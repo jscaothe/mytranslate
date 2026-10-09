@@ -5,6 +5,7 @@ import { QuickActionBar } from '../../components/QuickActionBar'
 import { Button, Hotkey, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { keigoLabels } from '../../data/mock'
+import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { DEFAULT_QUICK_ACTION_ITEMS, useStore, type HotkeyMap } from '../../store'
 import { AppScopeEditor } from './AppScopeEditor'
@@ -19,7 +20,7 @@ const hotkeyRows: { key: keyof HotkeyMap; label: string }[] = [
 ]
 
 export function SettingsView() {
-  const { settings, updateSettings, showToast } = useStore()
+  const { settings, updateSettings, showToast, setScreen } = useStore()
   const [recording, setRecording] = useState<keyof HotkeyMap | null>(null)
   const [confirmWipe, setConfirmWipe] = useState(false)
   const [newBlocked, setNewBlocked] = useState('')
@@ -262,7 +263,20 @@ export function SettingsView() {
           </Row>
         </Group>
 
-        <Group title="Dữ liệu" hint="Toàn bộ lịch sử dịch nằm trên máy này, trong %APPDATA%\MyTranslate\data.db.">
+        <Group
+          title="Dữ liệu"
+          hint={
+            isTauri
+              ? 'Lịch sử dịch, thread và glossary nằm trên máy này, trong %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db.'
+              : 'Toàn bộ lịch sử dịch nằm trên máy này.'
+          }
+        >
+          <Row label="Hướng dẫn ban đầu" hint="Kiểm tra lại kết nối Claude Code, hồ sơ và thử dịch.">
+            <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>Xem lại</Button>
+          </Row>
+          {/* Backup and wipe are not implemented in the real app yet; the prototype shows the intended design. */}
+          {!isTauri && (
+          <>
           <Row label="Sao lưu">
             <div className="flex gap-2">
               <Button onClick={() => showToast('Mô phỏng: xuất file data.db')}>Xuất dữ liệu</Button>
@@ -289,6 +303,8 @@ export function SettingsView() {
               </Button>
             )}
           </Row>
+          </>
+          )}
         </Group>
       </div>
     </div>

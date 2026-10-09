@@ -11,7 +11,7 @@ export type Scenario = 'normal' | 'not_logged_in' | 'quota' | 'network' | 'uncer
 
 export interface Conversation {
   id: string
-  app: ChatApp
+  app: ChatApp | 'other'
   workspace: string
   name: string
 }

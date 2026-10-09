@@ -15,9 +15,12 @@ pub struct Sections {
     pub issues: String,
     pub suggestion: String,
     pub suggestion_vi: String,
+    /// Only when the app asked for it: a short title for a new thread.
+    pub thread_title: String,
 }
 
-const TAGS: [&str; 7] = [
+const TAGS: [&str; 8] = [
+    "thread_title",
     "translation",
     "back_translation",
     "notes",
@@ -66,7 +69,8 @@ pub fn parse(raw: &str) -> Sections {
             "verdict" => out.verdict = text,
             "issues" => out.issues = text,
             "suggestion" => out.suggestion = text,
-            _ => out.suggestion_vi = text,
+            "suggestion_vi" => out.suggestion_vi = text,
+            _ => out.thread_title = text,
         }
     }
     // Tolerate a reply that ignored the tags entirely: show it as the translation.

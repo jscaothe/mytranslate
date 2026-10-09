@@ -71,6 +71,12 @@ pub enum TranslateEvent {
         kind: ErrorKind,
         message: String,
     },
+    /// After `Done`: where the translation was filed in the history.
+    Saved {
+        message_id: i64,
+        thread_id: i64,
+        thread_title: String,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

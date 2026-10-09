@@ -1,7 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { initialContacts, initialGlossary, initialThreads } from './data/mock'
+import { conversations as mockConversations, initialContacts, initialGlossary, initialThreads } from './data/mock'
+import { loadHistory } from './lib/history'
 import { isTauri } from './lib/claude'
 import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
 import type { Scenario, Thread, ThreadMessage } from './types'
@@ -29,15 +30,17 @@ const defaultSettings: Settings = {
   autostart: true,
   blockedApps: ['1Password.exe', 'KeePass.exe'],
   hotkeysPaused: false,
+  onboarded: false,
 }
 
 export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'threads' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [mainTab, setMainTab] = useState<MainTab>(initialMainTab)
   const [scenario, setScenario] = useState<Scenario>('normal')
-  const [threads, setThreads] = useState<Thread[]>(initialThreads)
+  const [threads, setThreads] = useState<Thread[]>(isTauri ? [] : initialThreads)
+  const [conversations, setConversations] = useState(isTauri ? [] : mockConversations)
   const [selectedThreadId, selectThread] = useState(initialThreads[0].id)
-  const [glossary, setGlossary] = useState(initialGlossary)
+  const [glossary, setGlossary] = useState(isTauri ? [] : initialGlossary)
   const [contacts, setContacts] = useState(initialContacts)
   const [settings, setSettings] = useState(defaultSettings)
   const [toast, setToast] = useState<Toast | null>(null)
@@ -88,6 +91,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
   // In the real app the Rust side owns the settings: every window loads them, saves through it, and follows
   // changes made in other windows (the popup uses the profile and keigo chosen in the main window).
   const settingsRef = useRef(defaultSettings)
+  const [settingsReady, setSettingsReady] = useState(!isTauri)
   const applySettings = useCallback((next: Settings) => {
     settingsRef.current = next
     setSettings(next)
@@ -107,13 +111,33 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     [applySettings, showToast],
   )
 
+  // Real app: the Threads screen shows the history on this PC and refreshes after every filed translation.
+  useEffect(() => {
+    if (!isTauri) return
+    let alive = true
+    const refresh = () =>
+      void loadHistory().then((h) => {
+        if (!alive) return
+        setConversations(h.conversations)
+        setThreads(h.threads)
+      })
+    refresh()
+    const off = listen('history:changed', refresh)
+    return () => {
+      alive = false
+      void off.then((f) => f())
+    }
+  }, [])
+
   useEffect(() => {
     if (!isTauri) return
     let alive = true
     const merge = (saved: unknown) => {
       if (alive && saved && typeof saved === 'object') applySettings({ ...defaultSettings, ...(saved as Partial<Settings>) })
     }
-    void invoke('settings_get').then(merge)
+    void invoke('settings_get')
+      .then(merge)
+      .finally(() => alive && setSettingsReady(true))
     const off = listen('settings:changed', (e) => merge(e.payload))
     return () => {
       alive = false
@@ -130,6 +154,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       setMainTab,
       scenario,
       setScenario,
+      conversations,
       threads,
       selectedThreadId,
       selectThread,
@@ -141,13 +166,14 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       contacts,
       setContacts,
       settings,
+      settingsReady,
       updateSettings,
       toast,
       showToast,
       popupGeometry,
       setPopupGeometry,
     }),
-    [screen, mainTab, openMain, scenario, threads, selectedThreadId, addMessage, createThread, updateThread, glossary, contacts, settings, updateSettings, toast, showToast, popupGeometry],
+    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, glossary, contacts, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

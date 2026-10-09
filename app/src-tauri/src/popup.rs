@@ -11,8 +11,10 @@ use tauri::{
 };
 
 use crate::capture;
-use crate::context::{self, ChatApp};
+use crate::context::{self, ChatApp, Context};
+use crate::history::{self, History, ThreadInfo};
 use crate::placement::{self, Anchor, Rect};
+use crate::threads::{self, Candidate, Confidence};
 
 pub const LABEL: &str = "popup";
 const DEFAULT_WIDTH: f64 = 440.0;
@@ -64,6 +66,71 @@ pub struct OpenPayload {
     pub workspace: Option<String>,
     /// `no_selection` or `clipboard` when nothing could be read.
     pub error: Option<String>,
+    /// History: the chat window's conversation, and the thread the message most likely belongs to.
+    pub conversation_id: Option<i64>,
+    pub thread_id: Option<i64>,
+    pub confidence: Confidence,
+    /// Recent threads of this conversation, for the thread picker.
+    pub threads: Vec<ThreadInfo>,
+}
+
+/// Threads untouched for this long are not offered as candidates.
+const THREAD_HORIZON_MS: i64 = 14 * 24 * 60 * 60 * 1000;
+const MAX_CANDIDATES: usize = 8;
+/// Messages per thread compared with the new text.
+const CANDIDATE_MESSAGES: usize = 4;
+
+/// Files the text under its chat window's conversation and guesses the thread, all locally.
+fn detect_thread(
+    history: &History,
+    ctx: &Context,
+    text: &str,
+) -> (Option<i64>, Option<i64>, Confidence, Vec<ThreadInfo>) {
+    let app = match ctx.app {
+        ChatApp::Slack => "slack",
+        ChatApp::Teams => "teams",
+        ChatApp::Other => "other",
+    };
+    let name = match ctx.conversation.trim() {
+        "" => "Khác",
+        n => n,
+    };
+    let conversation = match history.upsert_conversation(app, name, ctx.workspace.as_deref().unwrap_or("")) {
+        Ok(id) => id,
+        Err(e) => {
+            log::warn!("history unavailable: {e}");
+            return (None, None, Confidence::High, Vec::new());
+        }
+    };
+    let now = history::now_ms();
+    let threads = history
+        .recent_threads(conversation, now - THREAD_HORIZON_MS, MAX_CANDIDATES)
+        .unwrap_or_default();
+    let candidates: Vec<Candidate> = threads
+        .iter()
+        .map(|t| {
+            let mut text = t.title.clone();
+            for m in history.recent_messages(t.id, CANDIDATE_MESSAGES).unwrap_or_default() {
+                text.push('\n');
+                text.push_str(&m.source);
+                text.push('\n');
+                text.push_str(&m.result);
+            }
+            Candidate {
+                id: t.id,
+                last_active: t.last_active,
+                text,
+            }
+        })
+        .collect();
+    let d = threads::detect(text, &candidates, now);
+    log::info!(
+        "thread guess {:?} ({:?}) among {}",
+        d.thread_id,
+        d.confidence,
+        threads.len()
+    );
+    (Some(conversation), d.thread_id, d.confidence, threads)
 }
 
 /// What the user chose by dragging, in logical pixels. `None` / `false` means the app decides
@@ -212,6 +279,12 @@ pub fn on_hotkey(app: &AppHandle, action: Action) {
             Origin::Composer
         };
 
+        let (conversation_id, thread_id, confidence, threads) = if error.is_none() {
+            detect_thread(&app.state::<History>(), &ctx, &text)
+        } else {
+            (None, None, Confidence::High, Vec::new())
+        };
+
         let state = app.state::<PopupState>();
         let id = {
             let mut inner = state.inner.lock().unwrap();
@@ -228,6 +301,10 @@ pub fn on_hotkey(app: &AppHandle, action: Action) {
             conversation: ctx.conversation,
             workspace: ctx.workspace,
             error,
+            conversation_id,
+            thread_id,
+            confidence,
+            threads,
         };
         if let Err(e) = show(&app, payload) {
             log::warn!("could not show the popup: {e}");

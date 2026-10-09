@@ -1,11 +1,24 @@
+import { invoke } from '@tauri-apps/api/core'
 import { Lock, Plus, Search, Share2, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button, IconButton, Segmented } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
+import { isTauri } from '../../lib/claude'
 import { newId, useStore } from '../../store'
 
 type Filter = 'all' | 'personal' | 'project'
 
+interface TermRow {
+  id: number
+  ja: string
+  vi: string
+  note: string
+}
+
+/**
+ * The glossary. In the real app it lives in the history database on this PC and is sent to Claude with every
+ * translation whose text contains a term. Shared project glossaries exist only in the prototype so far.
+ */
 export function GlossaryView() {
   const { glossary, setGlossary, showToast, settings } = useStore()
   const [query, setQuery] = useState('')
@@ -14,34 +27,71 @@ export function GlossaryView() {
   const [vi, setVi] = useState('')
   const [note, setNote] = useState('')
 
+  const reload = useCallback(() => {
+    void invoke<TermRow[]>('glossary_list').then((rows) =>
+      setGlossary(rows.map((r) => ({ id: String(r.id), ja: r.ja, vi: r.vi, note: r.note, scope: 'personal' as const }))),
+    )
+  }, [setGlossary])
+
+  useEffect(() => {
+    if (isTauri) reload()
+  }, [reload])
+
   const q = query.trim().toLowerCase()
   const rows = glossary.filter(
-    (t) => (filter === 'all' || t.scope === filter) && (!q || t.ja.includes(q) || t.vi.toLowerCase().includes(q) || t.note.toLowerCase().includes(q)),
+    (t) =>
+      (isTauri || filter === 'all' || t.scope === filter) &&
+      (!q || t.ja.includes(q) || t.vi.toLowerCase().includes(q) || t.note.toLowerCase().includes(q)),
   )
 
   const add = () => {
     if (!ja.trim() || !vi.trim()) return
-    setGlossary([{ id: newId('g'), ja: ja.trim(), vi: vi.trim(), note: note.trim(), scope: 'personal' }, ...glossary])
-    setJa('')
-    setVi('')
-    setNote('')
-    showToast('Đã thêm vào glossary cá nhân')
+    const reset = () => {
+      setJa('')
+      setVi('')
+      setNote('')
+    }
+    if (!isTauri) {
+      setGlossary([{ id: newId('g'), ja: ja.trim(), vi: vi.trim(), note: note.trim(), scope: 'personal' }, ...glossary])
+      reset()
+      showToast('Đã thêm vào glossary cá nhân')
+      return
+    }
+    invoke('glossary_add', { ja, vi, note })
+      .then(() => {
+        reset()
+        reload()
+        showToast('Đã thêm thuật ngữ')
+      })
+      .catch((e) => showToast(`Không thêm được: ${String(e)}`))
+  }
+
+  const remove = (id: string) => {
+    if (!isTauri) {
+      setGlossary(glossary.filter((x) => x.id !== id))
+      return
+    }
+    invoke('glossary_delete', { id: Number(id) })
+      .then(reload)
+      .catch((e) => showToast(`Không xóa được: ${String(e)}`))
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
         <h2 className="text-[15px] font-semibold">Glossary</h2>
-        <Segmented
-          label="Lọc phạm vi"
-          value={filter}
-          onChange={setFilter}
-          options={[
-            { value: 'all', label: 'Tất cả' },
-            { value: 'personal', label: 'Cá nhân' },
-            { value: 'project', label: 'Dự án' },
-          ]}
-        />
+        {!isTauri && (
+          <Segmented
+            label="Lọc phạm vi"
+            value={filter}
+            onChange={setFilter}
+            options={[
+              { value: 'all', label: 'Tất cả' },
+              { value: 'personal', label: 'Cá nhân' },
+              { value: 'project', label: 'Dự án' },
+            ]}
+          />
+        )}
         <div className="flex-1" />
         <label className="flex h-8 w-64 items-center gap-2 rounded-md border border-line bg-surface px-2.5 focus-within:border-accent">
           <Search size={14} className="text-ink-3" />
@@ -76,7 +126,7 @@ export function GlossaryView() {
               <th className="py-2 pl-5 font-semibold">Tiếng Nhật</th>
               <th className="py-2 font-semibold">Tiếng Việt</th>
               <th className="py-2 font-semibold">Ghi chú</th>
-              <th className="py-2 font-semibold">Phạm vi</th>
+              {!isTauri && <th className="py-2 font-semibold">Phạm vi</th>}
               <th className="w-24 py-2 pr-5" />
             </tr>
           </thead>
@@ -88,22 +138,26 @@ export function GlossaryView() {
                 </td>
                 <td className="py-2.5 text-ink">{t.vi}</td>
                 <td className="py-2.5 text-ink-2">{t.note}</td>
-                <td className="py-2.5">
-                  {t.scope === 'project' ? (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
-                      <Lock size={11} /> CustomerX
-                    </span>
-                  ) : (
-                    <span className="rounded-full bg-subtle px-2 py-0.5 text-[11.5px] font-medium text-ink-2">Cá nhân</span>
-                  )}
-                </td>
+                {!isTauri && (
+                  <td className="py-2.5">
+                    {t.scope === 'project' ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
+                        <Lock size={11} /> CustomerX
+                      </span>
+                    ) : (
+                      <span className="rounded-full bg-subtle px-2 py-0.5 text-[11.5px] font-medium text-ink-2">Cá nhân</span>
+                    )}
+                  </td>
+                )}
                 <td className="py-1 pr-5 text-right">
                   {t.scope === 'personal' && (
                     <span className="inline-flex opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-                      <IconButton label="Đề xuất vào glossary chung" onClick={() => showToast('Đã sao chép đoạn YAML, dán vào file glossary chung của dự án')}>
-                        <Share2 size={14} />
-                      </IconButton>
-                      <IconButton label="Xóa" onClick={() => setGlossary(glossary.filter((x) => x.id !== t.id))}>
+                      {!isTauri && (
+                        <IconButton label="Đề xuất vào glossary chung" onClick={() => showToast('Đã sao chép đoạn YAML, dán vào file glossary chung của dự án')}>
+                          <Share2 size={14} />
+                        </IconButton>
+                      )}
+                      <IconButton label="Xóa" onClick={() => remove(t.id)}>
                         <Trash2 size={14} />
                       </IconButton>
                     </span>
@@ -113,8 +167,8 @@ export function GlossaryView() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-10 text-center text-ink-3">
-                  Không có thuật ngữ nào
+                <td colSpan={isTauri ? 4 : 5} className="py-10 text-center text-ink-3">
+                  {q ? 'Không có thuật ngữ nào khớp' : 'Chưa có thuật ngữ nào. Thêm tên màn hình, tên tính năng hay thuật ngữ khách hay dùng.'}
                 </td>
               </tr>
             )}
@@ -123,7 +177,13 @@ export function GlossaryView() {
       </div>
 
       <div className="shrink-0 border-t border-line px-5 py-2 text-[12px] text-ink-3">
-        Thuật ngữ dự án được đọc từ <code className="rounded bg-subtle px-1">{settings.glossaryPath}</code> và chỉ sửa được trong file đó.
+        {isTauri ? (
+          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho Claude, để dịch đúng và nhất quán.'
+        ) : (
+          <>
+            Thuật ngữ dự án được đọc từ <code className="rounded bg-subtle px-1">{settings.glossaryPath}</code> và chỉ sửa được trong file đó.
+          </>
+        )}
       </div>
     </div>
   )

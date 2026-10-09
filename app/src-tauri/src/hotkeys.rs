@@ -86,6 +86,12 @@ pub fn apply(app: &AppHandle) -> Vec<String> {
             }
         }
     }
+    log::info!(
+        "hotkeys {}: {} active, {} failed",
+        if store.hotkeys_paused() { "paused" } else { "on" },
+        active.len(),
+        failed.len()
+    );
     *state.active.lock().unwrap() = active;
     failed
 }

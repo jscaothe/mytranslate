@@ -10,6 +10,8 @@ export interface TranslationState {
   error: { kind: ErrorKind; message: string } | null
   /** Plan usage reported by the CLI with the result, when it reported any. */
   rateLimit: RateLimit | null
+  /** Where the result was filed in the history (real app only). */
+  saved: { messageId: number; threadId: number; threadTitle: string } | null
 }
 
 const initial: TranslationState = {
@@ -17,6 +19,7 @@ const initial: TranslationState = {
   sections: emptySections,
   error: null,
   rateLimit: null,
+  saved: null,
 }
 
 /** Prototype-only failures chosen in the toolbar, mapped onto the real error kinds. */
@@ -38,6 +41,7 @@ export function useTranslation({
   runKey,
   enabled,
   scenario,
+  thread,
 }: {
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
@@ -46,6 +50,8 @@ export function useTranslation({
   runKey: number
   enabled: boolean
   scenario: Scenario
+  /** History filing, read when a run starts; changing it later does not restart the translation. */
+  thread?: { conversationId: number | null; threadId: number | null; newThreadTitle: string | null }
 }) {
   const key = enabled ? `${runKey}|${direction}|${keigo}|${text}` : null
   const [state, setState] = useState<{ key: string | null; value: TranslationState }>({ key: null, value: initial })
@@ -64,10 +70,11 @@ export function useTranslation({
       return () => window.clearTimeout(t)
     }
 
-    void startTranslation({ direction, text, keigo, profile }, (e) => {
+    void startTranslation({ direction, text, keigo, profile, ...thread }, (e) => {
       if (e.type === 'thinking') update({ phase: 'thinking' })
       if (e.type === 'delta') update({ phase: 'streaming', sections: e.sections })
       if (e.type === 'done') update({ phase: 'done', sections: e.sections, rateLimit: e.rateLimit })
+      if (e.type === 'saved') update({ saved: { messageId: e.messageId, threadId: e.threadId, threadTitle: e.threadTitle } })
       if (e.type === 'error' && e.kind !== 'cancelled') update({ phase: 'error', error: { kind: e.kind, message: e.message } })
     }).then((c) => {
       if (alive) cancel = c
@@ -77,7 +84,7 @@ export function useTranslation({
       alive = false
       cancel?.()
     }
-    // `profile` is read when a run starts; editing it should not restart the current translation.
+    // `profile` and `thread` are read when a run starts; editing them should not restart the current translation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

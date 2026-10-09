@@ -54,14 +54,15 @@ function PopupShell() {
 
 /** The real app window: no fake desktop or prototype toolbar. */
 function TauriShell() {
-  const { settings, toast } = useStore()
+  const { settings, settingsReady, toast } = useStore()
   const theme = useResolvedTheme(settings.theme)
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
   return (
-    <div className="relative h-full">
-      <MainWindow chromeless />
+    <div className="relative h-full bg-window">
+      {/* Wait for the saved settings, so a returning user never sees the first-run guide flash. */}
+      {settingsReady && (settings.onboarded ? <MainWindow chromeless /> : <Onboarding chromeless />)}
       {toast && (
         <div
           key={toast.id}

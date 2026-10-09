@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Contact, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
+import type { Contact, Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
 export type MainTab = 'translate' | 'threads' | 'glossary' | 'contacts' | 'settings'
@@ -27,6 +27,8 @@ export interface Settings {
   autostart: boolean
   blockedApps: string[]
   hotkeysPaused: boolean
+  /** Whether the first-run guide has been completed. */
+  onboarded: boolean
 }
 
 export type QuickActionId = 'translate' | 'review' | 'copyTranslation'
@@ -87,6 +89,8 @@ export interface Store {
   setMainTab: (t: MainTab) => void
   scenario: Scenario
   setScenario: (s: Scenario) => void
+  /** Mock data in the prototype; the history on this PC in the real app. */
+  conversations: Conversation[]
   threads: Thread[]
   selectedThreadId: string
   selectThread: (id: string) => void
@@ -98,6 +102,8 @@ export interface Store {
   contacts: Contact[]
   setContacts: (c: Contact[]) => void
   settings: Settings
+  /** False until the real app has loaded the saved settings (always true in the prototype). */
+  settingsReady: boolean
   updateSettings: (patch: Partial<Settings>) => void
   toast: Toast | null
   showToast: (text: string) => void

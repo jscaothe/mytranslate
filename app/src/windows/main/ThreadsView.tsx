@@ -1,14 +1,18 @@
-import { Archive, Download, Merge, MoreHorizontal, Pencil, Pin, Search, Sparkles } from 'lucide-react'
+import { listen } from '@tauri-apps/api/event'
+import { Archive, Download, Merge, MessagesSquare, MoreHorizontal, Pencil, Pin, Search, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { IconButton } from '../../components/ui'
 import { cx } from '../../components/styles'
-import { conversations } from '../../data/mock'
+import { isTauri } from '../../lib/claude'
+import { loadMessages, renameThread } from '../../lib/history'
 import { useStore } from '../../store'
-import type { Thread } from '../../types'
+import type { Conversation, Thread, ThreadMessage } from '../../types'
+
+const appName = (c: Conversation) => (c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : 'Ứng dụng khác')
 
 export function ThreadsView() {
-  const { threads, selectedThreadId, selectThread } = useStore()
+  const { conversations, threads, selectedThreadId, selectThread } = useStore()
   const [query, setQuery] = useState('')
 
   const q = query.trim().toLowerCase()
@@ -28,6 +32,18 @@ export function ThreadsView() {
     .filter((g) => g.threads.length > 0)
 
   const thread = threads.find((t) => t.id === selectedThreadId) ?? threads[0]
+
+  if (!thread) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
+        <MessagesSquare size={28} className="text-ink-3" />
+        <p className="text-[14px] font-semibold text-ink">Chưa có thread nào</p>
+        <p className="max-w-[360px] text-[13px] leading-relaxed text-ink-2">
+          Dịch bằng phím tắt trong Teams hoặc Slack, các tin sẽ được xếp vào thread theo từng cuộc trò chuyện ở đây.
+        </p>
+      </div>
+    )
+  }
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -51,7 +67,7 @@ export function ThreadsView() {
               <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11.5px] font-semibold text-ink-3">
                 <AppBadge app={g.conversation.app} className="size-3.5 text-[8px]" />
                 <span className="truncate">
-                  {g.conversation.workspace} · {g.conversation.name}
+                  {[g.conversation.workspace, g.conversation.name].filter(Boolean).join(' · ')}
                 </span>
               </div>
               {g.threads.map((t) => (
@@ -69,9 +85,11 @@ export function ThreadsView() {
                     <span className="flex-1 truncate text-[13.5px] font-semibold text-ink">{t.title}</span>
                     <span className="shrink-0 text-[11.5px] text-ink-3">{t.lastActive}</span>
                   </span>
-                  <span lang="vi" className="truncate text-[12.5px] text-ink-2">
-                    {t.messages.at(-1)?.vi ?? 'Chưa có tin nào'}
-                  </span>
+                  {t.messages.length > 0 && (
+                    <span lang="vi" className="truncate text-[12.5px] text-ink-2">
+                      {t.messages.at(-1)?.vi}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -86,15 +104,36 @@ export function ThreadsView() {
 
 /** Keyed by thread id so menus and title editing reset when another thread is opened. */
 function ThreadDetail({ thread }: { thread: Thread }) {
-  const { updateThread, showToast } = useStore()
+  const { conversations, updateThread, showToast } = useStore()
   const [menuOpen, setMenuOpen] = useState(false)
   const [editingTitle, setEditingTitle] = useState(false)
   const timelineRef = useRef<HTMLDivElement>(null)
   const conversation = conversations.find((c) => c.id === thread.conversationId)
+  // The real app loads a thread's messages on demand and follows new ones as they are filed.
+  const [loaded, setLoaded] = useState<ThreadMessage[] | null>(null)
+  const messages = isTauri ? (loaded ?? []) : thread.messages
+
+  useEffect(() => {
+    if (!isTauri) return
+    let alive = true
+    const load = () => void loadMessages(thread.id).then((m) => alive && setLoaded(m))
+    load()
+    const off = listen('history:changed', load)
+    return () => {
+      alive = false
+      void off.then((f) => f())
+    }
+  }, [thread.id])
 
   useEffect(() => {
     timelineRef.current?.scrollTo({ top: timelineRef.current.scrollHeight })
-  }, [thread.messages.length])
+  }, [messages.length])
+
+  const rename = (title: string) => {
+    if (!title || title === thread.title) return
+    if (isTauri) void renameThread(thread.id, title).catch((e) => showToast(`Không đổi được tên: ${String(e)}`))
+    else updateThread(thread.id, { title })
+  }
 
   const menuAction = (label: string) => {
     setMenuOpen(false)
@@ -110,7 +149,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
               autoFocus
               defaultValue={thread.title}
               onBlur={(e) => {
-                updateThread(thread.id, { title: e.target.value.trim() || thread.title })
+                rename(e.target.value.trim())
                 setEditingTitle(false)
               }}
               onKeyDown={(e) => {
@@ -124,19 +163,22 @@ function ThreadDetail({ thread }: { thread: Thread }) {
           )}
           <div className="flex items-center gap-1.5 text-[12px] text-ink-3">
             {conversation && <AppBadge app={conversation.app} className="size-3.5 text-[8px]" />}
-            {conversation ? `${conversation.app === 'slack' ? 'Slack' : 'Teams'} / ${conversation.workspace} / ${conversation.name}` : 'Khác'}
+            {conversation ? [appName(conversation), conversation.workspace, conversation.name].filter(Boolean).join(' / ') : 'Khác'}
           </div>
         </div>
         <IconButton label="Đổi tên" onClick={() => setEditingTitle(true)}>
           <Pencil size={14} />
         </IconButton>
-        <IconButton
-          label={thread.pinned ? 'Bỏ ghim thread' : 'Ghim thread (mọi tin trong cuộc hội thoại sẽ vào thread này)'}
-          active={thread.pinned}
-          onClick={() => updateThread(thread.id, { pinned: !thread.pinned })}
-        >
-          <Pin size={14} />
-        </IconButton>
+        {/* Pinning is not stored in the history yet, so the real app does not offer it. */}
+        {!isTauri && (
+          <IconButton
+            label={thread.pinned ? 'Bỏ ghim thread' : 'Ghim thread (mọi tin trong cuộc hội thoại sẽ vào thread này)'}
+            active={thread.pinned}
+            onClick={() => updateThread(thread.id, { pinned: !thread.pinned })}
+          >
+            <Pin size={14} />
+          </IconButton>
+        )}
         <IconButton label="Thêm" active={menuOpen} onClick={() => setMenuOpen((o) => !o)}>
           <MoreHorizontal size={16} />
         </IconButton>
@@ -162,15 +204,17 @@ function ThreadDetail({ thread }: { thread: Thread }) {
       </div>
 
       <div ref={timelineRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <div className="mb-5 rounded-lg border border-line bg-subtle px-4 py-3">
-          <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-ink-3">
-            <Sparkles size={13} className="text-accent" /> Tóm tắt
+        {thread.summary && (
+          <div className="mb-5 rounded-lg border border-line bg-subtle px-4 py-3">
+            <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-ink-3">
+              <Sparkles size={13} className="text-accent" /> Tóm tắt
+            </div>
+            <p className="text-[13.5px] leading-relaxed text-ink">{thread.summary}</p>
           </div>
-          <p className="text-[13.5px] leading-relaxed text-ink">{thread.summary}</p>
-        </div>
+        )}
 
         <div className="flex flex-col gap-3">
-          {thread.messages.map((m) => (
+          {messages.map((m) => (
             <div key={m.id} className={cx('flex flex-col', m.author === 'me' ? 'items-end' : 'items-start')}>
               <div className="mb-1 flex items-baseline gap-2 px-1 text-[12px]">
                 <span className="font-semibold text-ink-2">{m.name}</span>
@@ -191,7 +235,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
               </div>
             </div>
           ))}
-          {thread.messages.length === 0 && <p className="py-8 text-center text-[13px] text-ink-3">Thread này chưa có tin nào</p>}
+          {messages.length === 0 && <p className="py-8 text-center text-[13px] text-ink-3">Thread này chưa có tin nào</p>}
         </div>
       </div>
     </div>

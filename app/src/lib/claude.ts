@@ -16,6 +16,8 @@ export interface Sections {
   issues: string
   suggestion: string
   suggestionVi: string
+  /** Only for a new thread: the short title Claude gave it. */
+  threadTitle: string
 }
 
 export const emptySections: Sections = {
@@ -26,6 +28,7 @@ export const emptySections: Sections = {
   issues: '',
   suggestion: '',
   suggestionVi: '',
+  threadTitle: '',
 }
 
 export interface Timing {
@@ -52,6 +55,8 @@ export type TranslateEvent =
   | { type: 'delta'; sections: Sections }
   | { type: 'done'; sections: Sections; timing: Timing; rateLimit: RateLimit | null }
   | { type: 'error'; kind: ErrorKind; message: string }
+  /** After `done`: where the result was filed in the history. */
+  | { type: 'saved'; messageId: number; threadId: number; threadTitle: string }
 
 export interface TranslateRequest {
   /** `review_ja` checks Japanese the user wrote instead of translating it. */
@@ -59,8 +64,11 @@ export interface TranslateRequest {
   text: string
   keigo: Keigo
   profile?: string
-  threadTitle?: string
-  threadMessages?: { fromClient: boolean; text: string }[]
+  /** History: the chat window the text came from; the Rust side adds the thread's messages as context. */
+  conversationId?: number | null
+  /** History: the chosen thread; null starts a new one. */
+  threadId?: number | null
+  newThreadTitle?: string | null
 }
 
 /** Starts a translation; returns a function that cancels it. */

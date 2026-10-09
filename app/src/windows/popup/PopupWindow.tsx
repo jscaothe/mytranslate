@@ -15,6 +15,10 @@ interface OpenPayload {
   conversation: string
   workspace: string | null
   error: string | null
+  conversationId: number | null
+  threadId: number | null
+  confidence: 'high' | 'low'
+  threads: { id: number; title: string; lastActive: number }[]
 }
 
 interface GeometryInfo {
@@ -32,7 +36,15 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
   origin: p.origin,
   conversationId: '',
   app: p.app,
-  window: { conversation: p.conversation, workspace: p.workspace, error: p.error },
+  window: {
+    conversation: p.conversation,
+    workspace: p.workspace,
+    error: p.error,
+    conversationId: p.conversationId,
+    threadId: p.threadId,
+    confidence: p.confidence,
+    threads: p.threads,
+  },
   anchor: { x: 0, y: 0 },
   placement: 'below',
 })

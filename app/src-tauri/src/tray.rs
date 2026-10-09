@@ -28,7 +28,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let pause = CheckMenuItem::with_id(
         app,
         MENU_PAUSE,
-        "Tạm dừng phím tắt",
+        "Tạm dừng phím tắt (đến khi tắt app)",
         true,
         store.hotkeys_paused(),
         None::<&str>,

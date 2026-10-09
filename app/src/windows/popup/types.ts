@@ -6,6 +6,11 @@ export interface WindowContext {
   workspace: string | null
   /** `no_selection` or `clipboard` when no text could be read. */
   error: string | null
+  /** History: the conversation, the guessed thread (null = new) and the recent threads to pick from. */
+  conversationId: number | null
+  threadId: number | null
+  confidence: 'high' | 'low'
+  threads: { id: number; title: string; lastActive: number }[]
 }
 
 export type ResizeDirection = 'East' | 'West' | 'South' | 'SouthEast' | 'SouthWest'

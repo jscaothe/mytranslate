@@ -1,3 +1,4 @@
+import { invoke } from '@tauri-apps/api/core'
 import {
   AlertTriangle,
   ChevronDown,
@@ -19,10 +20,11 @@ import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { conversations, keigoLabels } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
+import { relativeTime } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
 import { useStore } from '../../store'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
-import type { Confidence, Direction, Keigo, ReviewResult } from '../../types'
+import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
 import { ThreadPicker } from './ThreadPicker'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
 import { useFloatingFrame } from './useFloatingFrame'
@@ -68,6 +70,14 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const bodyRef = useRef<HTMLDivElement>(null)
   const footerRef = useRef<HTMLElement>(null)
   const notice = request.window?.error ?? null
+  // Real app: the thread comes from the history on this PC. `id: null` with a title is a new thread the user named.
+  const conversationId = request.window?.conversationId ?? null
+  const [realChoice, setRealChoice] = useState<{ id: number | null; newTitle: string | null; confidence: 'high' | 'low' }>(() => ({
+    id: request.window?.threadId ?? null,
+    newTitle: null,
+    confidence: request.window?.confidence ?? 'high',
+  }))
+  const [filedIn, setFiledIn] = useState<{ threadId: number; title: string } | null>(null)
   const frame = useFloatingFrame({
     request,
     container,
@@ -95,7 +105,48 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     runKey,
     enabled: longConfirmed && !notice,
     scenario,
+    thread: windowed ? { conversationId, threadId: realChoice.id, newThreadTitle: realChoice.newTitle } : undefined,
   })
+
+  // The translation was filed when it finished. If the user picked another thread (before or after that), move it.
+  const saved = live.saved
+  useEffect(() => {
+    if (!windowed || !saved || conversationId === null) return
+    const current = filedIn?.threadId ?? saved.threadId
+    const wantsNew = realChoice.id === null && realChoice.newTitle !== null
+    if (!wantsNew && (realChoice.id === null || realChoice.id === current)) return
+    void invoke<{ threadId: number; threadTitle: string }>('history_move', {
+      messageId: saved.messageId,
+      conversationId,
+      fromThread: current,
+      toThread: realChoice.id,
+      newTitle: realChoice.newTitle,
+    }).then((r) => {
+      setFiledIn({ threadId: r.threadId, title: r.threadTitle })
+      setRealChoice({ id: r.threadId, newTitle: null, confidence: 'high' })
+    })
+  }, [windowed, saved, conversationId, filedIn, realChoice])
+
+  const realThreads = useMemo(() => request.window?.threads ?? [], [request.window?.threads])
+  const realTitle =
+    realChoice.newTitle ??
+    (realChoice.id !== null && realChoice.id === filedIn?.threadId ? filedIn.title : null) ??
+    realThreads.find((t) => t.id === realChoice.id)?.title ??
+    (realChoice.id === null || realChoice.id === saved?.threadId ? saved?.threadTitle : undefined) ??
+    'Thread mới'
+  const pickerThreads = useMemo<Thread[]>(
+    () =>
+      realThreads.map((t) => ({
+        id: String(t.id),
+        conversationId: String(conversationId),
+        title: t.title,
+        summary: '',
+        lastActive: relativeTime(t.lastActive),
+        pinned: false,
+        messages: [],
+      })),
+    [realThreads, conversationId],
+  )
   const reviewResult = useMemo(
     () => (isReview && live.phase === 'done' ? toReview(source, live.sections) : null),
     [isReview, live.phase, live.sections, source],
@@ -230,7 +281,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       }
       return
     }
-    if (e.ctrlKey && e.key.toLowerCase() === 't' && !windowed) {
+    if (e.ctrlKey && e.key.toLowerCase() === 't') {
       e.preventDefault()
       setPickerOpen(true)
       return
@@ -330,10 +381,22 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       >
         {(container || windowed) && <GripVertical size={14} className="shrink-0 text-ink-3" aria-hidden />}
         {windowed ? (
-          <span className="flex h-7 min-w-0 shrink items-center gap-1.5 px-1.5" title={request.window?.workspace ?? undefined}>
+          <button
+            type="button"
+            onClick={() => setPickerOpen((o) => !o)}
+            title={`Đổi thread (Ctrl+T)${request.window?.workspace ? ` · ${request.window.workspace}` : ''}`}
+            className={cx(
+              'flex h-7 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-hover',
+              realChoice.confidence === 'low' && 'border border-dashed border-warn',
+            )}
+          >
             <AppBadge app={request.app} />
-            <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{request.window?.conversation || 'Ứng dụng khác'}</span>
-          </span>
+            <span className="max-w-[110px] shrink-0 truncate text-[12.5px] text-ink-2">{request.window?.conversation || 'Ứng dụng khác'}</span>
+            <span className="shrink-0 text-ink-3">›</span>
+            <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{realTitle}</span>
+            <ConfidenceMark confidence={realChoice.confidence} />
+            <ChevronDown size={13} className="shrink-0 text-ink-3" />
+          </button>
         ) : (
         <button
           type="button"
@@ -367,7 +430,27 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         <IconButton label="Đóng (Esc)" onClick={close}>
           <X size={15} />
         </IconButton>
-        {pickerOpen && (
+        {pickerOpen && windowed && (
+          <ThreadPicker
+            threads={pickerThreads}
+            currentId={realChoice.id === null ? null : String(realChoice.id)}
+            onClose={() => {
+              setPickerOpen(false)
+              rootRef.current?.focus()
+            }}
+            onPick={(id) => {
+              setRealChoice({ id: Number(id), newTitle: null, confidence: 'high' })
+              setPickerOpen(false)
+              rootRef.current?.focus()
+            }}
+            onCreate={(title) => {
+              setRealChoice({ id: null, newTitle: title, confidence: 'high' })
+              setPickerOpen(false)
+              rootRef.current?.focus()
+            }}
+          />
+        )}
+        {pickerOpen && !windowed && (
           <ThreadPicker
             threads={conversationThreads}
             currentId={threadPick.id}

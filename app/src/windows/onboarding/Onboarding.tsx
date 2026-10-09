@@ -4,6 +4,8 @@ import { ProfilePromptEditor } from '../../components/ProfilePromptEditor'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { keigoLabels } from '../../data/mock'
+import { invoke } from '@tauri-apps/api/core'
+import { claudeStatus, isTauri, startTranslation } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { useStore } from '../../store'
 import { Popup } from '../popup/Popup'
@@ -14,14 +16,15 @@ const sampleJa = 'お世話になっております。明日の打ち合わせ�
 
 type CheckState = 'idle' | 'running' | 'ok' | 'fail'
 
-export function Onboarding() {
-  const { setScreen } = useStore()
+/** First-run guide. In the real app (`chromeless`) it fills the main window; in the prototype it sits on the fake desktop. */
+export function Onboarding({ chromeless = false }: { chromeless?: boolean }) {
+  const { setScreen, updateSettings } = useStore()
   const [step, setStep] = useState(0)
   const [claudeReady, setClaudeReady] = useState(false)
+  const finish = () => (chromeless ? updateSettings({ onboarded: true }) : setScreen('playground'))
 
-  return (
-    <div className="absolute inset-0 flex items-center justify-center p-6">
-      <WindowFrame title="Chào mừng đến với MyTranslate" icon={<AppMark size={16} />} onClose={() => setScreen('playground')} className="h-[560px] w-[680px]">
+  const content = (
+    <>
         <div className="flex shrink-0 items-center gap-2 px-8 pt-6">
           {steps.map((s, i) => (
             <div key={s} className="flex flex-1 flex-col gap-1.5">
@@ -48,11 +51,19 @@ export function Onboarding() {
               Tiếp tục
             </Button>
           ) : (
-            <Button variant="primary" onClick={() => setScreen('playground')}>
-              Hoàn tất, thu nhỏ về khay
+            <Button variant="primary" onClick={finish}>
+              {chromeless ? 'Hoàn tất' : 'Hoàn tất, thu nhỏ về khay'}
             </Button>
           )}
         </div>
+    </>
+  )
+
+  if (chromeless) return <div className="flex h-full flex-col bg-window">{content}</div>
+  return (
+    <div className="absolute inset-0 flex items-center justify-center p-6">
+      <WindowFrame title="Chào mừng đến với MyTranslate" icon={<AppMark size={16} />} onClose={() => setScreen('playground')} className="h-[560px] w-[680px]">
+        {content}
       </WindowFrame>
     </div>
   )
@@ -87,10 +98,47 @@ function ConnectClaude({ onReady }: { onReady: (ready: boolean) => void }) {
   const failAt = scenario === 'not_logged_in' ? 1 : scenario === 'network' || scenario === 'quota' ? 2 : -1
   // Each check run is keyed so a retry or a scenario change starts over without resetting state in an effect.
   const runKey = `${attempt}:${failAt}`
-  const [progress, setProgress] = useState<{ key: string; states: CheckState[] } | null>(null)
+  const [progress, setProgress] = useState<{ key: string; states: CheckState[]; details?: Record<number, string> } | null>(null)
   const states: CheckState[] = progress?.key === runKey ? progress.states : ['running', 'idle', 'idle']
+  const details = progress?.key === runKey ? (progress.details ?? {}) : {}
+
+  // Real app: is claude installed, then one short translation proves the login works and shows the speed.
+  useEffect(() => {
+    if (!isTauri) return
+    let alive = true
+    let cancel: (() => void) | null = null
+    const set = (s: CheckState[], d: Record<number, string> = {}) => alive && setProgress({ key: runKey, states: s, details: d })
+    void (async () => {
+      const status = await claudeStatus().catch((e) => ({ version: null, error: String(e) }))
+      if (!alive) return
+      if (!status.version) {
+        set(['fail', 'idle', 'idle'], { 0: status.error ?? 'Không tìm thấy lệnh claude' })
+        onReady(false)
+        return
+      }
+      const found = { 0: `Tìm thấy ${status.version}` }
+      set(['ok', 'running', 'idle'], found)
+      cancel = await startTranslation({ direction: 'ja_vi', text: 'ありがとうございます。', keigo: 'polite' }, (e) => {
+        if (e.type === 'done') {
+          const first = e.timing.firstTokenMs === null ? '' : `, chữ đầu tiên sau ${(e.timing.firstTokenMs / 1000).toFixed(1).replace('.', ',')} giây`
+          set(['ok', 'ok', 'ok'], { ...found, 2: `Dịch thử thành công${first}` })
+          onReady(true)
+        }
+        if (e.type === 'error' && e.kind !== 'cancelled') {
+          if (e.kind === 'not_logged_in') set(['ok', 'fail', 'idle'], found)
+          else set(['ok', 'ok', 'fail'], { ...found, 2: e.message })
+          onReady(false)
+        }
+      })
+    })()
+    return () => {
+      alive = false
+      cancel?.()
+    }
+  }, [runKey, onReady])
 
   useEffect(() => {
+    if (isTauri) return
     const timers: number[] = []
     let current: CheckState[] = ['running', 'idle', 'idle']
     for (let i = 0; i < 3; i++) {
@@ -124,7 +172,14 @@ function ConnectClaude({ onReady }: { onReady: (ready: boolean) => void }) {
       detail: 'Đăng nhập bằng tài khoản Claude của bạn',
       fail: 'Chưa đăng nhập. Mở terminal và chạy lệnh claude để đăng nhập.',
       action: (
-        <Button size="sm" onClick={() => showToast('Mô phỏng: mở terminal chạy "claude"')}>
+        <Button
+          size="sm"
+          onClick={() =>
+            isTauri
+              ? void invoke('open_claude_login').catch((e) => showToast(`Không mở được terminal: ${String(e)}`))
+              : showToast('Mô phỏng: mở terminal chạy "claude"')
+          }
+        >
           <Terminal size={13} /> Mở terminal để đăng nhập
         </Button>
       ),
@@ -150,10 +205,10 @@ function ConnectClaude({ onReady }: { onReady: (ready: boolean) => void }) {
             <StatusIcon state={states[i]} />
             <div className="min-w-0 flex-1">
               <div className={cx('text-[13.5px] font-medium', states[i] === 'idle' ? 'text-ink-3' : 'text-ink')}>{item.title}</div>
-              {states[i] === 'ok' && <div className="text-[12.5px] text-ink-3">{item.detail}</div>}
+              {states[i] === 'ok' && <div className="text-[12.5px] text-ink-3">{details[i] ?? item.detail}</div>}
               {states[i] === 'fail' && (
                 <div className="mt-0.5 flex flex-col items-start gap-2">
-                  <span className="text-[12.5px] text-bad">{item.fail}</span>
+                  <span className="text-[12.5px] break-all text-bad">{details[i] ?? item.fail}</span>
                   {item.action}
                 </div>
               )}
