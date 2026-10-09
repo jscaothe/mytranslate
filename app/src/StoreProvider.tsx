@@ -1,11 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { conversations as mockConversations, initialContacts, initialGlossary, initialThreads } from './data/mock'
+import { conversations as mockConversations, initialGlossary, initialThreads } from './data/mock'
 import { loadHistory } from './lib/history'
 import { isTauri } from './lib/claude'
-import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
-import type { Scenario, Thread, ThreadMessage } from './types'
+import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, DEFAULT_TEMPLATES, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
+import type { Conversation, Scenario, Thread, ThreadMessage } from './types'
 
 const defaultSettings: Settings = {
   theme: 'system',
@@ -26,7 +26,9 @@ const defaultSettings: Settings = {
     display: 'iconText',
     items: DEFAULT_QUICK_ACTION_ITEMS,
   },
-  glossaryPath: 'D:\\projects\\customerx\\docs\\glossary.yaml',
+  // The prototype shows how a configured team glossary looks; the real app starts without one.
+  glossaryPath: isTauri ? '' : 'D:\\projects\\customerx\\docs\\glossary.yaml',
+  templates: DEFAULT_TEMPLATES,
   autostart: true,
   blockedApps: ['1Password.exe', 'KeePass.exe'],
   hotkeysPaused: false,
@@ -41,7 +43,6 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
   const [conversations, setConversations] = useState(isTauri ? [] : mockConversations)
   const [selectedThreadId, selectThread] = useState(initialThreads[0].id)
   const [glossary, setGlossary] = useState(isTauri ? [] : initialGlossary)
-  const [contacts, setContacts] = useState(initialContacts)
   const [settings, setSettings] = useState(defaultSettings)
   const [toast, setToast] = useState<Toast | null>(null)
   const [popupGeometry, setPopupGeometry] = useState<PopupGeometry>({ width: DEFAULT_POPUP_WIDTH, height: null, position: null })
@@ -86,6 +87,21 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
         return t.id === id ? { ...t, ...patch } : t
       }),
     )
+  }, [])
+
+  const mergeThread = useCallback((from: string, into: string) => {
+    setThreads((ts) => {
+      const source = ts.find((t) => t.id === from)
+      if (!source) return ts
+      return ts
+        .filter((t) => t.id !== from)
+        .map((t) => (t.id === into ? { ...t, pinned: t.pinned || source.pinned, messages: [...t.messages, ...source.messages] } : t))
+    })
+    selectThread(into)
+  }, [])
+
+  const updateConversation = useCallback((id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => {
+    setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
   }, [])
 
   // In the real app the Rust side owns the settings: every window loads them, saves through it, and follows
@@ -161,10 +177,10 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       addMessage,
       createThread,
       updateThread,
+      mergeThread,
+      updateConversation,
       glossary,
       setGlossary,
-      contacts,
-      setContacts,
       settings,
       settingsReady,
       updateSettings,
@@ -173,7 +189,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       popupGeometry,
       setPopupGeometry,
     }),
-    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, glossary, contacts, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
+    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, mergeThread, updateConversation, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

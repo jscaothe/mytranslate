@@ -14,6 +14,7 @@ use crate::capture;
 use crate::context::{self, ChatApp, Context};
 use crate::history::{self, History, ThreadInfo};
 use crate::placement::{self, Anchor, Rect};
+use crate::settings::SettingsStore;
 use crate::threads::{self, Candidate, Confidence};
 
 pub const LABEL: &str = "popup";
@@ -72,6 +73,10 @@ pub struct OpenPayload {
     pub confidence: Confidence,
     /// Recent threads of this conversation, for the thread picker.
     pub threads: Vec<ThreadInfo>,
+    /// Copy the result to the clipboard as soon as it is ready (toolbar "translate and copy").
+    pub auto_copy: bool,
+    /// The keigo level remembered for this conversation; empty means the default from the settings.
+    pub keigo: String,
 }
 
 /// Threads untouched for this long are not offered as candidates.
@@ -103,9 +108,18 @@ fn detect_thread(
         }
     };
     let now = history::now_ms();
-    let threads = history
+    let mut threads = history
         .recent_threads(conversation, now - THREAD_HORIZON_MS, MAX_CANDIDATES)
         .unwrap_or_default();
+    // A pinned thread takes every new message of its conversation, however old it is.
+    if let Ok(Some(pinned)) = history.pinned_thread(conversation) {
+        log::info!("thread pinned {}", pinned.id);
+        let id = pinned.id;
+        if !threads.iter().any(|t| t.id == id) {
+            threads.insert(0, pinned);
+        }
+        return (Some(conversation), Some(id), Confidence::High, threads);
+    }
     let candidates: Vec<Candidate> = threads
         .iter()
         .map(|t| {
@@ -242,16 +256,35 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn on_hotkey(app: &AppHandle, action: Action) {
     // Right now, while Alt is still held: keep the app in front from opening its menu bar on Alt release.
     capture::mask_menu_key();
+    run(app, action, None, false);
+}
+
+/// Reads the selection, places the popup and tells its page what to do. `target` is the chat window when the
+/// quick toolbar already knows it (the user selected with the mouse); `auto_copy` copies the result as soon as
+/// it is ready.
+pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: bool) {
     let app = app.clone();
     // Copying blocks for up to ~1 s (waiting for keys to be released, for the clipboard); keep it off the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
-        let ctx = context::foreground();
-        log::info!("hotkey {action:?} in {} ({:?})", ctx.exe, ctx.app);
+        let from_toolbar = target.is_some();
+        let ctx = match target {
+            Some(t) => {
+                capture::bring_to_front(t.hwnd);
+                t
+            }
+            None => context::foreground(),
+        };
+        log::info!("{action:?} in {} ({:?})", ctx.exe, ctx.app);
         if ctx.exe.eq_ignore_ascii_case(&own_exe_name()) {
             return;
         }
+        if app.state::<SettingsStore>().is_blocked(&ctx.exe) {
+            log::info!("{} is blocked in the settings", ctx.exe);
+            return;
+        }
         // Only a message box is safe to select-all; in the message list Ctrl+A would grab the whole page.
-        let select_all = matches!(action, Action::ViJa | Action::Review);
+        // A mouse selection is never extended.
+        let select_all = !from_toolbar && matches!(action, Action::ViJa | Action::Review);
         let (text, error) = match capture::copy_selection(select_all) {
             Ok(Some(t)) => (t, None),
             Ok(None) => (String::new(), Some("no_selection".to_string())),
@@ -279,11 +312,16 @@ pub fn on_hotkey(app: &AppHandle, action: Action) {
             Origin::Composer
         };
 
+        let history = app.state::<History>();
         let (conversation_id, thread_id, confidence, threads) = if error.is_none() {
-            detect_thread(&app.state::<History>(), &ctx, &text)
+            detect_thread(&history, &ctx, &text)
         } else {
             (None, None, Confidence::High, Vec::new())
         };
+        let keigo = conversation_id
+            .and_then(|id| history.conversation(id).ok().flatten())
+            .map(|c| c.keigo)
+            .unwrap_or_default();
 
         let state = app.state::<PopupState>();
         let id = {
@@ -305,6 +343,8 @@ pub fn on_hotkey(app: &AppHandle, action: Action) {
             thread_id,
             confidence,
             threads,
+            auto_copy,
+            keigo,
         };
         if let Err(e) = show(&app, payload) {
             log::warn!("could not show the popup: {e}");

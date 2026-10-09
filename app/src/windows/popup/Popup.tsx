@@ -10,6 +10,7 @@ import {
   Pin,
   Reply,
   RotateCcw,
+  Sparkles,
   ThumbsDown,
   WifiOff,
   X,
@@ -20,9 +21,9 @@ import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { conversations, keigoLabels } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
-import { relativeTime } from '../../lib/history'
+import { relativeTime, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
-import { useStore } from '../../store'
+import { useStore, type Template } from '../../store'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
 import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
 import { ThreadPicker } from './ThreadPicker'
@@ -34,6 +35,8 @@ const LONG_TEXT_LIMIT = 4000
 const keigoOrder: Keigo[] = ['casual', 'polite', 'formal']
 /** A popup that could not read any text explains why, then gets out of the way. */
 const NOTICE_CLOSE_MS = 2200
+/** How long "copied" stays on screen after translate-and-copy. */
+const AUTO_COPY_CLOSE_MS = 1200
 
 export interface PopupProps {
   request: PopupRequest
@@ -55,7 +58,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const [direction, setDirection] = useState<Direction>(request.direction)
   const [source, setSource] = useState(request.source)
   const [origin, setOrigin] = useState<PopupOrigin>(request.origin)
-  const [keigo, setKeigo] = useState<Keigo>(settings.defaultKeigo)
+  // The keigo remembered for this chat, else the default; changing it here remembers it for the chat.
+  const [keigo, setKeigo] = useState<Keigo>(request.window?.keigo || settings.defaultKeigo)
   const [runKey, setRunKey] = useState(0)
   const [pinned, setPinned] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -165,6 +169,19 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     return () => window.clearTimeout(t)
   }, [notice, onClose])
 
+  // Toolbar "translate and copy": put the result on the clipboard as soon as it is ready, say so, then close.
+  const autoCopy = Boolean(windowed && request.window?.autoCopy)
+  const [autoCopied, setAutoCopied] = useState(false)
+  useEffect(() => {
+    if (!autoCopy || !resultReady || autoCopied) return
+    void invoke('clipboard_write', { text: resultText }).then(() => setAutoCopied(true))
+  }, [autoCopy, resultReady, autoCopied, resultText])
+  useEffect(() => {
+    if (!autoCopied) return
+    const t = window.setTimeout(onClose, AUTO_COPY_CLOSE_MS)
+    return () => window.clearTimeout(t)
+  }, [autoCopied, onClose])
+
   // A real window follows its content's height (the Rust side ignores this once the user sets a height).
   useEffect(() => {
     if (!windowed) return
@@ -240,9 +257,36 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     onClose()
   }
 
-  const cycleKeigo = () => {
-    setKeigo((k) => keigoOrder[(keigoOrder.indexOf(k) + 1) % keigoOrder.length])
+  const changeKeigo = (k: Keigo) => {
+    setKeigo(k)
     setRunKey((r) => r + 1)
+    if (windowed && conversationId !== null) void updateConversation(String(conversationId), k)
+  }
+
+  const cycleKeigo = () => changeKeigo(keigoOrder[(keigoOrder.indexOf(keigo) + 1) % keigoOrder.length])
+
+  // Reply suggestions for a client message: three short Japanese replies with their meaning.
+  const [replies, setReplies] = useState<{ state: 'idle' | 'loading' | 'error'; items: SuggestedReply[]; error?: string }>({ state: 'idle', items: [] })
+  const askReplies = () => {
+    if (!resultReady || direction !== 'ja_vi' || replies.state === 'loading') return
+    setReplies({ state: 'loading', items: [] })
+    const done = (items: SuggestedReply[]) => setReplies({ state: 'idle', items })
+    if (!windowed) {
+      window.setTimeout(() => done(MOCK_REPLIES), 700)
+      return
+    }
+    suggestReplies({ text: source, keigo, conversationId, threadId: saved?.threadId ?? realChoice.id })
+      .then(done)
+      .catch((e) => setReplies({ state: 'error', items: [], error: String(e) }))
+  }
+
+  // Templates are added to (or taken off) the start or end of the Japanese draft.
+  const toggleTemplate = (t: Template) => {
+    const cur = finalText
+    let next: string
+    if (t.position === 'before') next = cur.startsWith(t.ja) ? cur.slice(t.ja.length).replace(/^\n/, '') : `${t.ja}\n${cur}`
+    else next = cur.endsWith(t.ja) ? cur.slice(0, cur.length - t.ja.length).replace(/\n$/, '') : `${cur}\n${t.ja}`
+    setDraft(next)
   }
 
   const startReply = () => {
@@ -309,6 +353,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     if (!typing && direction === 'ja_vi' && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
       startReply()
+    }
+    if (!typing && direction === 'ja_vi' && e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.altKey) {
+      e.preventDefault()
+      askReplies()
     }
   }
 
@@ -514,6 +562,23 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             back={live.sections.backTranslation || undefined}
           />
         )}
+        {direction === 'vi_ja' && resultReady && draft !== null && settings.templates.length > 0 && (
+          <TemplateChips templates={settings.templates} text={finalText} onToggle={toggleTemplate} />
+        )}
+        {direction === 'ja_vi' && (replies.state !== 'idle' || replies.items.length > 0) ? (
+          <RepliesBlock
+            state={replies.state}
+            items={replies.items}
+            error={replies.error}
+            onRetry={askReplies}
+            onCopy={(r) => void copy(r.ja, 'Đã sao chép câu trả lời')}
+          />
+        ) : null}
+        {autoCopied && (
+          <div role="status" className="flex items-center gap-1.5 border-t border-line px-4 py-2 text-[12.5px] font-medium text-good">
+            <Copy size={13} /> Đã sao chép bản dịch
+          </div>
+        )}
         {resultReady && <QuotaLine rate={live.rateLimit} />}
         </>
         )}
@@ -549,13 +614,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             ready={resultReady}
             keigo={keigo}
             feedback={feedback}
-            onKeigo={(k) => {
-              setKeigo(k)
-              setRunKey((r) => r + 1)
-            }}
+            onKeigo={changeKeigo}
             onPrimary={primary}
             onKeep={keepOriginal}
             onReply={startReply}
+            onSuggest={askReplies}
+            suggesting={replies.state === 'loading'}
             onCopy={() => void copy(finalText, 'Đã sao chép bản dịch')}
             onFeedback={() => {
               setFeedback(true)
@@ -566,6 +630,99 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       </footer>
       )}
     </div>
+  )
+}
+
+const MOCK_REPLIES: SuggestedReply[] = [
+  { ja: '承知いたしました。確認いたします。', vi: 'Em đã hiểu. Em sẽ kiểm tra ạ.' },
+  { ja: '詳細を教えていただけますでしょうか。', vi: 'Anh có thể cho em biết chi tiết hơn được không ạ?' },
+  { ja: '本日中に確認してご連絡いたします。', vi: 'Trong hôm nay em sẽ kiểm tra và liên lạc lại ạ.' },
+]
+
+function TemplateChips({ templates, text, onToggle }: { templates: Template[]; text: string; onToggle: (t: Template) => void }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-2">
+      <span className="mr-0.5 text-[11.5px] font-semibold text-ink-3">Mẫu câu</span>
+      {templates.map((t) => {
+        const on = t.position === 'before' ? text.startsWith(t.ja) : text.endsWith(t.ja)
+        return (
+          <button
+            key={t.id}
+            type="button"
+            lang="ja"
+            aria-pressed={on}
+            title={`${t.position === 'before' ? 'Thêm vào đầu' : 'Thêm vào cuối'}${t.vi ? `: ${t.vi}` : ''}`}
+            onClick={() => onToggle(t)}
+            className={cx(
+              'h-6 max-w-full truncate rounded-full border px-2 text-[12px]',
+              on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink',
+            )}
+          >
+            {t.ja}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+function RepliesBlock({
+  state,
+  items,
+  error,
+  onRetry,
+  onCopy,
+}: {
+  state: 'idle' | 'loading' | 'error'
+  items: SuggestedReply[]
+  error?: string
+  onRetry: () => void
+  onCopy: (r: SuggestedReply) => void
+}) {
+  return (
+    <Section className="bg-subtle">
+      <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">
+        <Sparkles size={12} className="text-accent" /> Gợi ý trả lời
+      </div>
+      {state === 'loading' && (
+        <div role="status" className="flex items-center gap-2 py-1 text-[13.5px] text-ink-2">
+          <Loader2 size={15} className="animate-spin text-accent motion-reduce:animate-none" /> Đang soạn gợi ý…
+        </div>
+      )}
+      {state === 'error' && (
+        <div className="flex items-center gap-2 text-[13px] text-bad">
+          <span className="min-w-0 flex-1 truncate" title={error}>
+            Không lấy được gợi ý
+          </span>
+          <Button size="sm" onClick={onRetry}>
+            Thử lại
+          </Button>
+        </div>
+      )}
+      <div className="flex flex-col gap-1">
+        {items.map((r) => (
+          <button
+            key={r.ja}
+            type="button"
+            onClick={() => onCopy(r)}
+            title="Bấm để sao chép"
+            className="group -mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
+          >
+            <span className="min-w-0 flex-1">
+              <span lang="ja" className="block text-[14px] leading-relaxed text-ink">
+                {r.ja}
+              </span>
+              {r.vi && (
+                <span lang="vi" className="block text-[12.5px] leading-relaxed text-ink-2">
+                  {r.vi}
+                </span>
+              )}
+            </span>
+            <Copy size={13} className="mt-1 shrink-0 text-ink-3 opacity-0 group-hover:opacity-100" />
+          </button>
+        ))}
+      </div>
+    </Section>
   )
 }
 
@@ -852,6 +1009,8 @@ function FooterActions({
   onPrimary,
   onKeep,
   onReply,
+  onSuggest,
+  suggesting,
   onCopy,
   onFeedback,
 }: {
@@ -864,6 +1023,8 @@ function FooterActions({
   onPrimary: () => void
   onKeep: () => void
   onReply: () => void
+  onSuggest: () => void
+  suggesting: boolean
   onCopy: () => void
   onFeedback: () => void
 }) {
@@ -879,6 +1040,9 @@ function FooterActions({
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={onReply}>
           <Reply size={14} /> Trả lời <Kbd>R</Kbd>
+        </Button>
+        <Button size="sm" disabled={!ready || suggesting} onClick={onSuggest} title="Claude gợi ý 3 câu trả lời tiếng Nhật">
+          <Sparkles size={14} /> Gợi ý <Kbd>G</Kbd>
         </Button>
         <div className="flex-1" />
         {feedbackButton}

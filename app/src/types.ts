@@ -14,6 +14,10 @@ export interface Conversation {
   app: ChatApp | 'other'
   workspace: string
   name: string
+  /** Keigo to write in for this conversation; `''` uses the default from the settings. */
+  keigo: Keigo | ''
+  /** Who the people here are (names, roles, how to address them); sent with each translation. */
+  note: string
 }
 
 export interface ThreadMessage {
@@ -31,7 +35,12 @@ export interface Thread {
   title: string
   summary: string
   lastActive: string
+  /** Every new message of the conversation goes into the pinned thread. */
   pinned: boolean
+  /** Hidden from the list and never guessed for new messages. */
+  archived?: boolean
+  /** New messages arrived after the summary was made. */
+  summaryStale?: boolean
   messages: ThreadMessage[]
 }
 
@@ -41,14 +50,6 @@ export interface GlossaryTerm {
   vi: string
   note: string
   scope: 'personal' | 'project'
-}
-
-export interface Contact {
-  id: string
-  name: string
-  company: string
-  role: string
-  keigo: Keigo
 }
 
 export interface ChatMessage {

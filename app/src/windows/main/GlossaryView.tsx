@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { Button, IconButton, Segmented } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { isTauri } from '../../lib/claude'
+import { yamlEntry } from '../../lib/glossary'
 import { newId, useStore } from '../../store'
 
 type Filter = 'all' | 'personal' | 'project'
@@ -15,12 +16,20 @@ interface TermRow {
   note: string
 }
 
+interface TeamGlossary {
+  path: string
+  project: string
+  terms: { ja: string; vi: string; note: string }[]
+  error: string | null
+}
+
 /**
- * The glossary. In the real app it lives in the history database on this PC and is sent to Claude with every
- * translation whose text contains a term. Shared project glossaries exist only in the prototype so far.
+ * The glossary. Personal terms live in the database on this PC; the team's terms are read from the shared YAML
+ * file set in Settings. Terms that occur in a text are sent to Claude with it; personal ones win.
  */
 export function GlossaryView() {
   const { glossary, setGlossary, showToast, settings } = useStore()
+  const [team, setTeam] = useState<TeamGlossary | null>(null)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
   const [ja, setJa] = useState('')
@@ -37,10 +46,26 @@ export function GlossaryView() {
     if (isTauri) reload()
   }, [reload])
 
+  // The team file is re-read when the screen opens or the path changes (the Rust side caches it by mtime).
+  useEffect(() => {
+    if (!isTauri) return
+    let alive = true
+    void invoke<TeamGlossary>('glossary_team').then((g) => alive && setTeam(g))
+    return () => {
+      alive = false
+    }
+  }, [settings.glossaryPath])
+
+  const teamName = isTauri ? team?.project || 'Dự án' : 'CustomerX'
+  const all = isTauri
+    ? [...glossary, ...(team?.terms ?? []).map((t, i) => ({ ...t, id: `team-${i}`, scope: 'project' as const }))]
+    : glossary
+  const hasTeam = !isTauri || Boolean(team?.path)
+
   const q = query.trim().toLowerCase()
-  const rows = glossary.filter(
+  const rows = all.filter(
     (t) =>
-      (isTauri || filter === 'all' || t.scope === filter) &&
+      (filter === 'all' || t.scope === filter) &&
       (!q || t.ja.includes(q) || t.vi.toLowerCase().includes(q) || t.note.toLowerCase().includes(q)),
   )
 
@@ -66,6 +91,13 @@ export function GlossaryView() {
       .catch((e) => showToast(`Không thêm được: ${String(e)}`))
   }
 
+  const copyYaml = (t: { ja: string; vi: string; note: string }) => {
+    const text = yamlEntry(t)
+    const done = () => showToast('Đã sao chép đoạn YAML, dán vào mục terms của file glossary chung')
+    if (isTauri) void invoke('clipboard_write', { text }).then(done)
+    else void navigator.clipboard.writeText(text).then(done, done)
+  }
+
   const remove = (id: string) => {
     if (!isTauri) {
       setGlossary(glossary.filter((x) => x.id !== id))
@@ -80,7 +112,7 @@ export function GlossaryView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
         <h2 className="text-[15px] font-semibold">Glossary</h2>
-        {!isTauri && (
+        {hasTeam && (
           <Segmented
             label="Lọc phạm vi"
             value={filter}
@@ -126,7 +158,7 @@ export function GlossaryView() {
               <th className="py-2 pl-5 font-semibold">Tiếng Nhật</th>
               <th className="py-2 font-semibold">Tiếng Việt</th>
               <th className="py-2 font-semibold">Ghi chú</th>
-              {!isTauri && <th className="py-2 font-semibold">Phạm vi</th>}
+              {hasTeam && <th className="py-2 font-semibold">Phạm vi</th>}
               <th className="w-24 py-2 pr-5" />
             </tr>
           </thead>
@@ -138,11 +170,11 @@ export function GlossaryView() {
                 </td>
                 <td className="py-2.5 text-ink">{t.vi}</td>
                 <td className="py-2.5 text-ink-2">{t.note}</td>
-                {!isTauri && (
+                {hasTeam && (
                   <td className="py-2.5">
                     {t.scope === 'project' ? (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent">
-                        <Lock size={11} /> CustomerX
+                      <span className="inline-flex max-w-40 items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11.5px] font-medium text-accent" title="Chỉ sửa được trong file glossary chung">
+                        <Lock size={11} className="shrink-0" /> <span className="truncate">{teamName}</span>
                       </span>
                     ) : (
                       <span className="rounded-full bg-subtle px-2 py-0.5 text-[11.5px] font-medium text-ink-2">Cá nhân</span>
@@ -152,8 +184,8 @@ export function GlossaryView() {
                 <td className="py-1 pr-5 text-right">
                   {t.scope === 'personal' && (
                     <span className="inline-flex opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">
-                      {!isTauri && (
-                        <IconButton label="Đề xuất vào glossary chung" onClick={() => showToast('Đã sao chép đoạn YAML, dán vào file glossary chung của dự án')}>
+                      {hasTeam && (
+                        <IconButton label="Đề xuất vào glossary chung (sao chép YAML)" onClick={() => copyYaml(t)}>
                           <Share2 size={14} />
                         </IconButton>
                       )}
@@ -167,7 +199,7 @@ export function GlossaryView() {
             ))}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={isTauri ? 4 : 5} className="py-10 text-center text-ink-3">
+                <td colSpan={hasTeam ? 5 : 4} className="py-10 text-center text-ink-3">
                   {q ? 'Không có thuật ngữ nào khớp' : 'Chưa có thuật ngữ nào. Thêm tên màn hình, tên tính năng hay thuật ngữ khách hay dùng.'}
                 </td>
               </tr>
@@ -177,12 +209,17 @@ export function GlossaryView() {
       </div>
 
       <div className="shrink-0 border-t border-line px-5 py-2 text-[12px] text-ink-3">
-        {isTauri ? (
-          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho Claude, để dịch đúng và nhất quán.'
-        ) : (
+        {team?.error ? (
+          <span className="text-bad">
+            Glossary chung <code className="rounded bg-subtle px-1">{team.path}</code>: {team.error}
+          </span>
+        ) : hasTeam ? (
           <>
-            Thuật ngữ dự án được đọc từ <code className="rounded bg-subtle px-1">{settings.glossaryPath}</code> và chỉ sửa được trong file đó.
+            Thuật ngữ dự án đọc từ <code className="rounded bg-subtle px-1">{isTauri ? team?.path : settings.glossaryPath}</code> và chỉ sửa được trong file
+            đó. Thuật ngữ cá nhân được ưu tiên khi trùng.
           </>
+        ) : (
+          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho Claude. Glossary chung của team đặt trong Cài đặt.'
         )}
       </div>
     </div>

@@ -17,7 +17,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     MapVirtualKeyW, SendInput, VIRTUAL_KEY, VK_A, VK_C, VK_CONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN, VK_MENU, VK_RMENU,
     VK_RSHIFT, VK_RWIN, VK_SHIFT, VK_V,
 };
-use windows::Win32::UI::WindowsAndMessaging::SetForegroundWindow;
+use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
 use windows::core::{PCWSTR, w};
 
 /// How long a target app gets to put the selection on the clipboard after Ctrl+C.
@@ -82,6 +82,17 @@ pub fn paste_into(hwnd: isize, text: &str) -> Result<(), CaptureError> {
     send_chord(VK_CONTROL, VK_V);
     sleep(PASTE_SETTLE);
     saved.restore()
+}
+
+/// Makes sure the chat window is in front before keys are sent to it (a toolbar click may have moved focus).
+pub fn bring_to_front(hwnd: isize) {
+    let target = HWND(hwnd as *mut _);
+    unsafe {
+        if GetForegroundWindow() != target {
+            let _ = SetForegroundWindow(target);
+            sleep(Duration::from_millis(60));
+        }
+    }
 }
 
 /// Puts `text` on the clipboard for the user to paste themselves (kept, not restored).

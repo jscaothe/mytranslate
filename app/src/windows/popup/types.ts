@@ -1,4 +1,4 @@
-import type { ChatApp, Direction } from '../../types'
+import type { ChatApp, Direction, Keigo } from '../../types'
 
 /** Where the text came from in the real app (filled by the Rust side from the foreground window). */
 export interface WindowContext {
@@ -11,6 +11,10 @@ export interface WindowContext {
   threadId: number | null
   confidence: 'high' | 'low'
   threads: { id: number; title: string; lastActive: number }[]
+  /** Copy the result as soon as it is ready, then close (toolbar "translate and copy"). */
+  autoCopy: boolean
+  /** Keigo remembered for this conversation; `''` uses the default from the settings. */
+  keigo: Keigo | ''
 }
 
 export type ResizeDirection = 'East' | 'West' | 'South' | 'SouthEast' | 'SouthWest'

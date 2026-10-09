@@ -59,7 +59,23 @@ const MIGRATIONS: &[&str] = &[
         UNIQUE (ja, vi)
     );
 "#,
+    r#"
+    ALTER TABLE threads ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE threads ADD COLUMN summary TEXT NOT NULL DEFAULT '';
+    -- How many messages the summary covered; more messages since then make it stale.
+    ALTER TABLE threads ADD COLUMN summary_messages INTEGER NOT NULL DEFAULT 0;
+    -- Per conversation: the keigo level to write in ('' = the default from the settings), and a free-form
+    -- note about the people in it that is sent with each translation.
+    ALTER TABLE conversations ADD COLUMN keigo TEXT NOT NULL DEFAULT '';
+    ALTER TABLE conversations ADD COLUMN note TEXT NOT NULL DEFAULT '';
+"#,
 ];
+
+/// Columns of `ThreadInfo`, in `thread_row` order.
+const THREAD_COLUMNS: &str = "id, conversation_id, title, pinned, last_active, archived, summary, summary_messages,
+     (SELECT COUNT(*) FROM messages WHERE thread_id = threads.id)";
+/// Columns of `ConversationInfo`, in `conversation_row` order.
+const CONVERSATION_COLUMNS: &str = "id, app, name, workspace, last_active, keigo, note";
 
 pub struct History {
     conn: Mutex<Connection>,
@@ -73,6 +89,13 @@ pub struct ThreadInfo {
     pub title: String,
     pub pinned: bool,
     pub last_active: i64,
+    /// Hidden from the Threads list and never guessed for new messages.
+    pub archived: bool,
+    /// Vietnamese summary made on request; empty when there is none.
+    pub summary: String,
+    /// New messages arrived after the summary was made.
+    pub summary_stale: bool,
+    pub message_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -107,6 +130,10 @@ pub struct ConversationInfo {
     pub name: String,
     pub workspace: String,
     pub last_active: i64,
+    /// casual, polite or formal; empty means the default from the settings.
+    pub keigo: String,
+    /// Who the people in this conversation are, sent with each translation.
+    pub note: String,
 }
 
 pub struct NewMessage<'a> {
@@ -172,10 +199,10 @@ impl History {
         limit: usize,
     ) -> rusqlite::Result<Vec<ThreadInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, title, pinned, last_active FROM threads
-             WHERE conversation_id = ?1 AND last_active >= ?2 ORDER BY last_active DESC LIMIT ?3",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {THREAD_COLUMNS} FROM threads
+             WHERE conversation_id = ?1 AND last_active >= ?2 AND archived = 0 ORDER BY last_active DESC LIMIT ?3"
+        ))?;
         stmt.query_map(params![conversation_id, since_ms, limit as i64], thread_row)?
             .collect()
     }
@@ -183,11 +210,113 @@ impl History {
     pub fn thread(&self, id: i64) -> rusqlite::Result<Option<ThreadInfo>> {
         let conn = self.conn.lock().unwrap();
         conn.query_row(
-            "SELECT id, conversation_id, title, pinned, last_active FROM threads WHERE id = ?1",
+            &format!("SELECT {THREAD_COLUMNS} FROM threads WHERE id = ?1"),
             [id],
             thread_row,
         )
         .optional()
+    }
+
+    /// The thread the user pinned in this conversation: every new message goes there.
+    pub fn pinned_thread(&self, conversation_id: i64) -> rusqlite::Result<Option<ThreadInfo>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {THREAD_COLUMNS} FROM threads WHERE conversation_id = ?1 AND pinned = 1 AND archived = 0"),
+            [conversation_id],
+            thread_row,
+        )
+        .optional()
+    }
+
+    /// Pins a thread (unpinning any other in its conversation: only one can collect the new messages).
+    pub fn set_pinned(&self, id: i64, pinned: bool) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        if pinned {
+            tx.execute(
+                "UPDATE threads SET pinned = 0
+                 WHERE conversation_id = (SELECT conversation_id FROM threads WHERE id = ?1)",
+                [id],
+            )?;
+            // A pinned thread is in use again.
+            tx.execute("UPDATE threads SET pinned = 1, archived = 0 WHERE id = ?1", [id])?;
+        } else {
+            tx.execute("UPDATE threads SET pinned = 0 WHERE id = ?1", [id])?;
+        }
+        tx.commit()
+    }
+
+    /// Archiving also unpins: an archived thread must not keep collecting messages.
+    pub fn set_archived(&self, id: i64, archived: bool) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE threads SET archived = ?2, pinned = CASE WHEN ?2 THEN 0 ELSE pinned END WHERE id = ?1",
+            params![id, archived],
+        )?;
+        Ok(())
+    }
+
+    /// Moves every message of `from` into `into` and removes `from`. Both must be in the same conversation.
+    pub fn merge_threads(&self, from: i64, into: i64) -> rusqlite::Result<()> {
+        if from == into {
+            return Ok(());
+        }
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let conversation: i64 = tx.query_row(
+            "SELECT a.conversation_id FROM threads a JOIN threads b ON a.conversation_id = b.conversation_id
+             WHERE a.id = ?1 AND b.id = ?2",
+            params![from, into],
+            |r| r.get(0),
+        )?;
+        tx.execute(
+            "UPDATE messages SET thread_id = ?2 WHERE thread_id = ?1",
+            params![from, into],
+        )?;
+        tx.execute(
+            "UPDATE threads SET
+                last_active = MAX(last_active, (SELECT last_active FROM threads WHERE id = ?1)),
+                pinned = MAX(pinned, (SELECT pinned FROM threads WHERE id = ?1))
+             WHERE id = ?2",
+            params![from, into],
+        )?;
+        tx.execute("DELETE FROM threads WHERE id = ?1", [from])?;
+        tx.execute(
+            "INSERT INTO thread_corrections (conversation_id, from_thread, to_thread, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![conversation, from, into, now_ms()],
+        )?;
+        tx.commit()
+    }
+
+    /// Stores a summary covering the thread's current messages.
+    pub fn set_summary(&self, id: i64, summary: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE threads SET summary = ?2, summary_messages = (SELECT COUNT(*) FROM messages WHERE thread_id = ?1)
+             WHERE id = ?1",
+            params![id, summary.trim()],
+        )?;
+        Ok(())
+    }
+
+    pub fn conversation(&self, id: i64) -> rusqlite::Result<Option<ConversationInfo>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {CONVERSATION_COLUMNS} FROM conversations WHERE id = ?1"),
+            [id],
+            conversation_row,
+        )
+        .optional()
+    }
+
+    /// `keigo` is casual, polite, formal, or empty for the default.
+    pub fn update_conversation(&self, id: i64, keigo: &str, note: &str) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET keigo = ?2, note = ?3 WHERE id = ?1",
+            params![id, keigo, note.trim()],
+        )?;
+        Ok(())
     }
 
     /// The last `limit` messages of a thread, oldest first.
@@ -276,21 +405,12 @@ impl History {
 
     pub fn conversations(&self) -> rusqlite::Result<Vec<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, app, name, workspace, last_active FROM conversations
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {CONVERSATION_COLUMNS} FROM conversations
              WHERE EXISTS (SELECT 1 FROM threads WHERE conversation_id = conversations.id)
-             ORDER BY last_active DESC",
-        )?;
-        stmt.query_map([], |r| {
-            Ok(ConversationInfo {
-                id: r.get(0)?,
-                app: r.get(1)?,
-                name: r.get(2)?,
-                workspace: r.get(3)?,
-                last_active: r.get(4)?,
-            })
-        })?
-        .collect()
+             ORDER BY last_active DESC"
+        ))?;
+        stmt.query_map([], conversation_row)?.collect()
     }
 
     pub fn all_threads(&self) -> rusqlite::Result<Vec<ThreadInfo>> {
@@ -299,10 +419,9 @@ impl History {
 
     fn recent_all(&self, since_ms: i64) -> rusqlite::Result<Vec<ThreadInfo>> {
         let conn = self.conn.lock().unwrap();
-        let mut stmt = conn.prepare(
-            "SELECT id, conversation_id, title, pinned, last_active FROM threads
-             WHERE last_active >= ?1 ORDER BY last_active DESC",
-        )?;
+        let mut stmt = conn.prepare(&format!(
+            "SELECT {THREAD_COLUMNS} FROM threads WHERE last_active >= ?1 ORDER BY last_active DESC"
+        ))?;
         stmt.query_map([since_ms], thread_row)?.collect()
     }
 
@@ -361,12 +480,31 @@ impl GlossaryTerm {
 }
 
 fn thread_row(r: &rusqlite::Row) -> rusqlite::Result<ThreadInfo> {
+    let summary_messages: i64 = r.get(7)?;
+    let message_count: i64 = r.get(8)?;
+    let summary: String = r.get(6)?;
     Ok(ThreadInfo {
         id: r.get(0)?,
         conversation_id: r.get(1)?,
         title: r.get(2)?,
         pinned: r.get::<_, i64>(3)? != 0,
         last_active: r.get(4)?,
+        archived: r.get::<_, i64>(5)? != 0,
+        summary_stale: !summary.is_empty() && message_count > summary_messages,
+        summary,
+        message_count,
+    })
+}
+
+fn conversation_row(r: &rusqlite::Row) -> rusqlite::Result<ConversationInfo> {
+    Ok(ConversationInfo {
+        id: r.get(0)?,
+        app: r.get(1)?,
+        name: r.get(2)?,
+        workspace: r.get(3)?,
+        last_active: r.get(4)?,
+        keigo: r.get(5)?,
+        note: r.get(6)?,
     })
 }
 
@@ -466,6 +604,72 @@ mod tests {
         assert!(!t.appears_in("請求書", "請求書"));
         h.delete_glossary_term(id).unwrap();
         assert!(h.glossary().unwrap().is_empty());
+    }
+
+    #[test]
+    fn pinning_is_exclusive_per_conversation_and_archiving_hides() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let other = h.upsert_conversation("slack", "general", "").unwrap();
+        let a = h.create_thread(conv, "A").unwrap();
+        let b = h.create_thread(conv, "B").unwrap();
+        let c = h.create_thread(other, "C").unwrap();
+        h.set_pinned(a, true).unwrap();
+        h.set_pinned(c, true).unwrap();
+        h.set_pinned(b, true).unwrap();
+        assert_eq!(h.pinned_thread(conv).unwrap().unwrap().id, b);
+        assert_eq!(h.pinned_thread(other).unwrap().unwrap().id, c);
+        assert!(!h.thread(a).unwrap().unwrap().pinned);
+
+        h.set_archived(b, true).unwrap();
+        assert!(h.pinned_thread(conv).unwrap().is_none());
+        let recent: Vec<i64> = h.recent_threads(conv, 0, 8).unwrap().iter().map(|t| t.id).collect();
+        assert_eq!(recent, [a]);
+        h.set_pinned(b, true).unwrap();
+        assert!(!h.thread(b).unwrap().unwrap().archived);
+    }
+
+    #[test]
+    fn merging_moves_messages_and_removes_the_source() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let from = h.create_thread(conv, "Trùng").unwrap();
+        let into = h.create_thread(conv, "Chính").unwrap();
+        h.add_message(from, &msg("ja_vi", "a", "b")).unwrap();
+        h.add_message(into, &msg("ja_vi", "c", "d")).unwrap();
+        h.add_message(from, &msg("vi_ja", "e", "f")).unwrap();
+        h.set_pinned(from, true).unwrap();
+        h.merge_threads(from, into).unwrap();
+        assert!(h.thread(from).unwrap().is_none());
+        let t = h.thread(into).unwrap().unwrap();
+        assert_eq!(t.message_count, 3);
+        assert!(t.pinned);
+        let other = h.upsert_conversation("teams", "Suzuki", "").unwrap();
+        let elsewhere = h.create_thread(other, "Khác").unwrap();
+        assert!(h.merge_threads(into, elsewhere).is_err());
+    }
+
+    #[test]
+    fn summary_becomes_stale_with_new_messages() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("slack", "dm", "").unwrap();
+        let t = h.create_thread(conv, "x").unwrap();
+        h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
+        h.set_summary(t, " Khách hỏi lịch release. ").unwrap();
+        let info = h.thread(t).unwrap().unwrap();
+        assert_eq!(info.summary, "Khách hỏi lịch release.");
+        assert!(!info.summary_stale);
+        h.add_message(t, &msg("ja_vi", "c", "d")).unwrap();
+        assert!(h.thread(t).unwrap().unwrap().summary_stale);
+    }
+
+    #[test]
+    fn conversation_keeps_keigo_and_note() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("teams", "Tanaka Taro", "").unwrap();
+        h.update_conversation(conv, "formal", " PM phía khách ").unwrap();
+        let c = h.conversation(conv).unwrap().unwrap();
+        assert_eq!((c.keigo.as_str(), c.note.as_str()), ("formal", "PM phía khách"));
     }
 
     #[test]

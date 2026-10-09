@@ -1,30 +1,36 @@
 mod capture;
 mod context;
+mod export;
 mod history;
 mod hotkeys;
 mod placement;
 mod popup;
-mod prompt;
-mod provider;
+pub mod prompt;
+pub mod provider;
+mod quickbar;
+mod selection_watch;
 mod settings;
+mod team_glossary;
 mod threads;
 mod tray;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
 use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::ShortcutState;
 
 use history::{History, NewMessage};
 use hotkeys::{HotkeyAction, HotkeyState};
-use prompt::{Direction, ThreadMessage, TranslateRequest};
+use prompt::{Direction, Keigo, ThreadMessage, TranslateRequest};
 use provider::claude_cli::{ClaudeCli, Timing, TranslateEvent};
 use provider::stream_parser::Sections;
 use settings::SettingsStore;
+use team_glossary::TeamGlossaryCache;
 
 /// Default model; SP1 showed Sonnet with low effort thinks far less often than Haiku.
 const DEFAULT_MODEL: &str = "sonnet";
@@ -32,6 +38,79 @@ const DEFAULT_MODEL: &str = "sonnet";
 const BACKGROUND_ARG: &str = "--background";
 /// Earlier messages of the thread sent as context with each translation.
 const CONTEXT_MESSAGES: usize = 6;
+/// Messages a summary covers: the latest ones, enough for a long topic.
+const SUMMARY_MESSAGES: usize = 40;
+
+/// The thread's title and its last `limit` messages, Japanese side only, as prompt context.
+fn thread_context(history: &History, thread_id: i64, limit: usize) -> Option<(String, Vec<ThreadMessage>)> {
+    let thread = history.thread(thread_id).ok().flatten()?;
+    let messages = history
+        .recent_messages(thread.id, limit)
+        .unwrap_or_default()
+        .iter()
+        .map(|m| {
+            let (from_client, text) = m.japanese();
+            ThreadMessage {
+                from_client,
+                text: text.to_string(),
+            }
+        })
+        .collect();
+    Some((thread.title, messages))
+}
+
+/// Glossary terms that occur in `text`: personal ones, then the team's for Japanese not already covered.
+fn glossary_for(app: &AppHandle, text: &str) -> Vec<(String, String)> {
+    let lower = text.to_lowercase();
+    let mut terms: Vec<(String, String)> = app
+        .state::<History>()
+        .glossary()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|t| t.appears_in(text, &lower))
+        .map(|t| (t.ja, t.vi))
+        .collect();
+    let path = app
+        .state::<SettingsStore>()
+        .get()
+        .get("glossaryPath")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    for t in app.state::<TeamGlossaryCache>().get(&path).terms {
+        let term = history::GlossaryTerm {
+            id: 0,
+            ja: t.ja,
+            vi: t.vi,
+            note: t.note,
+        };
+        if term.appears_in(text, &lower) && !terms.iter().any(|(ja, _)| *ja == term.ja) {
+            terms.push((term.ja, term.vi));
+        }
+    }
+    terms
+}
+
+fn conversation_note(app: &AppHandle, conversation_id: Option<i64>) -> String {
+    conversation_id
+        .and_then(|id| app.state::<History>().conversation(id).ok().flatten())
+        .map(|c| c.note)
+        .unwrap_or_default()
+}
+
+/// Runs a request to the end and returns its sections (for tasks that are not streamed to a page).
+async fn complete(cli: &Arc<ClaudeCli>, request: TranslateRequest) -> Result<Sections, String> {
+    let result: Arc<Mutex<Option<Result<Sections, String>>>> = Arc::default();
+    let out = result.clone();
+    cli.translate(cli.next_request_id(), request, move |event| match event {
+        TranslateEvent::Done { sections, .. } => *out.lock().unwrap() = Some(Ok(sections)),
+        TranslateEvent::Error { message, .. } => *out.lock().unwrap() = Some(Err(message)),
+        _ => {}
+    })
+    .await;
+    let r = result.lock().unwrap().take();
+    r.unwrap_or_else(|| Err("Claude không trả lời".into()))
+}
 
 /// Translates with the thread's recent messages as context, then files the result in the history.
 #[tauri::command]
@@ -42,22 +121,19 @@ async fn translate(
     mut request: TranslateRequest,
     on_event: Channel<TranslateEvent>,
 ) -> Result<(), String> {
-    let history = app.state::<History>();
-    match request.thread_id.and_then(|id| history.thread(id).ok().flatten()) {
-        Some(thread) => {
-            request.thread_messages = history
-                .recent_messages(thread.id, CONTEXT_MESSAGES)
-                .unwrap_or_default()
-                .iter()
-                .map(|m| {
-                    let (from_client, text) = m.japanese();
-                    ThreadMessage {
-                        from_client,
-                        text: text.to_string(),
-                    }
-                })
-                .collect();
-            request.thread_title = Some(thread.title);
+    if !matches!(
+        request.direction,
+        Direction::JaVi | Direction::ViJa | Direction::ReviewJa
+    ) {
+        return Err("only translate and review are streamed".into());
+    }
+    match request
+        .thread_id
+        .and_then(|id| thread_context(&app.state::<History>(), id, CONTEXT_MESSAGES))
+    {
+        Some((title, messages)) => {
+            request.thread_messages = messages;
+            request.thread_title = Some(title);
         }
         None => {
             request.thread_id = None;
@@ -67,14 +143,8 @@ async fn translate(
     request.ask_title =
         request.conversation_id.is_some() && request.thread_id.is_none() && request.new_thread_title.is_none();
     // Only the terms that occur in this text: a short prompt keeps the first character fast.
-    let lower = request.text.to_lowercase();
-    request.glossary = history
-        .glossary()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|t| t.appears_in(&request.text, &lower))
-        .map(|t| (t.ja, t.vi))
-        .collect();
+    request.glossary = glossary_for(&app, &request.text);
+    request.conversation_note = conversation_note(&app, request.conversation_id);
 
     let cli = cli.inner().clone();
     let filed = request.clone();
@@ -102,6 +172,7 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         Direction::JaVi => ("ja_vi", &s.translation, &s.back_translation),
         Direction::ViJa => ("vi_ja", &s.translation, &s.back_translation),
         Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
+        Direction::Summarize | Direction::Reply => return None,
     };
     if result.trim().is_empty() {
         return None;
@@ -154,6 +225,7 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
         Direction::JaVi => s.translation.as_str(),
         Direction::ViJa => req.text.as_str(),
         Direction::ReviewJa => s.suggestion_vi.as_str(),
+        Direction::Summarize | Direction::Reply => "",
     };
     let words: Vec<&str> = vietnamese.split_whitespace().take(8).collect();
     if words.is_empty() {
@@ -229,6 +301,191 @@ fn history_move(
         thread_id,
         thread_title,
     })
+}
+
+#[tauri::command]
+fn history_set_pinned(app: AppHandle, thread_id: i64, pinned: bool) -> Result<(), String> {
+    app.state::<History>()
+        .set_pinned(thread_id, pinned)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn history_set_archived(app: AppHandle, thread_id: i64, archived: bool) -> Result<(), String> {
+    app.state::<History>()
+        .set_archived(thread_id, archived)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn history_merge(app: AppHandle, from: i64, into: i64) -> Result<(), String> {
+    app.state::<History>()
+        .merge_threads(from, into)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+/// Asks where to save, then writes the thread as Markdown. Returns the file, or `None` when cancelled.
+#[tauri::command]
+async fn history_export(app: AppHandle, thread_id: i64) -> Result<Option<String>, String> {
+    let history = app.state::<History>();
+    let thread = history
+        .thread(thread_id)
+        .map_err(|e| e.to_string())?
+        .ok_or("thread not found")?;
+    let conversation = history
+        .conversation(thread.conversation_id)
+        .map_err(|e| e.to_string())?;
+    let messages = history.messages(thread_id).map_err(|e| e.to_string())?;
+    let markdown = export::thread_markdown(conversation.as_ref(), &thread, &messages);
+
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Xuất thread ra Markdown")
+        .set_file_name(export::file_name(&thread.title))
+        .add_filter("Markdown", &["md"]);
+    if let Some(main) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&main);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    std::fs::write(&path, markdown).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Summarizes a thread in Vietnamese with Claude and stores the summary.
+#[tauri::command]
+async fn thread_summarize(
+    app: AppHandle,
+    cli: State<'_, Arc<ClaudeCli>>,
+    thread_id: i64,
+) -> Result<history::ThreadInfo, String> {
+    let history = app.state::<History>();
+    let (title, messages) = thread_context(&history, thread_id, SUMMARY_MESSAGES).ok_or("thread not found")?;
+    if messages.is_empty() {
+        return Err("Thread chưa có tin nào".into());
+    }
+    let mut request = TranslateRequest::task(Direction::Summarize, "", Keigo::Polite);
+    request.thread_title = Some(title);
+    request.thread_messages = messages;
+    let sections = complete(cli.inner(), request).await?;
+    if sections.summary.trim().is_empty() {
+        return Err("Claude không trả về tóm tắt".into());
+    }
+    history
+        .set_summary(thread_id, &sections.summary)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    history
+        .thread(thread_id)
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "thread not found".into())
+}
+
+#[derive(Serialize)]
+struct Reply {
+    ja: String,
+    vi: String,
+}
+
+/// Three short replies the user could send to the client's message, with their meaning.
+#[tauri::command]
+async fn suggest_replies(
+    app: AppHandle,
+    cli: State<'_, Arc<ClaudeCli>>,
+    text: String,
+    keigo: Keigo,
+    conversation_id: Option<i64>,
+    thread_id: Option<i64>,
+) -> Result<Vec<Reply>, String> {
+    let mut request = TranslateRequest::task(Direction::Reply, &text, keigo);
+    if let Some((title, messages)) =
+        thread_id.and_then(|id| thread_context(&app.state::<History>(), id, CONTEXT_MESSAGES))
+    {
+        request.thread_title = Some(title);
+        request.thread_messages = messages;
+    }
+    request.glossary = glossary_for(&app, &text);
+    request.conversation_note = conversation_note(&app, conversation_id);
+    let sections = complete(cli.inner(), request).await?;
+    let replies = parse_replies(&sections.replies);
+    if replies.is_empty() {
+        return Err("Claude không trả về gợi ý".into());
+    }
+    Ok(replies)
+}
+
+/// "Japanese || Vietnamese" per line; a line without the separator is a reply without its meaning.
+fn parse_replies(text: &str) -> Vec<Reply> {
+    text.lines()
+        .map(|l| {
+            l.trim()
+                .trim_start_matches(|c: char| c == '-' || c == '・' || c.is_ascii_digit() || c == '.')
+                .trim()
+        })
+        .filter(|l| !l.is_empty())
+        .map(|l| match l.split_once("||") {
+            Some((ja, vi)) => Reply {
+                ja: ja.trim().to_string(),
+                vi: vi.trim().to_string(),
+            },
+            None => Reply {
+                ja: l.to_string(),
+                vi: String::new(),
+            },
+        })
+        .filter(|r| !r.ja.is_empty())
+        .take(3)
+        .collect()
+}
+
+/// Keigo level ('' = default) and note for a conversation; without a note the stored one is kept.
+#[tauri::command]
+fn conversation_update(
+    app: AppHandle,
+    conversation_id: i64,
+    keigo: String,
+    note: Option<String>,
+) -> Result<(), String> {
+    if !matches!(keigo.as_str(), "" | "casual" | "polite" | "formal") {
+        return Err(format!("unknown keigo {keigo}"));
+    }
+    let history = app.state::<History>();
+    let note = match note {
+        Some(n) => n,
+        None => history
+            .conversation(conversation_id)
+            .map_err(|e| e.to_string())?
+            .map(|c| c.note)
+            .unwrap_or_default(),
+    };
+    history
+        .update_conversation(conversation_id, &keigo, &note)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+/// The team glossary file named in the settings, read-only.
+#[tauri::command]
+fn glossary_team(store: State<'_, SettingsStore>, cache: State<'_, TeamGlossaryCache>) -> team_glossary::TeamGlossary {
+    let path = store
+        .get()
+        .get("glossaryPath")
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_string();
+    cache.get(&path)
 }
 
 #[tauri::command]
@@ -309,6 +566,12 @@ fn open_claude_login(cli: State<'_, Arc<ClaudeCli>>) -> Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Copies text for the user without hiding anything (the popup's "translate and copy").
+#[tauri::command]
+fn clipboard_write(text: String) -> Result<(), String> {
+    capture::copy_text(&text).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 fn settings_get(store: State<'_, SettingsStore>) -> Value {
     store.get()
@@ -381,6 +644,9 @@ pub fn run() {
         ))
         .manage(popup::PopupState::default())
         .manage(HotkeyState::default())
+        .manage(quickbar::QuickbarState::default())
+        .manage(TeamGlossaryCache::default())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -422,6 +688,8 @@ pub fn run() {
             app.manage(cli);
 
             popup::create(app.handle())?;
+            quickbar::create(app.handle())?;
+            selection_watch::start(app.handle());
             tray::create(app.handle())?;
             hotkeys::apply(app.handle());
 
@@ -456,13 +724,47 @@ pub fn run() {
             glossary_list,
             glossary_add,
             glossary_delete,
+            glossary_team,
+            history_set_pinned,
+            history_set_archived,
+            history_merge,
+            history_export,
+            thread_summarize,
+            suggest_replies,
+            conversation_update,
             popup::popup_hide,
             popup::popup_apply,
             popup::popup_copy,
             popup::popup_fit,
             popup::popup_reset_geometry,
             popup::popup_geometry,
+            quickbar::quickbar_fit,
+            quickbar::quickbar_hide,
+            quickbar::quickbar_action,
+            clipboard_write,
         ])
         .run(tauri::generate_context!())
         .expect("error while running MyTranslate");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replies_tolerate_numbering_and_missing_meaning() {
+        let r = parse_replies(
+            "1. 承知しました。 || Em đã hiểu.\n\n- 確認いたします。||Em sẽ kiểm tra.\nご連絡ありがとうございます。\n4つ目 || thừa",
+        );
+        assert_eq!(r.len(), 3);
+        assert_eq!((r[0].ja.as_str(), r[0].vi.as_str()), ("承知しました。", "Em đã hiểu."));
+        assert_eq!(
+            (r[1].ja.as_str(), r[1].vi.as_str()),
+            ("確認いたします。", "Em sẽ kiểm tra.")
+        );
+        assert_eq!(
+            (r[2].ja.as_str(), r[2].vi.as_str()),
+            ("ご連絡ありがとうございます。", "")
+        );
+    }
 }

@@ -17,9 +17,10 @@ export function QuickActionBar({
   onHoverChange,
   style,
   className,
+  bare = false,
 }: {
-  /** Whether the selected text is Japanese; decides labels and which buttons apply. */
-  japanese: boolean
+  /** Whether the selected text is Japanese; decides labels and which buttons apply. `null`: not known. */
+  japanese: boolean | null
   /** Buttons in display order, from Settings. */
   items: QuickActionItem[]
   /** Icon with label, or icon only with the label as tooltip. */
@@ -29,6 +30,8 @@ export function QuickActionBar({
   onHoverChange?: (hover: boolean) => void
   style?: CSSProperties
   className?: string
+  /** In its own window, Windows draws the border and shadow. */
+  bare?: boolean
 }) {
   // The bar can disappear under the pointer (after a click), which never fires mouseleave.
   useEffect(() => () => onHoverChange?.(false), [onHoverChange])
@@ -42,7 +45,11 @@ export function QuickActionBar({
       onMouseDown={(e) => e.preventDefault()}
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
-      className={cx('anim-popup flex h-9 items-center gap-0.5 rounded-lg border border-line bg-window px-1 shadow-popup', className)}
+      className={cx(
+        'flex h-9 w-max items-center gap-0.5 bg-window px-1',
+        !bare && 'anim-popup rounded-lg border border-line shadow-popup',
+        className,
+      )}
     >
       {visibleQuickActions(items, japanese).map((id) => {
         const meta = quickActionMeta[id]

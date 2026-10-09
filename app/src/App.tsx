@@ -12,6 +12,7 @@ import type { Scenario } from './types'
 import { MainWindow } from './windows/main/MainWindow'
 import { Onboarding } from './windows/onboarding/Onboarding'
 import { PopupWindow } from './windows/popup/PopupWindow'
+import { QuickbarWindow } from './windows/quickbar/QuickbarWindow'
 
 const screens: { value: Screen; label: string }[] = [
   { value: 'playground', label: 'Mô phỏng sử dụng' },
@@ -29,9 +30,10 @@ const scenarios: { value: Scenario; label: string }[] = [
 
 export default function App() {
   if (isTauri) {
+    const windowLabel = getCurrentWindow().label
     return (
       <StoreProvider initialScreen="main" initialMainTab="translate">
-        {getCurrentWindow().label === 'popup' ? <PopupShell /> : <TauriShell />}
+        {windowLabel === 'popup' ? <PopupShell /> : windowLabel === 'quickbar' ? <QuickbarShell /> : <TauriShell />}
       </StoreProvider>
     )
   }
@@ -40,6 +42,20 @@ export default function App() {
       <Shell />
     </StoreProvider>
   )
+}
+
+/** The quick toolbar window shown next to a mouse selection. */
+function QuickbarShell() {
+  const { settings } = useStore()
+  const theme = useResolvedTheme(settings.theme)
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+  }, [theme])
+  // Any pixel the toolbar does not cover must match it, never the prototype's desktop colour.
+  useEffect(() => {
+    document.body.style.background = 'var(--bg-window)'
+  }, [])
+  return <QuickbarWindow />
 }
 
 /** The translation popup window. */

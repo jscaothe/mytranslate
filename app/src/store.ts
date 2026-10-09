@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react'
-import type { Contact, Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
+import type { Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
 export type MainTab = 'translate' | 'threads' | 'glossary' | 'contacts' | 'settings'
@@ -23,13 +23,33 @@ export interface Settings {
   profilePrompt: string
   /** Mini toolbar shown when text is selected with the mouse. */
   quickActions: QuickActionSettings
+  /** The team's shared glossary (YAML), read-only; empty when there is none. */
   glossaryPath: string
+  /** Fixed sentences that can be added before or after a Japanese result. */
+  templates: Template[]
   autostart: boolean
   blockedApps: string[]
   hotkeysPaused: boolean
   /** Whether the first-run guide has been completed. */
   onboarded: boolean
 }
+
+export interface Template {
+  id: string
+  /** Japanese text as it is sent. */
+  ja: string
+  /** Its meaning, for the list. */
+  vi: string
+  /** Greetings go before the message, closings after it. */
+  position: 'before' | 'after'
+}
+
+export const DEFAULT_TEMPLATES: Template[] = [
+  { id: 'otsukare', ja: 'お疲れ様です。', vi: 'Chào anh/chị (lời chào trong công việc)', position: 'before' },
+  { id: 'osewa', ja: 'いつもお世話になっております。', vi: 'Cảm ơn anh/chị đã luôn giúp đỡ', position: 'before' },
+  { id: 'yoroshiku', ja: 'よろしくお願いいたします。', vi: 'Rất mong anh/chị giúp đỡ', position: 'after' },
+  { id: 'kakunin', ja: 'ご確認のほど、よろしくお願いいたします。', vi: 'Nhờ anh/chị kiểm tra giúp', position: 'after' },
+]
 
 export type QuickActionId = 'translate' | 'review' | 'copyTranslation'
 
@@ -97,10 +117,11 @@ export interface Store {
   addMessage: (threadId: string, msg: Omit<ThreadMessage, 'id'>) => void
   createThread: (conversationId: string, title: string) => string
   updateThread: (id: string, patch: Partial<Thread>) => void
+  /** Prototype only: merges one thread into another of the same conversation. */
+  mergeThread: (from: string, into: string) => void
+  updateConversation: (id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => void
   glossary: GlossaryTerm[]
   setGlossary: (g: GlossaryTerm[]) => void
-  contacts: Contact[]
-  setContacts: (c: Contact[]) => void
   settings: Settings
   /** False until the real app has loaded the saved settings (always true in the prototype). */
   settingsReady: boolean

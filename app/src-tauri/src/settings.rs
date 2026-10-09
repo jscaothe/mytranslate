@@ -73,6 +73,14 @@ impl SettingsStore {
         self.field("hotkeysPaused").unwrap_or(false)
     }
 
+    /// Apps the user excluded: no hotkey or toolbar acts in them (password managers...). Case-insensitive.
+    pub fn is_blocked(&self, exe: &str) -> bool {
+        self.field::<Vec<String>>("blockedApps")
+            .unwrap_or_default()
+            .iter()
+            .any(|b| b.trim().eq_ignore_ascii_case(exe))
+    }
+
     pub fn model(&self) -> Option<String> {
         self.field("model")
     }

@@ -1,10 +1,10 @@
 import type { AppRef } from '../store'
-import type { ChatChannel, Contact, Conversation, GlossaryTerm, Thread } from '../types'
+import type { ChatChannel, Conversation, GlossaryTerm, Thread } from '../types'
 
 export const conversations: Conversation[] = [
-  { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', name: '#dev-qa' },
-  { id: 'c-general', app: 'slack', workspace: 'CustomerX', name: '#general' },
-  { id: 'c-tanaka', app: 'teams', workspace: 'CustomerX', name: 'Tanaka Taro' },
+  { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', name: '#dev-qa', keigo: '', note: 'Tanaka là PM, Suzuki là tester phía khách.' },
+  { id: 'c-general', app: 'slack', workspace: 'CustomerX', name: '#general', keigo: 'polite', note: '' },
+  { id: 'c-tanaka', app: 'teams', workspace: 'CustomerX', name: 'Tanaka Taro', keigo: 'formal', note: 'PM phía khách, gọi là 田中様.' },
 ]
 
 export const initialThreads: Thread[] = [
@@ -205,11 +205,6 @@ export const initialGlossary: GlossaryTerm[] = [
   { id: 'g5', ja: 'デプロイ', vi: 'deploy', note: 'Giữ nguyên tiếng Anh', scope: 'personal' },
 ]
 
-export const initialContacts: Contact[] = [
-  { id: 'p1', name: 'Tanaka Taro', company: 'CustomerX', role: 'PM phía khách', keigo: 'formal' },
-  { id: 'p2', name: 'Suzuki Hanako', company: 'CustomerX', role: 'Tester', keigo: 'polite' },
-  { id: 'p3', name: 'Sato Kenji', company: 'CustomerX', role: 'Trưởng phòng', keigo: 'formal' },
-]
 
 export const keigoLabels: Record<'casual' | 'polite' | 'formal', string> = {
   casual: 'Thân mật',

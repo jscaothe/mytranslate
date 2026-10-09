@@ -42,6 +42,11 @@ Trong popup:
 - `Tab` đổi mức kính ngữ (Thân mật / Lịch sự / Trang trọng); `Esc` đóng; `Ctrl+P` ghim popup.
 - Bấm tên thread (hoặc `Ctrl+T`) để chuyển tin sang thread khác hoặc tạo thread mới.
 - Kéo thanh tiêu đề để di chuyển, kéo mép hoặc góc dưới để đổi kích thước; popup nhớ vị trí và kích thước cho đến khi tắt app.
+- Với tin của khách: `G` để Claude gợi ý 3 câu trả lời tiếng Nhật (bấm một câu để sao chép), `R` để tự gõ câu trả lời tiếng Việt.
+- Với bản tiếng Nhật: bấm mẫu câu (お疲れ様です。, よろしくお願いいたします。...) để thêm vào đầu hoặc cuối tin. Sửa danh sách ở Cài đặt > Mẫu câu.
+
+Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với các nút Dịch, Kiểm tra, Dịch và sao chép.
+Bật/tắt và chọn ứng dụng ở Cài đặt > Thao tác nhanh khi bôi đen.
 
 App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Teams/Slack.
 
@@ -50,7 +55,9 @@ App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Tea
 - **Cài đặt > Hồ sơ**: viết vài câu về bạn, dự án, cách xưng hô với khách, chữ ký. Nội dung này đi kèm mọi lần dịch.
 - **Glossary**: thêm tên màn hình, tên tính năng, thuật ngữ khách hay dùng (ví dụ `仕訳` = `bút toán`). Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được dịch đúng như glossary.
 - App tự gom tin theo cuộc trò chuyện và chủ đề (thread), và gửi kèm vài tin gần nhất để Claude hiểu các câu như 先ほどの件, それ.
-  Xem lại ở cửa sổ chính, tab **Threads**.
+  Xem lại ở cửa sổ chính, tab **Threads**: ghim một thread để mọi tin mới của cuộc trò chuyện vào đó, gộp thread trùng, lưu trữ thread đã xong, bấm **Tóm tắt** để Claude tóm tắt bằng tiếng Việt, xuất Markdown để bàn giao.
+- **Người liên hệ**: đặt mức kính ngữ cho từng cuộc trò chuyện (ví dụ Trang trọng với PM khách, Lịch sự trong kênh nội bộ) và ghi chú về người ở đó (tên, vai trò, cách gọi). Đổi kính ngữ trong popup cũng được nhớ cho cuộc trò chuyện đó.
+- **Glossary chung của team**: trỏ Cài đặt > Glossary chung tới file `glossary.yaml` của dự án (trong repo hoặc thư mục OneDrive). App chỉ đọc file, thuật ngữ cá nhân được ưu tiên khi trùng.
 
 ## Dữ liệu và quyền riêng tư
 

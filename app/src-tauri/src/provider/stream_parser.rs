@@ -17,9 +17,15 @@ pub struct Sections {
     pub suggestion_vi: String,
     /// Only when the app asked for it: a short title for a new thread.
     pub thread_title: String,
+    /// summarize_thread only.
+    pub summary: String,
+    /// suggest_replies only: one "Japanese || Vietnamese" per line.
+    pub replies: String,
 }
 
-const TAGS: [&str; 8] = [
+const TAGS: [&str; 10] = [
+    "summary",
+    "replies",
     "thread_title",
     "translation",
     "back_translation",
@@ -70,6 +76,8 @@ pub fn parse(raw: &str) -> Sections {
             "issues" => out.issues = text,
             "suggestion" => out.suggestion = text,
             "suggestion_vi" => out.suggestion_vi = text,
+            "summary" => out.summary = text,
+            "replies" => out.replies = text,
             _ => out.thread_title = text,
         }
     }
