@@ -69,6 +69,19 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE conversations ADD COLUMN keigo TEXT NOT NULL DEFAULT '';
     ALTER TABLE conversations ADD COLUMN note TEXT NOT NULL DEFAULT '';
 "#,
+    r#"
+    -- The user marked the translation as poor ("Dịch chưa tốt"): material for prompt improvements.
+    ALTER TABLE messages ADD COLUMN feedback INTEGER NOT NULL DEFAULT 0;
+"#,
+];
+
+/// Every table holding user data, children first (for wiping).
+const DATA_TABLES: [&str; 5] = [
+    "thread_corrections",
+    "messages",
+    "threads",
+    "conversations",
+    "glossary_terms",
 ];
 
 /// Columns of `ThreadInfo`, in `thread_row` order.
@@ -170,14 +183,103 @@ impl History {
     fn init(mut conn: Connection) -> rusqlite::Result<Self> {
         conn.pragma_update(None, "journal_mode", "WAL")?;
         conn.pragma_update(None, "foreign_keys", "ON")?;
-        let version: usize = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
-            let tx = conn.transaction()?;
-            tx.execute_batch(sql)?;
-            tx.pragma_update(None, "user_version", i + 1)?;
-            tx.commit()?;
-        }
+        // Unicode lowercase for search; SQLite's own lower() only knows ASCII.
+        conn.create_scalar_function(
+            "fold",
+            1,
+            rusqlite::functions::FunctionFlags::SQLITE_UTF8 | rusqlite::functions::FunctionFlags::SQLITE_DETERMINISTIC,
+            |ctx| Ok(ctx.get::<String>(0)?.to_lowercase()),
+        )?;
+        migrate(&mut conn)?;
         Ok(Self { conn: Mutex::new(conn) })
+    }
+
+    /// Writes a consistent copy of the whole history to `path` (works while the app is in use).
+    pub fn backup_to(&self, path: &Path) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let _ = std::fs::remove_file(path);
+        conn.execute("VACUUM INTO ?1", [path.to_string_lossy()])?;
+        Ok(())
+    }
+
+    /// Replaces the whole history with a backup made by `backup_to` (or an older version of the app).
+    /// The file is checked first; on any problem the current history is left untouched.
+    pub fn restore_from(&self, path: &Path) -> Result<(), String> {
+        let source = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|e| format!("Không mở được file: {e}"))?;
+        let version: usize = source
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| "File không phải bản sao lưu của MyTranslate".to_string())?;
+        let has_tables: i64 = source
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('conversations', 'threads', 'messages')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if version == 0 || has_tables != 3 {
+            return Err("File không phải bản sao lưu của MyTranslate".into());
+        }
+        if version > MIGRATIONS.len() {
+            return Err("Bản sao lưu được tạo bằng phiên bản app mới hơn; hãy cập nhật app trước".into());
+        }
+        drop(source);
+        let mut conn = self.conn.lock().unwrap();
+        conn.restore(rusqlite::MAIN_DB, path, None::<fn(rusqlite::backup::Progress)>)
+            .map_err(|e| format!("Không khôi phục được: {e}"))?;
+        // A backup from an older app version gets the newer columns.
+        migrate(&mut conn).map_err(|e| e.to_string())
+    }
+
+    /// Deletes every conversation, thread, message and personal glossary term.
+    pub fn wipe(&self) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        for table in DATA_TABLES {
+            tx.execute(&format!("DELETE FROM {table}"), [])?;
+        }
+        tx.commit()?;
+        conn.execute_batch("VACUUM")
+    }
+
+    /// Deletes messages older than `before_ms` and the threads they leave empty. Returns how many messages.
+    pub fn delete_older_than(&self, before_ms: i64) -> rusqlite::Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let n = tx.execute("DELETE FROM messages WHERE created_at < ?1", [before_ms])?;
+        if n > 0 {
+            tx.execute(
+                "DELETE FROM threads WHERE NOT EXISTS (SELECT 1 FROM messages WHERE thread_id = threads.id)",
+                [],
+            )?;
+        }
+        tx.commit()?;
+        Ok(n)
+    }
+
+    /// Threads whose title, summary or any message contains `query`, ignoring case (Vietnamese letters too).
+    pub fn search_threads(&self, query: &str) -> rusqlite::Result<Vec<i64>> {
+        let q = query.trim().to_lowercase();
+        if q.is_empty() {
+            return Ok(Vec::new());
+        }
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id FROM threads WHERE instr(fold(title), ?1) OR instr(fold(summary), ?1)
+             UNION
+             SELECT DISTINCT thread_id FROM messages
+             WHERE instr(fold(source), ?1) OR instr(fold(result), ?1) OR instr(fold(back), ?1)",
+        )?;
+        stmt.query_map([q], |r| r.get(0))?.collect()
+    }
+
+    pub fn set_feedback(&self, message_id: i64, bad: bool) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE messages SET feedback = ?2 WHERE id = ?1",
+            params![message_id, if bad { -1 } else { 0 }],
+        )?;
+        Ok(())
     }
 
     pub fn upsert_conversation(&self, app: &str, name: &str, workspace: &str) -> rusqlite::Result<i64> {
@@ -462,6 +564,17 @@ impl History {
     }
 }
 
+fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
+    let version: usize = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
+    for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.pragma_update(None, "user_version", i + 1)?;
+        tx.commit()?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GlossaryTerm {
@@ -670,6 +783,79 @@ mod tests {
         h.update_conversation(conv, "formal", " PM phía khách ").unwrap();
         let c = h.conversation(conv).unwrap().unwrap();
         assert_eq!((c.keigo.as_str(), c.note.as_str()), ("formal", "PM phía khách"));
+    }
+
+    #[test]
+    fn search_finds_titles_and_message_text_ignoring_case() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let a = h.create_thread(conv, "Lỗi đăng nhập").unwrap();
+        let b = h.create_thread(conv, "Lịch release").unwrap();
+        h.add_message(b, &msg("ja_vi", "決済APIのタイムアウト", "Timeout 100% của API"))
+            .unwrap();
+        assert_eq!(h.search_threads("ĐĂNG nhập").unwrap(), [a]);
+        assert_eq!(h.search_threads("タイムアウト").unwrap(), [b]);
+        assert_eq!(h.search_threads("timeout").unwrap(), [b]);
+        assert_eq!(h.search_threads("100%").unwrap(), [b]);
+        assert!(h.search_threads("1_0%").unwrap().is_empty());
+        assert!(h.search_threads("  ").unwrap().is_empty());
+    }
+
+    #[test]
+    fn retention_deletes_old_messages_and_empty_threads() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("slack", "dm", "").unwrap();
+        let old = h.create_thread(conv, "Cũ").unwrap();
+        let mixed = h.create_thread(conv, "Lẫn").unwrap();
+        h.add_message(old, &msg("ja_vi", "a", "b")).unwrap();
+        h.add_message(mixed, &msg("ja_vi", "c", "d")).unwrap();
+        let cutoff = now_ms() + 1;
+        h.add_message(mixed, &msg("ja_vi", "e", "f")).unwrap();
+        {
+            let conn = h.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE messages SET created_at = created_at + 1000 WHERE source = 'e'",
+                [],
+            )
+            .unwrap();
+        }
+        assert_eq!(h.delete_older_than(cutoff).unwrap(), 2);
+        assert!(h.thread(old).unwrap().is_none());
+        assert_eq!(h.messages(mixed).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn backup_restore_and_wipe() {
+        let dir = std::env::temp_dir().join(format!("mytranslate-backup-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let backup = dir.join("backup.db");
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let t = h.create_thread(conv, "Spec").unwrap();
+        let m = h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
+        h.set_feedback(m, true).unwrap();
+        h.add_glossary_term("仕訳", "bút toán", "").unwrap();
+        h.backup_to(&backup).unwrap();
+
+        h.wipe().unwrap();
+        assert!(h.all_threads().unwrap().is_empty());
+        assert!(h.glossary().unwrap().is_empty());
+
+        h.restore_from(&backup).unwrap();
+        assert_eq!(h.all_threads().unwrap().len(), 1);
+        assert_eq!(h.glossary().unwrap().len(), 1);
+
+        let junk = dir.join("junk.db");
+        std::fs::write(&junk, b"not a database at all, just text").unwrap();
+        assert!(h.restore_from(&junk).is_err());
+        let empty = dir.join("empty.db");
+        Connection::open(&empty)
+            .unwrap()
+            .execute_batch("CREATE TABLE x (a)")
+            .unwrap();
+        assert!(h.restore_from(&empty).is_err());
+        assert_eq!(h.all_threads().unwrap().len(), 1);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

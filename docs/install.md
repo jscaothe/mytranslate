@@ -59,12 +59,19 @@ App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Tea
 - **Người liên hệ**: đặt mức kính ngữ cho từng cuộc trò chuyện (ví dụ Trang trọng với PM khách, Lịch sự trong kênh nội bộ) và ghi chú về người ở đó (tên, vai trò, cách gọi). Đổi kính ngữ trong popup cũng được nhớ cho cuộc trò chuyện đó.
 - **Glossary chung của team**: trỏ Cài đặt > Glossary chung tới file `glossary.yaml` của dự án (trong repo hoặc thư mục OneDrive). App chỉ đọc file, thuật ngữ cá nhân được ưu tiên khi trùng.
 
+## Cập nhật
+
+App tự kiểm tra bản mới. Khi có, bạn thấy thông báo "Có phiên bản mới" ở đầu cửa sổ chính, một dòng nhỏ dưới bản dịch trong popup, và mục "Cập nhật lên phiên bản ..." trong menu khay.
+Bấm **Cập nhật và khởi động lại**: app tự tải, cài và mở lại sau vài giây; lịch sử và cài đặt giữ nguyên.
+Muốn kiểm tra ngay: Cài đặt > Cập nhật > Kiểm tra ngay.
+
 ## Dữ liệu và quyền riêng tư
 
 - Lịch sử dịch, thread, glossary nằm trên máy bạn: `%LOCALAPPDATA%\com.mytranslate.desktop\history.db`.
 - Cài đặt: `%APPDATA%\com.mytranslate.desktop\settings.json`.
 - Nội dung chỉ được gửi tới Claude qua Claude Code của chính bạn; app không có máy chủ riêng và không thu thập dữ liệu.
 - Clipboard của bạn được khôi phục sau mỗi lần app lấy hoặc dán văn bản; chữ tạm của app không vào lịch sử clipboard (Win+V).
+- Cài đặt > Dữ liệu: chọn thời gian giữ lịch sử, sao lưu ra một file `.db` (ví dụ trước khi đổi máy), khôi phục từ file đó, hoặc xóa toàn bộ dữ liệu.
 
 ## Xử lý sự cố
 

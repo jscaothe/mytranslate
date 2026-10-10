@@ -67,7 +67,7 @@ fn quote(text: &str) -> String {
 }
 
 /// `YYYY-MM-DD HH:MM` in UTC+7 (the team works in Vietnam; the file must read the same on every PC).
-fn date(ms: i64) -> String {
+pub fn date(ms: i64) -> String {
     let secs = ms.div_euclid(1000) + 7 * 3600;
     let days = secs.div_euclid(86_400);
     let rem = secs.rem_euclid(86_400);

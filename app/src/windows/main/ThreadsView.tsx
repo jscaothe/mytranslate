@@ -5,7 +5,7 @@ import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { isTauri } from '../../lib/claude'
-import { exportThread, loadMessages, mergeThreads, renameThread, setArchived, setPinned, summarizeThread } from '../../lib/history'
+import { exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
 import { useStore } from '../../store'
 import type { Conversation, Thread, ThreadMessage } from '../../types'
 
@@ -17,6 +17,17 @@ export function ThreadsView() {
   const [showArchived, setShowArchived] = useState(false)
 
   const q = query.trim().toLowerCase()
+  // The real app searches every message in the history (messages are not loaded up front).
+  const [found, setFound] = useState<{ q: string; ids: Set<string> } | null>(null)
+  useEffect(() => {
+    if (!isTauri || !q) return
+    let alive = true
+    const t = window.setTimeout(() => void searchThreads(q).then((ids) => alive && setFound({ q, ids })), 150)
+    return () => {
+      alive = false
+      window.clearTimeout(t)
+    }
+  }, [q, threads])
   const archivedCount = threads.filter((t) => t.archived).length
   const visible = useMemo(
     () =>
@@ -24,11 +35,13 @@ export function ThreadsView() {
         (t) =>
           Boolean(t.archived) === showArchived &&
           (!q ||
-            t.title.toLowerCase().includes(q) ||
-            t.summary.toLowerCase().includes(q) ||
-            t.messages.some((m) => m.ja.toLowerCase().includes(q) || m.vi.toLowerCase().includes(q))),
+            (isTauri
+              ? found?.q === q && found.ids.has(t.id)
+              : t.title.toLowerCase().includes(q) ||
+                t.summary.toLowerCase().includes(q) ||
+                t.messages.some((m) => m.ja.toLowerCase().includes(q) || m.vi.toLowerCase().includes(q)))),
       ),
-    [threads, q, showArchived],
+    [threads, q, showArchived, found],
   )
 
   const groups = conversations

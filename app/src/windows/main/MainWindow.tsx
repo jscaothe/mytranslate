@@ -1,6 +1,8 @@
 import { BookOpen, Languages, MessagesSquare, Settings, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AppMark, WindowFrame } from '../../components/ui'
+import { UpdateBanner } from '../../components/UpdatePanel'
+import { useUpdates } from '../../lib/updates'
 import { cx } from '../../components/styles'
 import { useStore, type MainTab } from '../../store'
 import { ContactsView } from './ContactsView'
@@ -42,7 +44,11 @@ export function MainWindow({ chromeless = false }: { chromeless?: boolean }) {
 
 function MainContent() {
   const { mainTab, setMainTab } = useStore()
+  // One update state for the banner and Settings, so progress shows in both.
+  const updates = useUpdates()
   return (
+    <div className="flex min-h-0 flex-1 flex-col">
+    {mainTab !== 'settings' && <UpdateBanner status={updates.status} install={updates.install} onInstall={() => void updates.installNow()} />}
     <div className="flex min-h-0 flex-1">
       <nav className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line py-2" aria-label="Điều hướng">
         {nav.map((n) => (
@@ -59,7 +65,8 @@ function MainContent() {
       {mainTab === 'threads' && <ThreadsView />}
       {mainTab === 'glossary' && <GlossaryView />}
       {mainTab === 'contacts' && <ContactsView />}
-      {mainTab === 'settings' && <SettingsView />}
+      {mainTab === 'settings' && <SettingsView updates={updates} />}
+    </div>
     </div>
   )
 }

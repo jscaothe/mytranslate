@@ -54,6 +54,9 @@ function QuickbarShell() {
   // Any pixel the toolbar does not cover must match it, never the prototype's desktop colour.
   useEffect(() => {
     document.body.style.background = 'var(--bg-window)'
+    // Never scrollbars in a window sized to its content.
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
   }, [])
   return <QuickbarWindow />
 }
@@ -285,7 +288,7 @@ function Taskbar() {
               <div className="my-1 h-px bg-line" />
               {item('Cài đặt', () => openMain('settings'))}
               {item('Chạy lại onboarding', () => setScreen('onboarding'))}
-              {item('Kiểm tra cập nhật', () => showToast('Bạn đang dùng bản mới nhất (0.1.0)'))}
+              {item('Kiểm tra cập nhật', () => openMain('settings'))}
               {item('Thoát', () => showToast('Prototype: thoát app sẽ tắt toàn bộ phím tắt'))}
             </div>
           )}

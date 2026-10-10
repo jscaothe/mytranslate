@@ -29,6 +29,16 @@ const INITIAL_HEIGHT: f64 = 300.0;
 /// Move/resize events that arrive this soon after the app itself moved the window are not the user's doing.
 const PROGRAMMATIC_GRACE: Duration = Duration::from_millis(500);
 
+/// Text the user selected with the mouse, in physical pixels: where the pointer was released, and the
+/// middle of the first and last selected line. The popup is placed around it instead of around the pointer
+/// (which is on the quick toolbar by then).
+#[derive(Debug, Clone, Copy)]
+pub struct Span {
+    pub x: f64,
+    pub top: f64,
+    pub bottom: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     JaVi,
@@ -187,6 +197,10 @@ struct Inner {
     placed: Option<Placed>,
     target_hwnd: isize,
     programmatic_until: Instant,
+    /// The user started dragging the title bar or an edge (told by the page). Only then do move and resize
+    /// events change the remembered place and size: Windows also sends them on its own, for example while
+    /// the popup grows with the translation, and those must not pin the popup somewhere.
+    user_change: bool,
     next_id: u64,
 }
 
@@ -198,6 +212,7 @@ impl Default for PopupState {
                 placed: None,
                 target_hwnd: 0,
                 programmatic_until: Instant::now(),
+                user_change: false,
                 next_id: 1,
             }),
         }
@@ -216,12 +231,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .resizable(true)
         .visible(false)
         .build()?;
+    crate::quickbar::round_corners(&window);
 
     let handle = app.clone();
     window.on_window_event(move |event| {
         let state = handle.state::<PopupState>();
         let mut inner = state.inner.lock().unwrap();
-        if Instant::now() < inner.programmatic_until {
+        if !inner.user_change || Instant::now() < inner.programmatic_until {
             return;
         }
         let Some(window) = handle.get_webview_window(LABEL) else {
@@ -256,13 +272,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn on_hotkey(app: &AppHandle, action: Action) {
     // Right now, while Alt is still held: keep the app in front from opening its menu bar on Alt release.
     capture::mask_menu_key();
-    run(app, action, None, false);
+    run(app, action, None, false, None);
 }
 
 /// Reads the selection, places the popup and tells its page what to do. `target` is the chat window when the
 /// quick toolbar already knows it (the user selected with the mouse); `auto_copy` copies the result as soon as
 /// it is ready.
-pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: bool) {
+pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: bool, span: Option<Span>) {
     let app = app.clone();
     // Copying blocks for up to ~1 s (waiting for keys to be released, for the clipboard); keep it off the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
@@ -346,13 +362,13 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             auto_copy,
             keigo,
         };
-        if let Err(e) = show(&app, payload) {
+        if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");
         }
     });
 }
 
-fn show(app: &AppHandle, payload: OpenPayload) -> tauri::Result<()> {
+fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Result<()> {
     let Some(window) = app.get_webview_window(LABEL) else {
         return Ok(());
     };
@@ -365,7 +381,10 @@ fn show(app: &AppHandle, payload: OpenPayload) -> tauri::Result<()> {
             let scale = window.scale_factor()?;
             PhysicalPosition::new(lx * scale, ly * scale)
         }
-        None => app.cursor_position()?,
+        None => match span {
+            Some(s) => PhysicalPosition::new(s.x, s.bottom),
+            None => app.cursor_position()?,
+        },
     };
     let monitor = app.monitor_from_point(point.x, point.y)?.or(window.current_monitor()?);
     let Some(monitor) = monitor else {
@@ -392,9 +411,13 @@ fn show(app: &AppHandle, payload: OpenPayload) -> tauri::Result<()> {
         .height
         .unwrap_or_else(|| placement::expected_height(&payload.text, width, with_back).min(AUTO_MAX_HEIGHT));
 
-    let (x, anchor) = match geometry.position {
-        Some(_) => (point.x, Anchor::Fixed { top: point.y }),
-        None => (
+    let (x, anchor) = match (geometry.position, span) {
+        (Some(_), _) => (point.x, Anchor::Fixed { top: point.y }),
+        (None, Some(s)) => (
+            s.x - 24.0 * scale,
+            placement::anchor_for_span(work, scale, s.top, s.bottom, expected * scale),
+        ),
+        (None, None) => (
             point.x - 24.0 * scale,
             placement::anchor_for_cursor(work, scale, point.y, expected * scale),
         ),
@@ -411,6 +434,7 @@ fn show(app: &AppHandle, payload: OpenPayload) -> tauri::Result<()> {
         let mut inner = state.inner.lock().unwrap();
         inner.placed = Some(placed);
         inner.programmatic_until = Instant::now() + PROGRAMMATIC_GRACE;
+        inner.user_change = false;
     }
     apply_frame(&window, f)?;
     window.emit_to(LABEL, "popup:open", &payload)?;
@@ -515,6 +539,12 @@ pub fn popup_reset_geometry(app: AppHandle) -> Result<(), String> {
     let mut inner = state.inner.lock().unwrap();
     inner.geometry = Geometry::default();
     Ok(())
+}
+
+/// The page: the user pressed on the title bar or an edge and a move or resize may follow.
+#[tauri::command]
+pub fn popup_user_change(app: AppHandle) {
+    app.state::<PopupState>().inner.lock().unwrap().user_change = true;
 }
 
 #[derive(Serialize)]

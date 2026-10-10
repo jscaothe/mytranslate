@@ -111,11 +111,13 @@ export function PopupWindow() {
       onFit: (height) => void invoke('popup_fit', { height }),
       startDrag: () => {
         interactingUntil.current = Date.now() + INTERACTION_SETTLE_MS
-        void getCurrentWindow().startDragging()
+        // Only a drag the user starts may change the remembered place and size.
+        void invoke('popup_user_change').then(() => getCurrentWindow().startDragging())
       },
       startResize: (direction) => {
         interactingUntil.current = Date.now() + INTERACTION_SETTLE_MS
-        void getCurrentWindow().startResizeDragging(direction)
+        // Only a drag the user starts may change the remembered place and size.
+        void invoke('popup_user_change').then(() => getCurrentWindow().startResizeDragging(direction))
       },
     }),
     [customized, refreshGeometry],

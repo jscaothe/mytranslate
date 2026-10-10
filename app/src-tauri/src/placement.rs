@@ -47,15 +47,21 @@ pub fn frame(work: Rect, scale: f64, x: f64, anchor: Anchor, width: f64, height:
 
 /// Puts the popup below the cursor when the expected height fits there, otherwise on whichever side has more room.
 pub fn anchor_for_cursor(work: Rect, scale: f64, cursor_y: f64, expected_height: f64) -> Anchor {
+    anchor_for_span(work, scale, cursor_y, cursor_y, expected_height)
+}
+
+/// Like `anchor_for_cursor` for a selection spanning lines from `top_y` to `bottom_y` (the middle of its first
+/// and last line): below the last line or above the first, never over the selected text.
+pub fn anchor_for_span(work: Rect, scale: f64, top_y: f64, bottom_y: f64, expected_height: f64) -> Anchor {
     let m = MARGIN * scale;
     let gap = CURSOR_GAP * scale;
-    let below_top = cursor_y + gap;
+    let below_top = bottom_y + gap;
     let space_below = work.y + work.h - m - below_top;
-    let space_above = cursor_y - gap - (work.y + m);
+    let space_above = top_y - gap - (work.y + m);
     if expected_height <= space_below || space_below >= space_above {
         Anchor::Below { top: below_top }
     } else {
-        Anchor::Above { bottom: cursor_y - gap }
+        Anchor::Above { bottom: top_y - gap }
     }
 }
 
@@ -152,6 +158,19 @@ mod tests {
         assert_eq!(
             anchor_for_cursor(SCREEN, 1.0, 200.0, 300.0),
             Anchor::Below { top: 216.0 }
+        );
+    }
+
+    #[test]
+    fn a_selection_is_never_covered() {
+        // Lines 400 to 480 selected: below the last line when it fits, above the first when it does not.
+        assert_eq!(
+            anchor_for_span(SCREEN, 1.0, 400.0, 480.0, 300.0),
+            Anchor::Below { top: 496.0 }
+        );
+        assert_eq!(
+            anchor_for_span(SCREEN, 1.0, 800.0, 880.0, 300.0),
+            Anchor::Above { bottom: 784.0 }
         );
     }
 

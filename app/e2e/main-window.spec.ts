@@ -99,3 +99,30 @@ test('settings: templates can be added and restored to the defaults', async ({ p
   await page.getByRole('button', { name: 'Khôi phục mẫu mặc định' }).click()
   await expect(page.getByText('引き続きよろしくお願いいたします。')).toHaveCount(0)
 })
+
+test('settings: history retention and the two-step wipe', async ({ page }) => {
+  await openTab(page, 'Cài đặt')
+  const keep = page.getByRole('radiogroup', { name: 'Giữ lịch sử' })
+  await keep.getByRole('radio', { name: '6 tháng' }).click()
+  await expect(keep.getByRole('radio', { name: '6 tháng' })).toHaveAttribute('aria-checked', 'true')
+
+  await page.getByRole('button', { name: 'Xóa dữ liệu...' }).click()
+  await page.getByRole('button', { name: 'Hủy' }).click()
+  await expect(page.getByRole('button', { name: 'Xác nhận xóa' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Xóa dữ liệu...' }).click()
+  await page.getByRole('button', { name: 'Xác nhận xóa' }).click()
+  await expect(page.getByRole('status').filter({ hasText: 'đã xóa dữ liệu' })).toBeVisible()
+})
+
+test('settings: checking finds a new version and installing shows progress', async ({ page }) => {
+  await openTab(page, 'Cài đặt')
+  await page.getByRole('button', { name: 'Kiểm tra ngay' }).click()
+  await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
+  await page.getByRole('button', { name: 'Cập nhật và khởi động lại' }).click()
+  await expect(page.getByText(/Đang tải/)).toBeVisible()
+  await expect(page.getByText('Đang cài, app sẽ tự mở lại…')).toBeVisible()
+
+  // Other tabs show the waiting update as a banner, which can be put off.
+  await page.getByRole('button', { name: 'Threads', exact: true }).click()
+  await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
+})

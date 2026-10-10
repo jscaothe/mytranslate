@@ -46,8 +46,9 @@ export function QuickActionBar({
       onMouseEnter={() => onHoverChange?.(true)}
       onMouseLeave={() => onHoverChange?.(false)}
       className={cx(
-        'flex h-9 w-max items-center gap-0.5 bg-window px-1',
-        !bare && 'anim-popup rounded-lg border border-line shadow-popup',
+        // Same height, padding and icon size in both display modes; only the labels come and go.
+        'flex w-max items-center gap-0.5 bg-window p-1',
+        !bare && 'anim-popup rounded-[10px] border border-line shadow-popup',
         className,
       )}
     >
@@ -58,9 +59,10 @@ export function QuickActionBar({
           <BarButton
             key={id}
             onClick={() => onAction(id)}
-            icon={<Icon size={display === 'iconOnly' ? 15 : 14} />}
+            icon={<Icon size={16} strokeWidth={1.9} />}
             primary={meta.primary}
             iconOnly={display === 'iconOnly'}
+            nativeTooltip={bare}
             title={meta.title}
           >
             {meta.label(japanese)}
@@ -68,14 +70,18 @@ export function QuickActionBar({
         )
       })}
       {onDismiss && (
-        <button
-          type="button"
-          aria-label="Ẩn thanh thao tác"
-          onClick={onDismiss}
-          className="ml-0.5 flex size-7 items-center justify-center rounded-md text-ink-3 hover:bg-hover hover:text-ink"
-        >
-          <X size={13} />
-        </button>
+        <>
+          <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-line" />
+          <button
+            type="button"
+            aria-label="Ẩn thanh thao tác"
+            title={bare ? 'Ẩn (Esc)' : undefined}
+            onClick={onDismiss}
+            className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+          >
+            <X size={14} />
+          </button>
+        </>
       )}
     </div>
   )
@@ -86,6 +92,7 @@ function BarButton({
   icon,
   primary,
   iconOnly,
+  nativeTooltip,
   title,
   children,
 }: {
@@ -93,24 +100,27 @@ function BarButton({
   icon: ReactNode
   primary?: boolean
   iconOnly?: boolean
+  /** In its own small window a drawn tooltip would be cut off; let Windows draw it. */
+  nativeTooltip?: boolean
   title?: string
   children: string
 }) {
+  const tooltip = iconOnly ? (title ? `${children} · ${title}` : children) : title
   return (
     <button
       type="button"
-      title={iconOnly ? undefined : title}
+      title={nativeTooltip || !iconOnly ? tooltip : undefined}
       aria-label={iconOnly ? children : undefined}
       onClick={onClick}
       className={cx(
-        'group relative flex h-7 items-center rounded-md text-[12.5px] font-medium whitespace-nowrap',
-        iconOnly ? 'w-7 justify-center' : 'gap-1.5 px-2',
-        primary ? 'text-accent hover:bg-accent-soft' : 'text-ink hover:bg-hover',
+        'group relative flex h-8 shrink-0 items-center justify-center rounded-md text-[13px] font-medium whitespace-nowrap transition-colors',
+        iconOnly ? 'w-8' : 'gap-1.5 pr-3 pl-2.5',
+        primary ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'text-ink-2 hover:bg-hover hover:text-ink',
       )}
     >
       {icon}
       {!iconOnly && children}
-      {iconOnly && (
+      {iconOnly && !nativeTooltip && (
         // Native tooltips take about a second; icon-only buttons need their name faster than that.
         <span
           role="tooltip"

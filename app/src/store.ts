@@ -27,6 +27,10 @@ export interface Settings {
   glossaryPath: string
   /** Fixed sentences that can be added before or after a Japanese result. */
   templates: Template[]
+  /** Messages older than this many months are deleted; 0 keeps everything. */
+  retentionMonths: number
+  /** Look for a new version after start-up and every few hours. */
+  autoUpdateCheck: boolean
   autostart: boolean
   blockedApps: string[]
   hotkeysPaused: boolean

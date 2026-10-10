@@ -1,9 +1,11 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
-import { AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react'
+import { AlertCircle, ArrowUpCircle, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { ProfilePromptEditor } from '../../components/ProfilePromptEditor'
 import { QuickActionBar } from '../../components/QuickActionBar'
+import { InstallProgress, UpToDate } from '../../components/UpdatePanel'
+import type { useUpdates } from '../../lib/updates'
 import { Button, Hotkey, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { keigoLabels } from '../../data/mock'
@@ -22,13 +24,34 @@ const hotkeyRows: { key: keyof HotkeyMap; label: string }[] = [
   { key: 'main', label: 'Mở cửa sổ chính' },
 ]
 
-export function SettingsView() {
+export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdates> }) {
   const { settings, updateSettings, showToast, setScreen } = useStore()
   const [recording, setRecording] = useState<keyof HotkeyMap | null>(null)
-  const [confirmWipe, setConfirmWipe] = useState(false)
+  const [confirm, setConfirm] = useState<'restore' | 'wipe' | null>(null)
   const [newBlocked, setNewBlocked] = useState('')
   const qa = settings.quickActions
   const setQa = (patch: Partial<typeof qa>) => updateSettings({ quickActions: { ...qa, ...patch } })
+  const failed = (what: string) => (e: unknown) => showToast(`${what}: ${String(e)}`)
+  const backup = () => {
+    if (!isTauri) return showToast('Mô phỏng: lưu file mytranslate-YYYY-MM-DD.db')
+    invoke<string | null>('data_backup')
+      .then((path) => path && showToast(`Đã sao lưu vào ${path}`))
+      .catch(failed('Không sao lưu được'))
+  }
+  const restore = () => {
+    setConfirm(null)
+    if (!isTauri) return showToast('Mô phỏng: đã khôi phục từ bản sao lưu')
+    invoke<boolean>('data_restore')
+      .then((done) => done && showToast('Đã khôi phục dữ liệu'))
+      .catch(failed('Không khôi phục được'))
+  }
+  const wipe = () => {
+    setConfirm(null)
+    if (!isTauri) return showToast('Mô phỏng: đã xóa dữ liệu (prototype không xóa thật)')
+    invoke('data_wipe')
+      .then(() => showToast('Đã xóa toàn bộ dữ liệu'))
+      .catch(failed('Không xóa được'))
+  }
   const previewAction = () => showToast('Đây là bản xem trước, hãy thử ở màn hình Mô phỏng sử dụng')
 
   return (
@@ -301,6 +324,8 @@ export function SettingsView() {
           </Row>
         </Group>
 
+        <UpdatesGroup updates={updates} auto={settings.autoUpdateCheck} onAuto={(v) => updateSettings({ autoUpdateCheck: v })} />
+
         <Group
           title="Dữ liệu"
           hint={
@@ -312,40 +337,97 @@ export function SettingsView() {
           <Row label="Hướng dẫn ban đầu" hint="Kiểm tra lại kết nối Claude Code, hồ sơ và thử dịch.">
             <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>Xem lại</Button>
           </Row>
-          {/* Backup and wipe are not implemented in the real app yet; the prototype shows the intended design. */}
-          {!isTauri && (
-          <>
-          <Row label="Sao lưu">
-            <div className="flex gap-2">
-              <Button onClick={() => showToast('Mô phỏng: xuất file data.db')}>Xuất dữ liệu</Button>
-              <Button onClick={() => showToast('Mô phỏng: nhập file data.db')}>Nhập dữ liệu</Button>
-            </div>
+          <Row label="Giữ lịch sử" hint="Tin cũ hơn thời hạn này được tự xóa, thread không còn tin nào cũng bị xóa.">
+            <Segmented
+              label="Giữ lịch sử"
+              value={String(settings.retentionMonths)}
+              onChange={(v) => updateSettings({ retentionMonths: Number(v) })}
+              options={[
+                { value: '0', label: 'Luôn giữ' },
+                { value: '3', label: '3 tháng' },
+                { value: '6', label: '6 tháng' },
+                { value: '12', label: '1 năm' },
+              ]}
+            />
           </Row>
-          <Row label="Xóa toàn bộ dữ liệu" hint="Xóa lịch sử, thread và glossary cá nhân. Không thể hoàn tác.">
-            {confirmWipe ? (
+          <Row label="Sao lưu" hint="Một file .db chứa toàn bộ lịch sử, thread, người liên hệ và glossary cá nhân.">
+            <Button onClick={backup}>Sao lưu...</Button>
+          </Row>
+          <Row label="Khôi phục" hint="Thay toàn bộ dữ liệu hiện tại bằng một bản sao lưu.">
+            {confirm === 'restore' ? (
               <div className="flex gap-2">
-                <Button onClick={() => setConfirmWipe(false)}>Hủy</Button>
-                <Button
-                  variant="danger"
-                  onClick={() => {
-                    setConfirmWipe(false)
-                    showToast('Mô phỏng: đã xóa dữ liệu (prototype không xóa thật)')
-                  }}
-                >
+                <Button onClick={() => setConfirm(null)}>Hủy</Button>
+                <Button variant="primary" onClick={restore}>
+                  Chọn file và thay dữ liệu
+                </Button>
+              </div>
+            ) : (
+              <Button onClick={() => setConfirm('restore')}>Khôi phục...</Button>
+            )}
+          </Row>
+          <Row label="Xóa toàn bộ dữ liệu" hint="Xóa lịch sử, thread, người liên hệ và glossary cá nhân. Cài đặt được giữ lại. Không thể hoàn tác.">
+            {confirm === 'wipe' ? (
+              <div className="flex gap-2">
+                <Button onClick={() => setConfirm(null)}>Hủy</Button>
+                <Button variant="danger" onClick={wipe}>
                   Xác nhận xóa
                 </Button>
               </div>
             ) : (
-              <Button className="text-bad" onClick={() => setConfirmWipe(true)}>
+              <Button className="text-bad" onClick={() => setConfirm('wipe')}>
                 Xóa dữ liệu...
               </Button>
             )}
           </Row>
-          </>
-          )}
         </Group>
       </div>
     </div>
+  )
+}
+
+function UpdatesGroup({ updates, auto, onAuto }: { updates: ReturnType<typeof useUpdates>; auto: boolean; onAuto: (v: boolean) => void }) {
+  const { status, checking, check, install, installNow } = updates
+  const busy = install.phase === 'downloading' || install.phase === 'installing'
+  return (
+    <Group title="Cập nhật" hint={status ? `Phiên bản đang dùng: ${status.current}` : undefined}>
+      {status && !status.configured ? (
+        <Row label="Kiểm tra cập nhật" hint="Bản cài này không có nguồn cập nhật. Hãy cài bản do team phát hành.">
+          <span className="text-[13px] text-ink-3">Không có</span>
+        </Row>
+      ) : (
+        <>
+          <Row label="Tự kiểm tra cập nhật" hint="Sau khi mở app và mỗi 6 giờ. Chỉ cài khi bạn bấm cập nhật.">
+            <Switch label="Tự kiểm tra cập nhật" checked={auto} onChange={onAuto} />
+          </Row>
+          {status?.available ? (
+            <div className="flex flex-col gap-2.5 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <ArrowUpCircle size={18} className="shrink-0 text-accent" />
+                <div className="min-w-0 flex-1">
+                  <div className="text-[13.5px] font-semibold text-ink">Có phiên bản mới {status.available.version}</div>
+                  {status.available.notes && <p className="mt-0.5 text-[12.5px] whitespace-pre-wrap text-ink-2">{status.available.notes}</p>}
+                </div>
+                <Button variant="primary" disabled={busy} onClick={() => void installNow()}>
+                  {busy && <Loader2 size={14} className="animate-spin" />}
+                  Cập nhật và khởi động lại
+                </Button>
+              </div>
+              <InstallProgress install={install} />
+            </div>
+          ) : (
+            <Row label="Trạng thái" hint={status?.error ? `Lần kiểm tra trước bị lỗi: ${status.error}` : undefined}>
+              <span className="flex items-center gap-3">
+                {status?.checkedAt && !status.error && <UpToDate status={status} />}
+                <Button disabled={checking} onClick={() => void check()}>
+                  {checking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  {checking ? 'Đang kiểm tra…' : 'Kiểm tra ngay'}
+                </Button>
+              </span>
+            </Row>
+          )}
+        </>
+      )}
+    </Group>
   )
 }
 

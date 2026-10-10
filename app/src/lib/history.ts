@@ -84,6 +84,16 @@ export async function renameThread(threadId: string, title: string): Promise<voi
   await invoke('history_rename_thread', { threadId: Number(threadId), title })
 }
 
+/** Ids of threads whose title, summary or messages contain the query. */
+export async function searchThreads(query: string): Promise<Set<string>> {
+  const ids = await invoke<number[]>('history_search', { query })
+  return new Set(ids.map(String))
+}
+
+export async function setFeedback(messageId: number, bad: boolean): Promise<void> {
+  await invoke('history_feedback', { messageId, bad })
+}
+
 export async function setPinned(threadId: string, pinned: boolean): Promise<void> {
   await invoke('history_set_pinned', { threadId: Number(threadId), pinned })
 }

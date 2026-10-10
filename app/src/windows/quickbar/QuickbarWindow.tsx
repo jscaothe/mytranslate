@@ -26,7 +26,11 @@ export function QuickbarWindow() {
   useEffect(() => {
     const el = barRef.current?.firstElementChild as HTMLElement | null
     if (!el) return
-    const fit = () => void invoke('quickbar_fit', { width: el.offsetWidth, height: el.offsetHeight })
+    // Rounded up: a window even a fraction of a pixel too small shows scrollbars.
+    const fit = () => {
+      const r = el.getBoundingClientRect()
+      void invoke('quickbar_fit', { width: Math.ceil(r.width), height: Math.ceil(r.height) })
+    }
     const ro = new ResizeObserver(fit)
     ro.observe(el)
     fit()
@@ -40,7 +44,7 @@ export function QuickbarWindow() {
   }, [shownAt, hover])
 
   return (
-    <div ref={barRef} className="inline-block">
+    <div ref={barRef} className="flex w-max">
       <QuickActionBar
         bare
         japanese={null}

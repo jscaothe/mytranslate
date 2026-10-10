@@ -21,9 +21,10 @@ import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { conversations, keigoLabels } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
-import { relativeTime, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
+import { relativeTime, setFeedback, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
 import { useStore, type Template } from '../../store'
+import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
 import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
 import { ThreadPicker } from './ThreadPicker'
@@ -68,7 +69,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   /** User edits of the finished result, tied to the stream run they belong to. */
   const [edit, setEdit] = useState<{ key: string | null; text: string } | null>(null)
   const [longConfirmed, setLongConfirmed] = useState(request.source.length <= LONG_TEXT_LIMIT)
-  const [feedback, setFeedback] = useState(false)
+  const [feedback, setFeedbackSent] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -580,6 +581,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
           </div>
         )}
         {resultReady && <QuotaLine rate={live.rateLimit} />}
+        {resultReady && windowed && <UpdateLine />}
         </>
         )}
         </div>
@@ -622,7 +624,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             suggesting={replies.state === 'loading'}
             onCopy={() => void copy(finalText, 'Đã sao chép bản dịch')}
             onFeedback={() => {
-              setFeedback(true)
+              setFeedbackSent(true)
+              if (windowed && saved) void setFeedback(saved.messageId, true)
               showToast('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt')
             }}
           />
@@ -890,6 +893,20 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
 }
 
 /** Shown only when the plan is close to its limit, so the user is not surprised when translations stop. */
+/** The popup is what people see every day: mention a waiting update, and open the main window to install it. */
+function UpdateLine() {
+  const { status } = useUpdates()
+  if (!status?.available) return null
+  return (
+    <div className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
+      <span className="flex-1">Có phiên bản mới {status.available.version}</span>
+      <button type="button" onClick={() => void invoke('show_main_window')} className="font-medium text-accent hover:underline">
+        Cập nhật
+      </button>
+    </div>
+  )
+}
+
 function QuotaLine({ rate }: { rate: RateLimit | null }) {
   if (!rate) return null
   const used = rate.utilization ?? 0

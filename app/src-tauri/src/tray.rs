@@ -12,9 +12,17 @@ const TRAY_ID: &str = "main";
 const MENU_OPEN: &str = "open";
 const MENU_PAUSE: &str = "pause";
 const MENU_QUIT: &str = "quit";
+const MENU_UPDATE: &str = "update";
 
 /// The "pause hotkeys" item, kept so its tick can follow changes made on the Settings page.
 struct PauseItem(CheckMenuItem<Wry>);
+
+/// The menu and its "update to x.y.z" item, which is only in the menu while an update is available.
+struct UpdateItem {
+    menu: Menu<Wry>,
+    item: MenuItem<Wry>,
+    shown: std::sync::Mutex<bool>,
+}
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let store = app.state::<SettingsStore>();
@@ -36,6 +44,11 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let quit = MenuItem::with_id(app, MENU_QUIT, "Thoát", true, None::<&str>)?;
     app.manage(PauseItem(pause.clone()));
     let menu = Menu::with_items(app, &[&open, &pause, &PredefinedMenuItem::separator(app)?, &quit])?;
+    app.manage(UpdateItem {
+        menu: menu.clone(),
+        item: MenuItem::with_id(app, MENU_UPDATE, "", true, None::<&str>)?,
+        shown: std::sync::Mutex::new(false),
+    });
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .tooltip("MyTranslate")
@@ -45,6 +58,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             MENU_OPEN => show_main(app),
             MENU_PAUSE => toggle_pause(app),
             MENU_QUIT => app.exit(0),
+            MENU_UPDATE => install_update(app),
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -77,6 +91,37 @@ pub fn sync(app: &AppHandle) {
             "MyTranslate"
         }));
     }
+}
+
+/// Shows "Cập nhật lên x.y.z" at the top of the menu while an update is available.
+pub fn set_update(app: &AppHandle, version: Option<&str>) {
+    let Some(u) = app.try_state::<UpdateItem>() else {
+        return;
+    };
+    let mut shown = u.shown.lock().unwrap();
+    match version {
+        Some(v) => {
+            let _ = u.item.set_text(format!("Cập nhật lên phiên bản {v}"));
+            if !*shown && u.menu.insert(&u.item, 0).is_ok() {
+                *shown = true;
+            }
+        }
+        None if *shown && u.menu.remove(&u.item).is_ok() => *shown = false,
+        None => {}
+    }
+}
+
+/// From the tray: no page to show progress, but the installer shows its own.
+fn install_update(app: &AppHandle) {
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let channel = tauri::ipc::Channel::new(|_| Ok(()));
+        if let Err(e) = crate::updates::update_install(app.clone(), channel).await {
+            log::warn!("update from the tray failed: {e}");
+            show_main(&app);
+            let _ = app.emit("update:failed", e);
+        }
+    });
 }
 
 pub fn show_main(app: &AppHandle) {

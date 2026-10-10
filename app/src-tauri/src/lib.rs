@@ -13,6 +13,7 @@ mod settings;
 mod team_glossary;
 mod threads;
 mod tray;
+mod updates;
 
 use std::sync::{Arc, Mutex};
 
@@ -40,6 +41,31 @@ const BACKGROUND_ARG: &str = "--background";
 const CONTEXT_MESSAGES: usize = 6;
 /// Messages a summary covers: the latest ones, enough for a long topic.
 const SUMMARY_MESSAGES: usize = 40;
+/// How often old messages are cleaned up while the app runs (it usually runs for days, in the tray).
+const RETENTION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+const DAY_MS: i64 = 24 * 60 * 60 * 1000;
+
+/// Deletes messages older than the "keep history for" setting (0 or missing keeps everything).
+fn apply_retention(app: &AppHandle) {
+    let months = app
+        .state::<SettingsStore>()
+        .get()
+        .get("retentionMonths")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
+    if months <= 0 {
+        return;
+    }
+    let before = history::now_ms() - months * 30 * DAY_MS;
+    match app.state::<History>().delete_older_than(before) {
+        Ok(0) => {}
+        Ok(n) => {
+            log::info!("deleted {n} messages older than {months} months");
+            let _ = app.emit("history:changed", ());
+        }
+        Err(e) => log::warn!("could not delete old messages: {e}"),
+    }
+}
 
 /// The thread's title and its last `limit` messages, Japanese side only, as prompt context.
 fn thread_context(history: &History, thread_id: i64, limit: usize) -> Option<(String, Vec<ThreadMessage>)> {
@@ -301,6 +327,70 @@ fn history_move(
         thread_id,
         thread_title,
     })
+}
+
+#[tauri::command]
+fn history_search(history: State<'_, History>, query: String) -> Result<Vec<i64>, String> {
+    history.search_threads(&query).map_err(|e| e.to_string())
+}
+
+/// "Dịch chưa tốt" in the popup, kept with the message to improve the prompt later.
+#[tauri::command]
+fn history_feedback(history: State<'_, History>, message_id: i64, bad: bool) -> Result<(), String> {
+    history.set_feedback(message_id, bad).map_err(|e| e.to_string())
+}
+
+/// Asks where to save, then writes a copy of the whole history. `None` when cancelled.
+#[tauri::command]
+async fn data_backup(app: AppHandle) -> Result<Option<String>, String> {
+    let name = format!("mytranslate-{}.db", &export::date(history::now_ms())[..10]);
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Sao lưu dữ liệu MyTranslate")
+        .set_file_name(name)
+        .add_filter("Bản sao lưu MyTranslate", &["db"]);
+    if let Some(main) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&main);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(None);
+    };
+    app.state::<History>().backup_to(&path).map_err(|e| e.to_string())?;
+    Ok(Some(path.display().to_string()))
+}
+
+/// Asks for a backup file and replaces the whole history with it. `false` when cancelled.
+#[tauri::command]
+async fn data_restore(app: AppHandle) -> Result<bool, String> {
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("Khôi phục dữ liệu MyTranslate")
+        .add_filter("Bản sao lưu MyTranslate", &["db"]);
+    if let Some(main) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&main);
+    }
+    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_pick_file())
+        .await
+        .map_err(|e| e.to_string())?;
+    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
+        return Ok(false);
+    };
+    app.state::<History>().restore_from(&path)?;
+    let _ = app.emit("history:changed", ());
+    Ok(true)
+}
+
+/// Deletes all history and personal glossary terms; the settings stay.
+#[tauri::command]
+fn data_wipe(app: AppHandle) -> Result<(), String> {
+    app.state::<History>().wipe().map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
 }
 
 #[tauri::command]
@@ -605,6 +695,9 @@ async fn settings_set(app: AppHandle, value: Value) -> Result<SettingsSaved, Str
     if changed("autostart") {
         apply_autostart(&app, &value);
     }
+    if changed("retentionMonths") {
+        apply_retention(&app);
+    }
     let _ = app.emit("settings:changed", &value);
     Ok(SettingsSaved { failed_hotkeys })
 }
@@ -646,6 +739,8 @@ pub fn run() {
         .manage(HotkeyState::default())
         .manage(quickbar::QuickbarState::default())
         .manage(TeamGlossaryCache::default())
+        .manage(updates::UpdateState::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -666,6 +761,7 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
+                        .level_for("mytranslate_lib", log::LevelFilter::Debug)
                         .build(),
                 )?;
             }
@@ -679,6 +775,13 @@ pub fn run() {
             }
             app.manage(store);
             app.manage(History::open(&app.path().app_local_data_dir()?.join("history.db"))?);
+            let handle = app.handle().clone();
+            std::thread::spawn(move || {
+                loop {
+                    apply_retention(&handle);
+                    std::thread::sleep(RETENTION_INTERVAL);
+                }
+            });
 
             // An empty working folder: no CLAUDE.md or project settings can leak into translations.
             let workdir = app.path().app_local_data_dir()?.join("claude-workdir");
@@ -692,6 +795,7 @@ pub fn run() {
             selection_watch::start(app.handle());
             tray::create(app.handle())?;
             hotkeys::apply(app.handle());
+            updates::watch(app.handle());
 
             if let Some(main) = app.get_webview_window("main") {
                 // Closing the main window keeps the app running in the tray, where the hotkeys live.
@@ -726,6 +830,14 @@ pub fn run() {
             glossary_delete,
             glossary_team,
             history_set_pinned,
+            history_search,
+            history_feedback,
+            data_backup,
+            data_restore,
+            data_wipe,
+            updates::update_status,
+            updates::update_check,
+            updates::update_install,
             history_set_archived,
             history_merge,
             history_export,
@@ -738,6 +850,7 @@ pub fn run() {
             popup::popup_fit,
             popup::popup_reset_geometry,
             popup::popup_geometry,
+            popup::popup_user_change,
             quickbar::quickbar_fit,
             quickbar::quickbar_hide,
             quickbar::quickbar_action,

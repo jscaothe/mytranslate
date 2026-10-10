@@ -48,6 +48,9 @@ enum Event {
 }
 
 static EVENTS: OnceLock<Sender<Event>> = OnceLock::new();
+/// Test hook: with `MYTRANSLATE_TEST_INJECTED_MOUSE=1`, simulated mouse input counts as the user's, so an
+/// automated end-to-end test can select text in a real chat app. Off in normal use.
+static ACCEPT_INJECTED_MOUSE: OnceLock<bool> = OnceLock::new();
 
 /// Starts the hooks and the decision thread. Safe to call once at start-up.
 pub fn start(app: &AppHandle) {
@@ -55,6 +58,11 @@ pub fn start(app: &AppHandle) {
     if EVENTS.set(tx).is_err() {
         return;
     }
+    let accept = std::env::var("MYTRANSLATE_TEST_INJECTED_MOUSE").is_ok_and(|v| v == "1");
+    if accept {
+        log::warn!("test mode: simulated mouse input can show the quick toolbar");
+    }
+    let _ = ACCEPT_INJECTED_MOUSE.set(accept);
 
     std::thread::Builder::new()
         .name("selection-hooks".into())
@@ -64,6 +72,8 @@ pub fn start(app: &AppHandle) {
             let keys = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
             if mouse.is_err() || keys.is_err() {
                 log::warn!("selection hooks unavailable: {mouse:?} {keys:?}");
+            } else {
+                log::debug!("selection hooks installed");
             }
             // Low-level hooks are called through this thread's message loop.
             let mut msg = MSG::default();
@@ -104,9 +114,12 @@ pub fn start(app: &AppHandle) {
                         };
                         last_click = Some((x, y, Instant::now()));
                         let dragged = (x - dx).abs() >= MIN_DRAG || (y - dy).abs() >= MIN_DRAG;
+                        if dragged || clicks >= 2 {
+                            log::debug!("selection gesture: ibeam {ibeam}, dragged {dragged}, clicks {clicks}");
+                        }
                         if ibeam && (dragged || clicks >= 2) && !quickbar::contains(&app, x, y) {
                             std::thread::sleep(SETTLE);
-                            quickbar::offer(&app, x, y);
+                            quickbar::offer(&app, x, y, dy);
                         }
                     }
                     Event::Other { x, y, mouse } => {
@@ -139,7 +152,7 @@ unsafe extern "system" fn mouse_proc(code: i32, wparam: WPARAM, lparam: LPARAM) 
     {
         let data = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
         // Our own simulated input is not the user selecting text.
-        if data.flags & LLMHF_INJECTED == 0 {
+        if data.flags & LLMHF_INJECTED == 0 || ACCEPT_INJECTED_MOUSE.get() == Some(&true) {
             let POINT { x, y } = data.pt;
             let event = match wparam.0 as u32 {
                 WM_LBUTTONDOWN => Some(Event::LeftDown {

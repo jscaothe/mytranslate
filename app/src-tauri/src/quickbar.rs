@@ -7,13 +7,15 @@ use serde::Deserialize;
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
+use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GetWindowLongPtrW, SW_SHOWNOACTIVATE, SetWindowLongPtrW, ShowWindow, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW,
+    GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_CAPTION, WS_EX_NOACTIVATE,
+    WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
 };
 
 use crate::context::{self, Context};
-use crate::placement::{self, Rect};
+use crate::placement::{self, Anchor, Rect};
 use crate::popup;
 use crate::settings::SettingsStore;
 
@@ -35,6 +37,8 @@ struct Inner {
     size: Option<(f64, f64)>,
     /// The chat window the selection is in.
     target: Option<Context>,
+    /// Where the selected text is, for placing the popup.
+    span: Option<popup::Span>,
 }
 
 pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
@@ -49,18 +53,52 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .focused(false)
         .visible(false)
         .build()?;
-    // No-activate: clicking a button leaves the chat app in front, with its selection intact.
     if let Ok(hwnd) = window.hwnd() {
         unsafe {
+            // No-activate: clicking a button leaves the chat app in front, with its selection intact.
             let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
             SetWindowLongPtrW(
                 hwnd,
                 GWL_EXSTYLE,
                 ex | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize,
             );
+            // A plain popup like Windows' own menus: a borderless Tauri window keeps a hidden caption and
+            // sizing frame, and Windows will not let such a window be shorter than about 70 px.
+            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+            SetWindowLongPtrW(
+                hwnd,
+                GWL_STYLE,
+                (style & !((WS_CAPTION.0 | WS_THICKFRAME.0) as isize)) | WS_POPUP.0 as isize,
+            );
+            let _ = SetWindowPos(
+                hwnd,
+                None,
+                0,
+                0,
+                0,
+                0,
+                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+            );
         }
     }
+    round_corners(&window);
     Ok(window)
+}
+
+/// Windows 11 rounds the corners of a borderless window only when asked, like its own menus and flyouts.
+/// Earlier Windows versions ignore the request.
+pub fn round_corners(window: &WebviewWindow) {
+    if let Ok(hwnd) = window.hwnd() {
+        let pref = DWMWCP_ROUND;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_WINDOW_CORNER_PREFERENCE,
+                (&raw const pref).cast(),
+                std::mem::size_of_val(&pref) as u32,
+            );
+        }
+    }
 }
 
 pub fn contains(app: &AppHandle, x: i32, y: i32) -> bool {
@@ -81,8 +119,12 @@ pub fn hide(app: &AppHandle) {
     }
     inner.visible = false;
     drop(inner);
-    if let Some(w) = app.get_webview_window(LABEL) {
-        let _ = w.hide();
+    // Shown with ShowWindow (to avoid activation), so hidden the same way: Tauri does not know it is visible
+    // and would ignore its own hide().
+    if let Some(Ok(hwnd)) = app.get_webview_window(LABEL).map(|w| w.hwnd()) {
+        unsafe {
+            let _ = ShowWindow(hwnd, SW_HIDE);
+        }
     }
 }
 
@@ -115,8 +157,9 @@ fn allowed(store: &SettingsStore, exe: &str) -> bool {
         && (qa.app_scope == "all" || qa.apps.iter().any(|a| a.exe.eq_ignore_ascii_case(exe)))
 }
 
-/// A selection just ended at (x, y): show the toolbar there if the settings allow it in this app.
-pub fn offer(app: &AppHandle, x: i32, y: i32) {
+/// A selection that started at height `start_y` just ended at (x, y): show the toolbar there if the settings
+/// allow it in this app.
+pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32) {
     let ctx = context::foreground();
     let own = std::env::current_exe()
         .ok()
@@ -143,14 +186,19 @@ pub fn offer(app: &AppHandle, x: i32, y: i32) {
     let state = app.state::<QuickbarState>();
     let (w, h) = state.inner.lock().unwrap().size.unwrap_or(DEFAULT_SIZE);
     let (w, h) = (w * scale, h * scale);
-    // Under the pointer, or above it at the bottom of the screen; always fully on screen.
-    let anchor = placement::anchor_for_cursor(work, scale, f64::from(y), h);
+    let anchor = bar_anchor(work, scale, f64::from(y), f64::from(start_y), h);
     let frame = placement::frame(work, scale, f64::from(x) - 12.0 * scale, anchor, w, h);
     {
         let mut inner = state.inner.lock().unwrap();
         inner.visible = true;
         inner.frame = Some(frame);
         inner.target = Some(ctx);
+        let (yf, sf) = (f64::from(y), f64::from(start_y));
+        inner.span = Some(popup::Span {
+            x: f64::from(x),
+            top: yf.min(sf),
+            bottom: yf.max(sf),
+        });
     }
     let _ = apply(&window, frame);
     if let Ok(hwnd) = window.hwnd() {
@@ -170,6 +218,24 @@ pub fn offer(app: &AppHandle, x: i32, y: i32) {
             .as_ref()
             .map_or("", |t| t.exe.as_str())
     );
+}
+
+/// Clear of the line under the pointer (about half a line height from its middle).
+const LINE_CLEARANCE: f64 = 16.0;
+
+/// On the side of the release point away from the selected text, so the bar never covers it: above for a
+/// selection within one line (or dragged upwards), below for one dragged down over several lines. The other side
+/// when the screen edge leaves no room. Physical pixels.
+fn bar_anchor(work: Rect, scale: f64, cursor_y: f64, start_y: f64, h: f64) -> Anchor {
+    let gap = LINE_CLEARANCE * scale;
+    let fits_above = cursor_y - gap - h >= work.y + 4.0 * scale;
+    let fits_below = cursor_y + gap + h <= work.y + work.h - 4.0 * scale;
+    let dragged_down = cursor_y - start_y > gap;
+    if fits_above && !(dragged_down && fits_below) {
+        Anchor::Above { bottom: cursor_y - gap }
+    } else {
+        Anchor::Below { top: cursor_y + gap }
+    }
 }
 
 fn apply(window: &WebviewWindow, f: Rect) -> tauri::Result<()> {
@@ -207,7 +273,11 @@ pub fn quickbar_hide(app: AppHandle) {
 /// A toolbar button: act on the selection in the window the toolbar was shown for.
 #[tauri::command]
 pub fn quickbar_action(app: AppHandle, action: String) {
-    let target = app.state::<QuickbarState>().inner.lock().unwrap().target.take();
+    let (target, span) = {
+        let state = app.state::<QuickbarState>();
+        let mut inner = state.inner.lock().unwrap();
+        (inner.target.take(), inner.span.take())
+    };
     hide(&app);
     let Some(target) = target else { return };
     let (popup_action, auto_copy) = match action.as_str() {
@@ -215,7 +285,7 @@ pub fn quickbar_action(app: AppHandle, action: String) {
         "copyTranslation" => (popup::Action::Auto, true),
         _ => (popup::Action::Auto, false),
     };
-    popup::run(&app, popup_action, Some(target), auto_copy);
+    popup::run(&app, popup_action, Some(target), auto_copy, span);
 }
 
 #[cfg(test)]
@@ -235,6 +305,29 @@ mod tests {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_nanos()
+    }
+
+    #[test]
+    fn bar_stays_clear_of_the_selected_text() {
+        let work = Rect {
+            x: 0.0,
+            y: 0.0,
+            w: 1920.0,
+            h: 1080.0,
+        };
+        // One line: above.
+        assert_eq!(
+            bar_anchor(work, 1.25, 600.0, 602.0, 50.0),
+            Anchor::Above { bottom: 580.0 }
+        );
+        // Dragged down over three lines: below, clear of the selection.
+        assert_eq!(bar_anchor(work, 1.25, 600.0, 520.0, 50.0), Anchor::Below { top: 620.0 });
+        // No room above / below.
+        assert_eq!(bar_anchor(work, 1.25, 40.0, 40.0, 50.0), Anchor::Below { top: 60.0 });
+        assert_eq!(
+            bar_anchor(work, 1.25, 1060.0, 900.0, 50.0),
+            Anchor::Above { bottom: 1040.0 }
+        );
     }
 
     #[test]

@@ -31,7 +31,9 @@ export function Playground() {
   const [request, setRequest] = useState<PopupRequest | null>(null)
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [guideOpen, setGuideOpen] = useState(true)
-  const [quick, setQuick] = useState<{ x: number; y: number; japanese: boolean } | null>(null)
+  const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
+  /** Where the current mouse selection started, to keep the toolbar off the selected lines. */
+  const downY = useRef(0)
   const [quickHover, setQuickHover] = useState(false)
 
   const rootRef = useRef<HTMLDivElement>(null)
@@ -147,7 +149,7 @@ export function Playground() {
         setQuick(null)
         return
       }
-      setQuick({ x: mouse.current.x, y: mouse.current.y, japanese: isJapanese(got.text) })
+      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current, japanese: isJapanese(got.text) })
     }, 0)
   }
 
@@ -274,6 +276,10 @@ export function Playground() {
       ref={rootRef}
       className="absolute inset-0"
       onMouseUp={onMouseUp}
+      onMouseDown={(e) => {
+        const box = rootRef.current?.getBoundingClientRect()
+        if (box) downY.current = e.clientY - box.top
+      }}
       onMouseMove={(e) => {
         const box = rootRef.current?.getBoundingClientRect()
         if (box) mouse.current = { x: e.clientX - box.left, y: e.clientY - box.top }
@@ -379,7 +385,8 @@ export function Playground() {
           className="absolute z-30"
           style={{
             left: Math.max(8, Math.min(quick.x - 16, size.width - (settings.quickActions.display === 'iconOnly' ? 170 : 400))),
-            top: quick.y + 56 > size.height ? quick.y - 48 : quick.y + 14,
+            // Like the real app: above a one-line selection, below one dragged down over several lines.
+            top: quickTop(quick, size.height),
           }}
         />
       )}
@@ -410,4 +417,13 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
       </div>
     </div>
   )
+}
+
+/** Toolbar top (40 px tall, 16 px clear of the pointer's line), on the side away from the selected text. */
+function quickTop(q: { y: number; startY: number }, height: number): number {
+  const above = q.y - 16 - 40
+  const below = q.y + 16
+  const draggedDown = q.y - q.startY > 16
+  if (above >= 4 && !(draggedDown && below + 40 <= height - 4)) return above
+  return below
 }
