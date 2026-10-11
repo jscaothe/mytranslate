@@ -23,6 +23,7 @@ const screens: { value: Screen; label: string }[] = [
 const scenarios: { value: Scenario; label: string }[] = [
   { value: 'normal', label: 'Bình thường' },
   { value: 'uncertain_thread', label: 'Không chắc thread' },
+  { value: 'no_claude', label: 'Chưa cài Claude Code' },
   { value: 'not_logged_in', label: 'Claude chưa đăng nhập' },
   { value: 'quota', label: 'Hết hạn mức' },
   { value: 'network', label: 'Lỗi mạng' },
@@ -233,7 +234,15 @@ function Taskbar() {
   }, [trayOpen])
 
   const claudeOk = scenario === 'normal' || scenario === 'uncertain_thread'
-  const claudeLabel = claudeOk ? 'Đã kết nối' : scenario === 'not_logged_in' ? 'Chưa đăng nhập' : scenario === 'quota' ? 'Hết hạn mức' : 'Mất kết nối'
+  const claudeLabel = claudeOk
+    ? 'Đã kết nối'
+    : scenario === 'no_claude'
+      ? 'Chưa cài'
+      : scenario === 'not_logged_in'
+        ? 'Chưa đăng nhập'
+        : scenario === 'quota'
+          ? 'Hết hạn mức'
+          : 'Mất kết nối'
 
   const item = (label: string, onClick: () => void, right?: React.ReactNode) => (
     <button

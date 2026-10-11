@@ -24,6 +24,34 @@ export const AI_NAMES: Record<AiProvider, string> = { claude: 'Claude', openai: 
 /** Fastest general model each vendor documents (2026-10); the default until the user picks another. */
 export const RECOMMENDED_MODELS = { openai: 'gpt-5.6-luna', gemini: 'gemini-3.6-flash' } as const
 
+/** Where to create an API key, and what one looks like. */
+export const KEY_HELP = {
+  openai: { url: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' },
+  gemini: { url: 'https://aistudio.google.com/apikey', placeholder: 'AIza...' },
+} as const
+
+/** The answer of `ai_test`: one short translation with a key and a model. */
+export interface TestResult {
+  ok: boolean
+  model: string
+  firstTokenMs: number | null
+  totalMs: number
+  translation: string
+  error: string | null
+  errorKind: string | null
+}
+
+/** Why a test translation failed, in the user's words. */
+export function testFailure(errorKind: string | null): string {
+  return errorKind === 'bad_key'
+    ? 'Key không đúng hoặc đã bị thu hồi'
+    : errorKind === 'rate_limited'
+      ? 'Hết hạn mức hoặc chưa nạp tiền'
+      : errorKind === 'network'
+        ? 'Không kết nối được'
+        : 'Không dịch được'
+}
+
 /** The settings field holding a provider's default model. */
 export function modelField(provider: AiProvider): 'model' | 'openaiModel' | 'geminiModel' {
   return provider === 'openai' ? 'openaiModel' : provider === 'gemini' ? 'geminiModel' : 'model'

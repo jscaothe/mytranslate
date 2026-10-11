@@ -7,7 +7,7 @@ export type Keigo = 'casual' | 'polite' | 'formal'
 export type Confidence = 'high' | 'medium' | 'low'
 
 /** Simulated backend condition, chosen from the prototype toolbar. */
-export type Scenario = 'normal' | 'not_logged_in' | 'quota' | 'network' | 'uncertain_thread'
+export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'network' | 'uncertain_thread'
 
 export interface Conversation {
   id: string
