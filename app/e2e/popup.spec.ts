@@ -28,6 +28,18 @@ test('Vietnamese in the composer is translated and Enter puts it back in the cha
   await expect(composer(page)).toHaveValue(translated)
 })
 
+test('a message of several lines keeps its lines in the reading back', async ({ page }) => {
+  await composer(page).fill('・Đã sửa lỗi đăng nhập\n・Đã cập nhật spec màn hình B')
+  await page.keyboard.press('Control+Alt+K')
+
+  const draft = popup(page).locator('textarea[data-role=draft]')
+  await expect(draft).toBeVisible()
+  expect((await draft.inputValue()).split('\n')).toHaveLength(2)
+  // innerText follows the rendering, so lines collapsed by CSS would come back joined by a space.
+  const back = popup(page).getByText('Ý nghĩa khi đọc lại').locator('..').locator('p[lang=vi]')
+  expect((await back.innerText()).split('\n')).toHaveLength(2)
+})
+
 test('a Japanese message is translated and Claude suggests replies that can be copied', async ({ page }) => {
   await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
   await page.keyboard.press('Control+Alt+J')

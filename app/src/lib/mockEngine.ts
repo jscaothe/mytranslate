@@ -48,6 +48,25 @@ interface ViJaEntry {
 
 const viToJa: ViJaEntry[] = [
   {
+    // A message of several lines: the translation and its reading back keep one line per line.
+    match: /\n/,
+    out: {
+      casual: {
+        ja: '・ログインのバグを直しました\n・画面Bの仕様を更新しました',
+        vi: '・Đã sửa bug đăng nhập\n・Đã cập nhật spec màn hình B',
+      },
+      polite: {
+        ja: '・ログインのバグを修正しました。\n・画面Bの仕様を更新しました。',
+        vi: '・Đã sửa bug đăng nhập.\n・Đã cập nhật spec màn hình B.',
+      },
+      formal: {
+        ja: '・ログインの不具合を修正いたしました。\n・画面Bの仕様を更新いたしました。',
+        vi: '・Tôi xin phép đã sửa lỗi đăng nhập.\n・Tôi xin phép đã cập nhật spec màn hình B.',
+      },
+    },
+    notes: {},
+  },
+  {
     match: /deploy|triển khai/i,
     out: {
       casual: { ja: 'さっきの修正、デプロイしました。もう一回確認してもらえますか？', vi: 'Bản sửa lúc nãy, tôi deploy rồi. Kiểm tra lại giúp được không?' },

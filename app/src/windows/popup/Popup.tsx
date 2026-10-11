@@ -880,7 +880,7 @@ function TranslationBody({
       {stream.done && direction === 'vi_ja' && back && (
         <Section className="bg-subtle">
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Ý nghĩa khi đọc lại</div>
-          <p lang="vi" className="text-[13.5px] leading-relaxed text-ink-2">
+          <p lang="vi" className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
             {back}
           </p>
         </Section>
@@ -932,7 +932,7 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
       {result.verdict !== 'ok' && (
         <Section>
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Đề xuất</div>
-          <p lang="ja" className="text-[15px] leading-relaxed">
+          <p lang="ja" className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {result.diff.map((part, i) => (
               <span
                 key={i}
@@ -946,7 +946,7 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
             ))}
           </p>
           {result.suggestionVi && (
-            <p lang="vi" className="mt-1.5 text-[13px] text-ink-2">
+            <p lang="vi" className="mt-1.5 text-[13px] whitespace-pre-wrap text-ink-2">
               Nghĩa: {result.suggestionVi}
             </p>
           )}
