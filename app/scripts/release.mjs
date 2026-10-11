@@ -1,8 +1,9 @@
 // Builds a release that installed apps can update to, and lays out the files to publish.
 //
-//   node scripts/release.mjs --url https://updates.example.com/mytranslate/ [--notes "Có gì mới"] [--config <json>]
+//   node scripts/release.mjs [--url <folder URL>] [--notes "Có gì mới"] [--config <json>] [--publish]
 //
-// --url is the folder the files will be published at; the app looks for `<url>latest.json`.
+// --url is the folder the files will be published at; the app looks for `<url>latest.json`. It defaults to the
+// team's Cloudflare R2 bucket. --publish uploads the files there with wrangler (run `npx wrangler login` once).
 // The updater private key is read from TAURI_SIGNING_PRIVATE_KEY, or from %USERPROFILE%\.tauri\mytranslate-updater.key.
 // Output: release/<version>/ with the installers, their signatures and latest.json. Publish the whole folder
 // content at --url (the version folder keeps old releases apart).
@@ -16,12 +17,18 @@ const app = join(dirname(fileURLToPath(import.meta.url)), '..')
 const args = process.argv.slice(2)
 const arg = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 
-let url = arg('--url') ?? process.env.MYTRANSLATE_RELEASE_URL
-if (!url) {
-  console.error('usage: node scripts/release.mjs --url <folder URL> [--notes "..."]')
+// Public address of the R2 bucket below; installed apps look for `latest.json` here.
+const R2_URL = 'https://pub-69dc6a2e1f5e440cba0e4352a80177f8.r2.dev/'
+const R2_ACCOUNT = 'c74342fd8c0005fcf5e2ec19a612d485'
+const R2_BUCKET = 'mytranslate-releases'
+
+let url = arg('--url') ?? process.env.MYTRANSLATE_RELEASE_URL ?? R2_URL
+if (!url.endsWith('/')) url += '/'
+const publish = args.includes('--publish')
+if (publish && url !== R2_URL) {
+  console.error(`--publish uploads to the R2 bucket, so --url must be ${R2_URL}`)
   process.exit(2)
 }
-if (!url.endsWith('/')) url += '/'
 const notes = arg('--notes') ?? ''
 const extraConfig = arg('--config')
 
@@ -75,5 +82,22 @@ const manifest = {
   },
 }
 writeFileSync(join(app, 'release', 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
-console.log(`\nPublish the content of ${join(app, 'release')} at ${url}:`)
-console.log(`  latest.json\n  ${version}/${setup}\n  ${version}/${msi}`)
+if (!publish) {
+  console.log(`\nPublish the content of ${join(app, 'release')} at ${url}:`)
+  console.log(`  latest.json\n  ${version}/${setup}\n  ${version}/${msi}`)
+  process.exit(0)
+}
+
+// The installers go up first and latest.json last, so an app never sees a release that is still uploading.
+const wranglerEnv = { ...process.env, CLOUDFLARE_ACCOUNT_ID: R2_ACCOUNT }
+const put = (key, file, contentType, extra = []) => {
+  console.log(`Uploading ${key}`)
+  const cmd = ['wrangler', 'r2', 'object', 'put', `${R2_BUCKET}/${key}`, '--file', file, '--remote']
+  cmd.push('--content-type', contentType, ...extra)
+  // Runs npx's script with this Node directly: npx itself is a .cmd on Windows, which needs a shell.
+  const npx = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js')
+  execFileSync(process.execPath, [npx, '--yes', ...cmd], { cwd: app, env: wranglerEnv, stdio: 'inherit' })
+}
+for (const f of [setup, msi]) put(`${version}/${f}`, join(out, f), 'application/octet-stream')
+put('latest.json', join(app, 'release', 'latest.json'), 'application/json', ['--cache-control', 'no-cache'])
+console.log(`\nPublished ${version}: ${url}latest.json`)
