@@ -83,6 +83,8 @@ export interface TranslateRequest {
   /** History: the chosen thread; null starts a new one. */
   threadId?: number | null
   newThreadTitle?: string | null
+  /** Translate with this AI and model instead of the default (the popup's AI switcher). */
+  ai?: { provider: string; model: string } | null
 }
 
 /** Starts a translation; returns a function that cancels it. */

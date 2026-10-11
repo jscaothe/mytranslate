@@ -44,6 +44,7 @@ export function useTranslation({
   enabled,
   scenario,
   thread,
+  ai,
 }: {
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
@@ -53,8 +54,11 @@ export function useTranslation({
   scenario: Scenario
   /** History filing, read when a run starts; changing it later does not restart the translation. */
   thread?: { conversationId: number | null; threadId: number | null; newThreadTitle: string | null }
+  /** Translate with this AI and model; `null` uses the default. Changing it translates again. */
+  ai?: { provider: string; model: string } | null
 }) {
-  const key = enabled ? `${runKey}|${direction}|${keigo}|${text}` : null
+  const aiKey = ai ? `${ai.provider}:${ai.model}` : ''
+  const key = enabled ? `${runKey}|${direction}|${keigo}|${aiKey}|${text}` : null
   const [state, setState] = useState<{ key: string | null; value: TranslationState }>({ key: null, value: initial })
 
   useEffect(() => {
@@ -71,7 +75,7 @@ export function useTranslation({
       return () => window.clearTimeout(t)
     }
 
-    void startTranslation({ direction, text, keigo, ...thread }, (e) => {
+    void startTranslation({ direction, text, keigo, ...thread, ai: ai ?? null }, (e) => {
       if (e.type === 'thinking') update({ phase: 'thinking' })
       if (e.type === 'delta') update({ phase: 'streaming', sections: e.sections })
       if (e.type === 'done')
@@ -92,7 +96,7 @@ export function useTranslation({
       alive = false
       cancel?.()
     }
-    // `thread` is read when a run starts; editing it should not restart the current translation.
+    // `thread` is read when a run starts; editing it should not restart the current translation. `ai` is in `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

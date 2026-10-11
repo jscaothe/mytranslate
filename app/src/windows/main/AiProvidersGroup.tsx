@@ -1,24 +1,23 @@
 import { invoke } from '@tauri-apps/api/core'
-import { AlertCircle, CheckCircle2, KeyRound, Loader2, ShieldAlert } from 'lucide-react'
+import { listen } from '@tauri-apps/api/event'
+import { AlertCircle, Check, CheckCircle2, ChevronDown, KeyRound, Loader2, Search, ShieldAlert } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
+import { AI_NAMES, choiceLabel, defaultChoice, modelName, RECOMMENDED_MODELS } from '../../lib/ai'
 import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
-import { useStore, type AiProvider, type Settings } from '../../store'
-
-const PROVIDERS: { value: AiProvider; label: string }[] = [
-  { value: 'claude', label: 'Claude' },
-  { value: 'openai', label: 'ChatGPT' },
-  { value: 'gemini', label: 'Gemini' },
-]
-
-/** Fastest general model each vendor documents (2026-10); the list from the API replaces it once a key works. */
-const DEFAULT_MODELS = { openai: 'gpt-5.6-luna', gemini: 'gemini-3.6-flash' } as const
+import { useStore, type AiProvider } from '../../store'
+import { AiMark } from '../popup/AiSwitcher'
 
 const KEY_HELP = {
   openai: { url: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' },
   gemini: { url: 'https://aistudio.google.com/apikey', placeholder: 'AIza...' },
 } as const
+
+const PROTOTYPE_MODELS = {
+  openai: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
+  gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'],
+}
 
 interface TestResult {
   ok: boolean
@@ -30,46 +29,73 @@ interface TestResult {
   errorKind: string | null
 }
 
+type Keys = { openai: boolean; gemini: boolean }
+
 /**
- * Settings > AI: which provider translates. Claude goes through Claude Code (the user's Claude plan); ChatGPT and
- * Gemini through their APIs with the user's own key, kept in the Windows Credential Manager.
+ * Settings > Kết nối AI. One card per AI, each usable to set up that AI without making it the default: its status,
+ * default model and (ChatGPT, Gemini) the API key and the favourite models offered in the quick switcher. Day to day
+ * the AI is switched from the popup header (Ctrl+M) or the tray menu; this page is for setting things up.
  */
-export function AiProvidersGroup({ group: Group, row: Row }: { group: GroupComponent; row: RowComponent }) {
+export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row: RowComponent }) {
   const { settings, updateSettings } = useStore()
-  const [keys, setKeys] = useState<{ openai: boolean; gemini: boolean }>({ openai: !isTauri, gemini: false })
+  const [keys, setKeys] = useState<Keys>({ openai: !isTauri, gemini: false })
+  const current = defaultChoice(settings)
+  const [expanded, setExpanded] = useState<AiProvider | null>(current.provider)
 
   useEffect(() => {
     if (!isTauri) return
-    void invoke<{ openai: boolean; gemini: boolean }>('ai_keys_status').then(setKeys)
+    let alive = true
+    const load = () => void invoke<Keys>('ai_keys_status').then((k) => alive && setKeys(k))
+    load()
+    const off = listen('ai:keys-changed', load)
+    return () => {
+      alive = false
+      void off.then((f) => f())
+    }
   }, [])
 
-  const p = settings.aiProvider
+  const available = (p: AiProvider) => p === 'claude' || keys[p]
+
   return (
-    <Group
-      title="Kết nối AI"
-      hint="Chọn AI dùng để dịch. Claude dùng Claude Code đã đăng nhập trên máy; ChatGPT và Gemini dùng API key của bạn."
-    >
-      <Row label="AI dùng để dịch">
-        <Segmented label="AI dùng để dịch" value={p} onChange={(v) => updateSettings({ aiProvider: v })} options={PROVIDERS} />
-      </Row>
-      {p === 'claude' && <ClaudeRows row={Row} settings={settings} onModel={(m) => updateSettings({ model: m })} />}
-      {p !== 'claude' && (
-        <ApiRows
+    <Group title="Kết nối AI" hint="Đổi nhanh AI và model ngay trên popup (bấm tên AI ở đầu popup hoặc Ctrl+M) hay ở menu khay > AI dịch.">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] text-ink">Đang dịch bằng</div>
+          <div className="mt-0.5 text-[12px] text-ink-3">AI và model dùng cho mọi lần dịch, trừ khi bạn đổi trên popup.</div>
+        </div>
+        <span className="flex items-center gap-2 rounded-md border border-line bg-subtle px-2.5 py-1.5 text-[13px] font-medium text-ink">
+          <AiMark provider={current.provider} />
+          {choiceLabel(current)}
+        </span>
+      </div>
+
+      {(['claude', 'openai', 'gemini'] as const).map((p) => (
+        <ProviderCard
           key={p}
           provider={p}
-          row={Row}
-          hasKey={keys[p]}
-          model={(p === 'openai' ? settings.openaiModel : settings.geminiModel) || DEFAULT_MODELS[p]}
-          onModel={(m) => updateSettings(p === 'openai' ? { openaiModel: m } : { geminiModel: m })}
-          onKeySaved={(saved) => setKeys((k) => ({ ...k, [p]: saved }))}
-        />
-      )}
-      <Row
-        label="Tự chuyển sang AI khác khi lỗi"
-        hint="Khi AI đang chọn hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini)."
-      >
+          ready={available(p)}
+          isDefault={current.provider === p}
+          open={expanded === p}
+          onToggle={() => setExpanded((e) => (e === p ? null : p))}
+          onMakeDefault={() => updateSettings({ aiProvider: p })}
+        >
+          {p === 'claude' ? (
+            <ClaudeBody />
+          ) : (
+            <ApiBody provider={p} hasKey={keys[p]} onKeySaved={(saved) => setKeys((k) => ({ ...k, [p]: saved }))} />
+          )}
+        </ProviderCard>
+      ))}
+
+      <div className="flex items-center gap-4 px-4 py-3">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13.5px] text-ink">Tự chuyển sang AI khác khi lỗi</div>
+          <div className="mt-0.5 text-[12px] text-ink-3">
+            Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini).
+          </div>
+        </div>
         <Switch label="Tự chuyển sang AI khác khi lỗi" checked={settings.aiFallback} onChange={(v) => updateSettings({ aiFallback: v })} />
-      </Row>
+      </div>
       <div className="flex gap-2.5 px-4 py-3 text-[12px] leading-relaxed text-ink-2">
         <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
         <span>
@@ -84,7 +110,69 @@ export function AiProvidersGroup({ group: Group, row: Row }: { group: GroupCompo
 type GroupComponent = (props: { title: string; hint?: string; children: ReactNode }) => ReactNode
 type RowComponent = (props: { label: string; hint?: string; children: ReactNode }) => ReactNode
 
-function ClaudeRows({ row: Row, settings, onModel }: { row: RowComponent; settings: Settings; onModel: (m: Settings['model']) => void }) {
+function ProviderCard({
+  provider,
+  ready,
+  isDefault,
+  open,
+  onToggle,
+  onMakeDefault,
+  children,
+}: {
+  provider: AiProvider
+  ready: boolean
+  isDefault: boolean
+  open: boolean
+  onToggle: () => void
+  onMakeDefault: () => void
+  children: ReactNode
+}) {
+  const status = provider === 'claude' ? 'Claude Code trên máy này' : ready ? 'Đã có API key' : 'Chưa có API key'
+  return (
+    <section aria-label={AI_NAMES[provider]}>
+      <div className="flex items-center gap-3 px-4 py-2.5">
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={onToggle}
+          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md py-1 text-left"
+        >
+          <AiMark provider={provider} className="size-6 text-[12px]" />
+          <span className="min-w-0">
+            <span className="block text-[13.5px] font-semibold text-ink">{AI_NAMES[provider]}</span>
+            <span className={cx('block text-[12px]', ready ? 'text-ink-3' : 'text-warn')}>{status}</span>
+          </span>
+          <ChevronDown size={15} className={cx('ml-1 shrink-0 text-ink-3 transition-transform', open && 'rotate-180')} />
+        </button>
+        {isDefault ? (
+          <span className="flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1 text-[12px] font-medium text-accent">
+            <Check size={13} /> Đang dùng
+          </span>
+        ) : (
+          <Button size="sm" disabled={!ready} onClick={onMakeDefault} title={ready ? undefined : 'Thêm API key trước'}>
+            Dùng {AI_NAMES[provider]}
+          </Button>
+        )}
+      </div>
+      {open && <div className="border-t border-line bg-subtle/60 px-4 py-3">{children}</div>}
+    </section>
+  )
+}
+
+function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-start gap-4 py-2">
+      <div className="w-36 shrink-0 pt-1.5">
+        <div className="text-[13px] text-ink">{label}</div>
+        {hint && <div className="mt-0.5 text-[11.5px] leading-snug text-ink-3">{hint}</div>}
+      </div>
+      <div className="min-w-0 flex-1">{children}</div>
+    </div>
+  )
+}
+
+function ClaudeBody() {
+  const { settings, updateSettings } = useStore()
   const [status, setStatus] = useState<ClaudeStatus | null>(null)
   useEffect(() => {
     let alive = true
@@ -97,29 +185,29 @@ function ClaudeRows({ row: Row, settings, onModel }: { row: RowComponent; settin
   }, [])
   return (
     <>
-      <Row label="Model" hint="Haiku nhanh và tiết kiệm hạn mức hơn, Sonnet dịch tốt hơn.">
+      <Field label="Model" hint="Sonnet dịch tốt hơn, Haiku nhanh và tiết kiệm hạn mức hơn.">
         <Segmented
           label="Model Claude"
           value={settings.model}
-          onChange={onModel}
+          onChange={(m) => updateSettings({ model: m })}
           options={[
             { value: 'sonnet', label: 'Sonnet' },
             { value: 'haiku', label: 'Haiku' },
           ]}
         />
-      </Row>
-      <Row label="Claude Code" hint="Dịch bằng tài khoản Claude đã đăng nhập trong Claude Code trên máy này.">
+      </Field>
+      <Field label="Claude Code">
         {!status ? (
-          <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
+          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-ink-2">
             <Loader2 size={15} className="animate-spin" /> Đang kiểm tra…
           </span>
         ) : status.version ? (
-          <span className="flex items-center gap-1.5 text-[13px] text-good" title={status.path}>
+          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-good" title={status.path}>
             <CheckCircle2 size={15} /> {status.version}
           </span>
         ) : (
           <span className="flex items-center gap-2">
-            <span className="flex max-w-64 items-center gap-1.5 truncate text-[13px] text-bad" title={status.error ?? ''}>
+            <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-bad" title={status.error ?? ''}>
               <AlertCircle size={15} className="shrink-0" /> Không chạy được claude
             </span>
             <Button size="sm" onClick={() => void invoke('open_claude_login')}>
@@ -127,39 +215,29 @@ function ClaudeRows({ row: Row, settings, onModel }: { row: RowComponent; settin
             </Button>
           </span>
         )}
-      </Row>
+      </Field>
     </>
   )
 }
 
-function ApiRows({
-  provider,
-  row: Row,
-  hasKey,
-  model,
-  onModel,
-  onKeySaved,
-}: {
-  provider: 'openai' | 'gemini'
-  row: RowComponent
-  hasKey: boolean
-  model: string
-  onModel: (m: string) => void
-  onKeySaved: (saved: boolean) => void
-}) {
-  const { showToast } = useStore()
+function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemini'; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
+  const { settings, updateSettings, showToast } = useStore()
   const [draft, setDraft] = useState('')
-  const [models, setModels] = useState<string[] | null>(null)
+  const [fetched, setFetched] = useState<string[] | null>(null)
+  const [filter, setFilter] = useState('')
   const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
-  const name = provider === 'openai' ? 'ChatGPT' : 'Gemini'
+  const name = AI_NAMES[provider]
+  const field = provider === 'openai' ? 'openaiModel' : 'geminiModel'
+  const model = settings[field] || RECOMMENDED_MODELS[provider]
+  const favourites = settings.aiQuickModels[provider]
 
-  // The models this key can use, for the picker; refreshed when a key is saved.
+  // The models this key can use; refreshed when a key is saved.
   useEffect(() => {
-    if (!isTauri || !hasKey) return
+    if (!hasKey || !isTauri) return
     let alive = true
     void invoke<string[]>('ai_models', { provider })
-      .then((m) => alive && setModels(m))
-      .catch(() => alive && setModels([]))
+      .then((m) => alive && setFetched(m))
+      .catch(() => alive && setFetched([]))
     return () => {
       alive = false
     }
@@ -196,12 +274,22 @@ function ApiRows({
       .catch((e) => setTest({ state: 'done', result: { ok: false, model, firstTokenMs: null, totalMs: 0, translation: '', error: String(e), errorKind: null } }))
   }
 
-  const options = models && models.length > 0 ? (models.includes(model) ? models : [model, ...models]) : [model]
+  const toggleFavourite = (m: string) => {
+    const next = favourites.includes(m) ? favourites.filter((x) => x !== m) : [...favourites, m]
+    updateSettings({ aiQuickModels: { ...settings.aiQuickModels, [provider]: next } })
+  }
+
+  // The prototype shows a short made-up list.
+  const models = isTauri ? fetched : PROTOTYPE_MODELS[provider]
+  const all = models && models.length > 0 ? (models.includes(model) ? models : [model, ...models]) : [model]
+  const q = filter.trim().toLowerCase()
+  const listed = all.filter((m) => !q || m.toLowerCase().includes(q) || modelName(provider, m).toLowerCase().includes(q))
+
   return (
     <>
-      <Row label={`API key ${name}`} hint={hasKey ? 'Đã lưu trong Windows Credential Manager của máy này.' : `Tạo key tại ${KEY_HELP[provider].url}`}>
+      <Field label="API key" hint={hasKey ? 'Lưu trong Windows Credential Manager.' : <>Tạo key tại {KEY_HELP[provider].url}</>}>
         <form
-          className="flex w-80 gap-2"
+          className="flex gap-2"
           onSubmit={(e) => {
             e.preventDefault()
             if (draft.trim()) saveKey(draft)
@@ -231,32 +319,81 @@ function ApiRows({
             )
           )}
         </form>
-      </Row>
-      <Row label="Model" hint={isTauri && models === null && hasKey ? 'Đang lấy danh sách model…' : 'Model nhanh nhất được chọn sẵn; đổi nếu muốn dịch tốt hơn.'}>
-        <select
-          aria-label={`Model ${name}`}
-          value={model}
-          onChange={(e) => onModel(e.target.value)}
-          className={cx(inputClass, 'w-64')}
-          disabled={!hasKey}
+      </Field>
+      {hasKey && (
+        <Field
+          label="Model"
+          hint="Chọn model mặc định. Đánh dấu ☆ để model hiện trong menu chọn nhanh trên popup và khay."
         >
-          {options.map((m) => (
-            <option key={m} value={m}>
-              {m}
-              {m === DEFAULT_MODELS[provider] ? ' (khuyên dùng)' : ''}
-            </option>
-          ))}
-        </select>
-      </Row>
-      <Row label="Kiểm tra" hint="Dịch thử một câu ngắn bằng key và model này.">
+          <div className="overflow-hidden rounded-md border border-line bg-surface">
+            {all.length > 8 && (
+              <label className="flex h-8 items-center gap-2 border-b border-line px-2.5">
+                <Search size={13} className="text-ink-3" />
+                <input
+                  aria-label={`Tìm model ${name}`}
+                  value={filter}
+                  onChange={(e) => setFilter(e.target.value)}
+                  placeholder="Tìm model"
+                  className="flex-1 bg-transparent text-[12.5px] text-ink placeholder:text-ink-3 focus:outline-none"
+                />
+              </label>
+            )}
+            <ul role="radiogroup" aria-label={`Model ${name}`} className="scroll-thin max-h-48 overflow-y-auto py-1">
+              {isTauri && models === null && (
+                <li className="flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-ink-3">
+                  <Loader2 size={13} className="animate-spin" /> Đang lấy danh sách model…
+                </li>
+              )}
+              {listed.map((m) => {
+                const isDefault = m === model
+                const fav = isDefault || favourites.includes(m)
+                return (
+                  <li key={m} className="flex items-center gap-1 px-1.5">
+                    <button
+                      type="button"
+                      role="radio"
+                      aria-checked={isDefault}
+                      onClick={() => updateSettings({ [field]: m })}
+                      className={cx(
+                        'flex h-7 min-w-0 flex-1 items-center gap-2 rounded px-1.5 text-left text-[12.5px]',
+                        isDefault ? 'font-medium text-ink' : 'text-ink-2 hover:bg-hover hover:text-ink',
+                      )}
+                    >
+                      <span className={cx('flex size-3.5 shrink-0 items-center justify-center rounded-full border', isDefault ? 'border-accent bg-accent' : 'border-line-strong')}>
+                        {isDefault && <span className="size-1.5 rounded-full bg-on-accent" />}
+                      </span>
+                      <span className="truncate">{modelName(provider, m)}</span>
+                      <span className="truncate font-mono text-[11px] text-ink-3">{m}</span>
+                      {m === RECOMMENDED_MODELS[provider] && <span className="shrink-0 text-[11px] text-accent">khuyên dùng</span>}
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={fav}
+                      disabled={isDefault}
+                      title={isDefault ? 'Model mặc định luôn có trong menu chọn nhanh' : fav ? 'Bỏ khỏi menu chọn nhanh' : 'Thêm vào menu chọn nhanh'}
+                      aria-label={`${fav ? 'Bỏ' : 'Thêm'} ${m} ${fav ? 'khỏi' : 'vào'} menu chọn nhanh`}
+                      onClick={() => toggleFavourite(m)}
+                      className={cx('flex size-7 shrink-0 items-center justify-center rounded text-[15px]', fav ? 'text-warn' : 'text-ink-3 hover:bg-hover hover:text-ink', isDefault && 'opacity-60')}
+                    >
+                      {fav ? '★' : '☆'}
+                    </button>
+                  </li>
+                )
+              })}
+              {models !== null && listed.length === 0 && <li className="px-3 py-1.5 text-[12.5px] text-ink-3">Không có model nào khớp</li>}
+            </ul>
+          </div>
+        </Field>
+      )}
+      <Field label="Kiểm tra" hint="Dịch thử một câu ngắn bằng key và model mặc định.">
         <span className="flex items-center gap-3">
-          {test.state === 'done' && <TestLine result={test.result} />}
           <Button disabled={!hasKey || test.state === 'running'} onClick={runTest}>
             {test.state === 'running' && <Loader2 size={14} className="animate-spin" />}
             {test.state === 'running' ? 'Đang dịch thử…' : 'Dịch thử'}
           </Button>
+          {test.state === 'done' && <TestLine result={test.result} />}
         </span>
-      </Row>
+      </Field>
     </>
   )
 }
@@ -272,7 +409,7 @@ function TestLine({ result }: { result: TestResult }) {
             ? 'Không kết nối được'
             : 'Không dịch được'
     return (
-      <span className="flex max-w-72 items-center gap-1.5 text-[13px] text-bad" title={result.error ?? ''}>
+      <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-bad" title={result.error ?? ''}>
         <AlertCircle size={15} className="shrink-0" /> <span className="truncate">{why}</span>
       </span>
     )

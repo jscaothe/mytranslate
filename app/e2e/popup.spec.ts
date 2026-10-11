@@ -32,7 +32,7 @@ test('a Japanese message is translated and Claude suggests replies that can be c
   await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
   await page.keyboard.press('Control+Alt+J')
 
-  await expect(popup(page).getByText('JA → VI')).toBeVisible()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   const suggest = popup(page).getByRole('button', { name: /Gợi ý/ })
   await expect(suggest).toBeEnabled()
   await popup(page).press('g')
@@ -85,4 +85,23 @@ test('selecting text with the mouse shows the quick toolbar', async ({ page }) =
   await expect(bar).toBeVisible()
   await bar.getByRole('button', { name: /Dịch/ }).first().click()
   await expect(popup(page)).toBeVisible()
+})
+
+test('the AI can be switched from the popup, which translates again with it', async ({ page }) => {
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+K')
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+  const chip = popup(page).getByRole('button', { name: /^AI dịch: Claude Sonnet/ })
+  await expect(chip).toBeVisible()
+
+  await popup(page).press('Control+m')
+  const menu = popup(page).getByRole('menu', { name: 'Chọn AI dịch' })
+  await expect(menu).toBeVisible()
+  // No key for Gemini in the prototype: shown, but not selectable.
+  await expect(menu.getByRole('menuitemradio', { name: 'Gemini 3.6 Flash' })).toBeDisabled()
+  await menu.getByRole('menuitemradio', { name: 'Haiku' }).click()
+
+  await expect(menu).toBeHidden()
+  await expect(popup(page).getByRole('button', { name: /^AI dịch: Claude Haiku/ })).toBeVisible()
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
 })

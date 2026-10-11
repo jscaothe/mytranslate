@@ -49,7 +49,7 @@ fn main() {
         None => "sonnet".into(),
     });
     let route = match api {
-        None => Route::Claude,
+        None => Route::Claude { model: None },
         Some(api) => Route::Api {
             api,
             model: model.clone(),

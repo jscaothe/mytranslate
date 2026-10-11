@@ -40,7 +40,7 @@ test('the guide asks for nothing and teaches the toolbar: select, press Dịch, 
   await expect(bar.getByRole('button', { name: 'Dịch và chép' })).toHaveCount(0)
   await bar.getByRole('button', { name: 'Dịch sang Việt' }).click()
 
-  await expect(popup(page).getByText('JA → VI')).toBeVisible()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   await expect(page.getByText('Trong Teams và Slack cũng làm y như vậy.')).toBeVisible()
   // The practice popup keeps the one-time tip for the first real one.
   await expect(popup(page).getByRole('note')).toHaveCount(0)
@@ -61,7 +61,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
 
   await selectStart(page, message, 10)
   await page.keyboard.press('Control+Alt+J')
-  await expect(popup(page).getByText('JA → VI')).toBeVisible()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   await expect(popup(page).getByRole('button', { name: /Gợi ý/ })).toBeEnabled()
   await expect(popup(page).getByRole('note')).toHaveCount(0)
 })

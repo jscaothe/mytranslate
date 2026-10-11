@@ -88,6 +88,17 @@ pub struct TranslateRequest {
     /// The user's note about the people in the conversation. Set by the app.
     #[serde(skip)]
     pub conversation_note: String,
+    /// Translate with this AI and model instead of the default (the popup's AI switcher).
+    #[serde(default)]
+    pub ai: Option<AiChoice>,
+}
+
+/// An AI and, optionally, one of its models: `claude` + `sonnet`, `openai` + `gpt-...`, `gemini` + `gemini-...`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct AiChoice {
+    pub provider: String,
+    #[serde(default)]
+    pub model: Option<String>,
 }
 
 impl TranslateRequest {
@@ -105,6 +116,7 @@ impl TranslateRequest {
             ask_title: false,
             glossary: Vec::new(),
             conversation_note: String::new(),
+            ai: None,
         }
     }
 }

@@ -27,6 +27,8 @@ export interface Settings {
   geminiModel: string
   /** When the chosen AI fails before answering, try the others that are set up. */
   aiFallback: boolean
+  /** Extra models of ChatGPT and Gemini offered in the quick switcher, besides the default one. */
+  aiQuickModels: { openai: string[]; gemini: string[] }
   hotkeys: HotkeyMap
   /** Mini toolbar shown when text is selected with the mouse. */
   quickActions: QuickActionSettings
@@ -115,6 +117,9 @@ export interface Store {
   updateThread: (id: string, patch: Partial<Thread>) => void
   /** Prototype only: merges one thread into another of the same conversation. */
   mergeThread: (from: string, into: string) => void
+  /** Prototype only: deletes a thread, or a conversation with its threads. */
+  deleteThread: (id: string) => void
+  deleteConversation: (id: string) => void
   updateConversation: (id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => void
   glossary: GlossaryTerm[]
   setGlossary: (g: GlossaryTerm[]) => void

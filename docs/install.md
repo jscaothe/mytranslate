@@ -16,7 +16,9 @@ Tài liệu này dành cho người dùng trong team; thiết kế chi tiết �
 1. Chạy file `MyTranslate_<phiên bản>_x64-setup.exe` (cài cho riêng bạn, không cần quyền admin) hoặc `MyTranslate_<phiên bản>_x64_en-US.msi` (dùng khi IT cài hàng loạt).
 2. Mở MyTranslate từ menu Start.
    Lần đầu, app hiện **Hướng dẫn ban đầu**: kiểm tra Claude Code và dịch thử một câu.
-3. Xong hướng dẫn, đóng cửa sổ: app vẫn chạy ở **khay hệ thống** (góc dưới bên phải) và phím tắt luôn sẵn sàng.
+3. Xong hướng dẫn, trang **Bắt đầu dùng MyTranslate** nhắc lại ba cách dùng chính và có nút mở Teams / Slack.
+4. Đóng cửa sổ: app vẫn chạy ở **khay hệ thống** (góc dưới bên phải) và phím tắt luôn sẵn sàng.
+   Lần đầu đóng, Windows hiện một thông báo nhắc điều này.
 
 ### Nếu Windows chặn file cài đặt
 
@@ -56,14 +58,15 @@ App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Tea
 - App tự gom tin theo cuộc trò chuyện và chủ đề (thread), và gửi kèm vài tin gần nhất để Claude hiểu các câu như 先ほどの件, それ.
   Xem lại ở cửa sổ chính, tab **Threads**: ghim một thread để mọi tin mới của cuộc trò chuyện vào đó, gộp thread trùng, lưu trữ thread đã xong, bấm **Tóm tắt** để Claude tóm tắt bằng tiếng Việt, xuất Markdown để bàn giao.
 - **Người liên hệ**: đặt mức kính ngữ cho từng cuộc trò chuyện (ví dụ Trang trọng với PM khách, Lịch sự trong kênh nội bộ) và ghi chú về người ở đó (tên, vai trò, cách gọi). Đổi kính ngữ trong popup cũng được nhớ cho cuộc trò chuyện đó.
-- **Glossary chung của team**: trỏ Cài đặt > Glossary chung tới file `glossary.yaml` của dự án (trong repo hoặc thư mục OneDrive). App chỉ đọc file, thuật ngữ cá nhân được ưu tiên khi trùng.
+- **Glossary chung của team**: ở tab Glossary, bấm "Chọn file..." ở thanh dưới cùng và trỏ tới file `glossary.yaml` của dự án (trong repo hoặc thư mục OneDrive). App chỉ đọc file, thuật ngữ cá nhân được ưu tiên khi trùng.
 
 ## Dùng ChatGPT hoặc Gemini thay cho Claude
 
 1. Tạo API key: ChatGPT tại https://platform.openai.com/api-keys, Gemini tại https://aistudio.google.com/apikey.
 2. Cài đặt > Kết nối AI: chọn ChatGPT hoặc Gemini, dán key, bấm **Lưu** (key được lưu trong Windows Credential Manager của máy bạn).
-3. Bấm **Dịch thử** để kiểm tra key và xem tốc độ; đổi model nếu muốn.
-4. Nếu muốn, bật **Tự chuyển sang AI khác khi lỗi**: khi AI đang chọn hết hạn mức hoặc lỗi, app dịch bằng AI khác đã cài đặt.
+3. Bấm **Dịch thử** để kiểm tra key và xem tốc độ; chọn model mặc định và đánh dấu ☆ các model muốn có trong menu chọn nhanh.
+4. Đổi AI hoặc model hằng ngày: bấm tên model ở đầu popup (hoặc `Ctrl+M`), hoặc chuột phải icon khay > **AI dịch**. Popup dịch lại ngay bằng lựa chọn mới và dùng nó cho các lần sau.
+5. Nếu muốn, bật **Tự chuyển sang AI khác khi lỗi**: khi AI đang chọn hết hạn mức hoặc lỗi, app dịch bằng AI khác đã cài đặt.
 
 Dùng API được tính phí theo lượng chữ, tách khỏi gói ChatGPT Plus hay Gemini Advanced.
 Không dùng gói miễn phí của Gemini cho tin nhắn của khách, vì Google có thể dùng dữ liệu đó để cải thiện model.
