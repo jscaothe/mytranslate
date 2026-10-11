@@ -1,5 +1,5 @@
 import { listen } from '@tauri-apps/api/event'
-import { Archive, ArchiveRestore, ChevronLeft, Download, Loader2, Merge, MessagesSquare, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronLeft, Download, Loader2, Merge, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton } from '../../components/ui'
@@ -8,6 +8,7 @@ import { isTauri } from '../../lib/claude'
 import { exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
 import { useStore } from '../../store'
 import type { Conversation, Thread, ThreadMessage } from '../../types'
+import { GettingStarted } from './GettingStarted'
 
 const appName = (c: Conversation) => (c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : 'Ứng dụng khác')
 
@@ -52,17 +53,7 @@ export function ThreadsView() {
 
   const thread = threads.find((t) => t.id === selectedThreadId && Boolean(t.archived) === showArchived) ?? groups[0]?.threads[0]
 
-  if (threads.length === 0) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
-        <MessagesSquare size={28} className="text-ink-3" />
-        <p className="text-[14px] font-semibold text-ink">Chưa có thread nào</p>
-        <p className="max-w-[360px] text-[13px] leading-relaxed text-ink-2">
-          Dịch bằng phím tắt trong Teams hoặc Slack, các tin sẽ được xếp vào thread theo từng cuộc trò chuyện ở đây.
-        </p>
-      </div>
-    )
-  }
+  if (threads.length === 0) return <GettingStarted />
 
   return (
     <div className="flex min-h-0 flex-1">
@@ -363,7 +354,7 @@ function SummaryCard({ thread, busy, canSummarize, onSummarize }: { thread: Thre
           type="button"
           onClick={onSummarize}
           disabled={busy}
-          title="Tóm tắt lại bằng Claude"
+          title="Tóm tắt lại bằng AI"
           className="flex h-6 items-center gap-1 rounded px-1.5 font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-60"
         >
           {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}

@@ -7,6 +7,7 @@ import {
   GripVertical,
   Loader2,
   Languages,
+  Lightbulb,
   Pin,
   Reply,
   RotateCcw,
@@ -23,7 +24,7 @@ import { conversations, keigoLabels } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
 import { relativeTime, setFeedback, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
-import { useStore, type Template } from '../../store'
+import { useStore } from '../../store'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
 import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
@@ -55,6 +56,8 @@ export interface PopupProps {
 export function Popup({ request, container, onClose, onApply, onPinnedChange, windowed }: PopupProps) {
   const store = useStore()
   const { scenario, settings, threads, showToast } = store
+  // A first-time tip about the keys, shown in the first real popup only (the guide's practice popup does not count).
+  const [tipOpen, setTipOpen] = useState(() => !settings.popupTipShown && request.origin !== 'onboarding')
 
   const [direction, setDirection] = useState<Direction>(request.direction)
   const [source, setSource] = useState(request.source)
@@ -106,7 +109,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     direction,
     text: source,
     keigo,
-    profile: settings.profilePrompt,
     runKey,
     enabled: longConfirmed && !notice,
     scenario,
@@ -169,6 +171,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     const t = window.setTimeout(onClose, NOTICE_CLOSE_MS)
     return () => window.clearTimeout(t)
   }, [notice, onClose])
+
+  const tipVisible = tipOpen && resultReady && !isReview && !request.window?.autoCopy
+  const { updateSettings } = store
+  useEffect(() => {
+    if (tipVisible && !settings.popupTipShown) updateSettings({ popupTipShown: true })
+  }, [tipVisible, settings.popupTipShown, updateSettings])
 
   // Toolbar "translate and copy": put the result on the clipboard as soon as it is ready, say so, then close.
   const autoCopy = Boolean(windowed && request.window?.autoCopy)
@@ -281,15 +289,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       .catch((e) => setReplies({ state: 'error', items: [], error: String(e) }))
   }
 
-  // Templates are added to (or taken off) the start or end of the Japanese draft.
-  const toggleTemplate = (t: Template) => {
-    const cur = finalText
-    let next: string
-    if (t.position === 'before') next = cur.startsWith(t.ja) ? cur.slice(t.ja.length).replace(/^\n/, '') : `${t.ja}\n${cur}`
-    else next = cur.endsWith(t.ja) ? cur.slice(0, cur.length - t.ja.length).replace(/\n$/, '') : `${cur}\n${t.ja}`
-    setDraft(next)
-  }
-
   const startReply = () => {
     setReplyMode(true)
   }
@@ -348,12 +347,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     }
     if (e.key === 'Enter' && !e.shiftKey && (inDraft || !typing)) {
       e.preventDefault()
-      primary()
+      // On a client message Enter starts a reply. Not a letter key: a Vietnamese input method (UniKey) would
+      // count the letter as the start of the first word typed in the reply box and leave that word unconverted.
+      if (direction === 'ja_vi') startReply()
+      else primary()
       return
-    }
-    if (!typing && direction === 'ja_vi' && e.key.toLowerCase() === 'r' && !e.ctrlKey && !e.altKey) {
-      e.preventDefault()
-      startReply()
     }
     if (!typing && direction === 'ja_vi' && e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
@@ -547,7 +545,13 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             </div>
           </Banner>
         ) : live.phase === 'error' && live.error ? (
-          <ErrorBanner kind={live.error.kind} message={live.error.message} onRetry={() => setRunKey((r) => r + 1)} onAction={(t) => showToast(t)} />
+          <ErrorBanner
+            kind={live.error.kind}
+            provider={live.error.provider}
+            message={live.error.message}
+            onRetry={() => setRunKey((r) => r + 1)}
+            onAction={(t) => showToast(t)}
+          />
         ) : isReview ? (
           <ReviewBody result={reviewResult} />
         ) : (
@@ -563,9 +567,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             back={live.sections.backTranslation || undefined}
           />
         )}
-        {direction === 'vi_ja' && resultReady && draft !== null && settings.templates.length > 0 && (
-          <TemplateChips templates={settings.templates} text={finalText} onToggle={toggleTemplate} />
-        )}
         {direction === 'ja_vi' && (replies.state !== 'idle' || replies.items.length > 0) ? (
           <RepliesBlock
             state={replies.state}
@@ -580,6 +581,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             <Copy size={13} /> Đã sao chép bản dịch
           </div>
         )}
+        {resultReady && live.answeredBy?.fallbackFrom && (
+          <div className="border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
+            {aiName(live.answeredBy.fallbackFrom)} không dịch được, đã dịch bằng {aiName(live.answeredBy.provider)} ({live.answeredBy.model})
+          </div>
+        )}
+        {tipVisible && <FirstTip direction={direction} origin={origin} onDismiss={() => setTipOpen(false)} />}
         {resultReady && <QuotaLine rate={live.rateLimit} />}
         {resultReady && windowed && <UpdateLine />}
         </>
@@ -636,38 +643,34 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   )
 }
 
+/** The keys a new user would not guess; the buttons below already show the main one. */
+function FirstTip({ direction, origin, onDismiss }: { direction: Direction; origin: PopupOrigin; onDismiss: () => void }) {
+  const enter = <Kbd>Enter</Kbd>
+  return (
+    <div role="note" className="flex items-start gap-2 border-t border-line bg-accent-soft px-4 py-2 text-[12.5px] leading-relaxed text-ink">
+      <Lightbulb size={14} className="mt-[3px] shrink-0 text-accent" />
+      <p className="min-w-0 flex-1">
+        {direction === 'ja_vi' ? (
+          <>Nhấn {enter} để gõ câu trả lời bằng tiếng Việt, MyTranslate sẽ dịch sang tiếng Nhật cho bạn.</>
+        ) : origin === 'composer' ? (
+          <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. <Kbd>Tab</Kbd> đổi mức kính ngữ.</>
+        ) : (
+          <>Nhấn {enter} để sao chép bản dịch. <Kbd>Tab</Kbd> đổi mức kính ngữ.</>
+        )}{' '}
+        <Kbd>Esc</Kbd> để đóng.
+      </p>
+      <button type="button" onClick={onDismiss} className="shrink-0 rounded px-1 font-medium text-accent hover:underline">
+        Đã hiểu
+      </button>
+    </div>
+  )
+}
+
 const MOCK_REPLIES: SuggestedReply[] = [
   { ja: '承知いたしました。確認いたします。', vi: 'Em đã hiểu. Em sẽ kiểm tra ạ.' },
   { ja: '詳細を教えていただけますでしょうか。', vi: 'Anh có thể cho em biết chi tiết hơn được không ạ?' },
   { ja: '本日中に確認してご連絡いたします。', vi: 'Trong hôm nay em sẽ kiểm tra và liên lạc lại ạ.' },
 ]
-
-function TemplateChips({ templates, text, onToggle }: { templates: Template[]; text: string; onToggle: (t: Template) => void }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 border-b border-line px-4 py-2">
-      <span className="mr-0.5 text-[11.5px] font-semibold text-ink-3">Mẫu câu</span>
-      {templates.map((t) => {
-        const on = t.position === 'before' ? text.startsWith(t.ja) : text.endsWith(t.ja)
-        return (
-          <button
-            key={t.id}
-            type="button"
-            lang="ja"
-            aria-pressed={on}
-            title={`${t.position === 'before' ? 'Thêm vào đầu' : 'Thêm vào cuối'}${t.vi ? `: ${t.vi}` : ''}`}
-            onClick={() => onToggle(t)}
-            className={cx(
-              'h-6 max-w-full truncate rounded-full border px-2 text-[12px]',
-              on ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-ink-2 hover:bg-hover hover:text-ink',
-            )}
-          >
-            {t.ja}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
 
 function RepliesBlock({
   state,
@@ -793,7 +796,7 @@ function TranslationBody({
   /** Vietnamese reading of a Japanese result, so the user can check the meaning before sending. */
   back?: string
 }) {
-  if (!stream.started) return <PendingBlock label={direction === 'ja_vi' ? 'Đang dịch sang tiếng Việt…' : 'Đang dịch sang tiếng Nhật…'} />
+  if (!stream.started) return <PendingBlock label="Đang dịch…" />
   const lang = direction === 'ja_vi' ? 'vi' : 'ja'
   return (
     <>
@@ -948,17 +951,74 @@ function Banner({
   )
 }
 
+/** Display name of an AI provider id. */
+function aiName(id: string): string {
+  return id === 'openai' ? 'ChatGPT' : id === 'gemini' ? 'Gemini' : 'Claude'
+}
+
 function ErrorBanner({
   kind,
+  provider,
   message,
   onRetry,
   onAction,
 }: {
   kind: ClaudeErrorKind
+  provider: string
   message: string
   onRetry: () => void
   onAction: (toast: string) => void
 }) {
+  const name = aiName(provider)
+  const retry = (
+    <div className="mt-2 flex gap-2">
+      <Button size="sm" variant="primary" onClick={onRetry}>
+        Thử lại
+      </Button>
+    </div>
+  )
+  const openSettings = (
+    <div className="mt-2 flex gap-2">
+      <Button size="sm" variant="primary" onClick={() => void invoke('show_main_window')}>
+        Mở Cài đặt
+      </Button>
+      <Button size="sm" onClick={onRetry}>
+        Thử lại
+      </Button>
+    </div>
+  )
+  if (kind === 'missing_key') {
+    return (
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={`Chưa có API key ${name}`}>
+        Nhập API key ở Cài đặt &gt; Kết nối AI, hoặc chọn AI khác.
+        {openSettings}
+      </Banner>
+    )
+  }
+  if (kind === 'bad_key') {
+    return (
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={`API key ${name} không đúng`}>
+        Key sai hoặc đã bị thu hồi. Nhập lại key ở Cài đặt &gt; Kết nối AI.
+        {openSettings}
+      </Banner>
+    )
+  }
+  if (kind === 'network') {
+    return (
+      <Banner tone="bad" icon={<WifiOff size={16} />} title={`Không kết nối được tới ${name}`}>
+        Kiểm tra mạng (hoặc proxy của công ty) rồi thử lại.
+        {retry}
+      </Banner>
+    )
+  }
+  if (kind === 'rate_limited' && provider !== 'claude') {
+    return (
+      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={`Hết hạn mức ${name}`}>
+        Tài khoản API đã hết hạn mức hoặc chưa nạp tiền. Thử lại sau, hoặc bật "Tự chuyển sang AI khác khi lỗi" trong Cài đặt.
+        {retry}
+      </Banner>
+    )
+  }
   if (kind === 'not_logged_in') {
     return (
       <Banner tone="bad" icon={<CircleAlert size={16} />} title="Claude Code chưa đăng nhập">
@@ -996,7 +1056,7 @@ function ErrorBanner({
     )
   }
   return (
-    <Banner tone="bad" icon={<WifiOff size={16} />} title={kind === 'timeout' ? 'Claude không trả lời kịp' : 'Không dịch được'}>
+    <Banner tone="bad" icon={<WifiOff size={16} />} title={kind === 'timeout' ? `${name} không trả lời kịp` : 'Không dịch được'}>
       <span className="font-mono text-[12px] break-all">{message}</span>
       <div className="mt-2 flex gap-2">
         <Button size="sm" variant="primary" onClick={onRetry}>
@@ -1056,9 +1116,9 @@ function FooterActions({
     return (
       <div className="flex items-center gap-2">
         <Button size="sm" onClick={onReply}>
-          <Reply size={14} /> Trả lời <Kbd>R</Kbd>
+          <Reply size={14} /> Trả lời <Kbd>↵</Kbd>
         </Button>
-        <Button size="sm" disabled={!ready || suggesting} onClick={onSuggest} title="Claude gợi ý 3 câu trả lời tiếng Nhật">
+        <Button size="sm" disabled={!ready || suggesting} onClick={onSuggest} title="AI gợi ý 3 câu trả lời tiếng Nhật">
           <Sparkles size={14} /> Gợi ý <Kbd>G</Kbd>
         </Button>
         <div className="flex-1" />
@@ -1071,15 +1131,17 @@ function FooterActions({
   }
   if (direction === 'vi_ja') {
     return (
-      <div className="flex items-center gap-2">
-        <Segmented
-          label="Mức kính ngữ"
-          value={keigo}
-          onChange={onKeigo}
-          options={keigoOrder.map((k) => ({ value: k, label: keigoLabels[k] }))}
-        />
-        <Kbd>Tab</Kbd>
-        <div className="flex-1" />
+      // Wraps instead of overflowing when the popup is made narrow: the actions move under the keigo choice.
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
+        <span title="Tab để đổi mức kính ngữ" className="inline-flex">
+          <Segmented
+            label="Mức kính ngữ"
+            value={keigo}
+            onChange={onKeigo}
+            options={keigoOrder.map((k) => ({ value: k, label: keigoLabels[k] }))}
+          />
+        </span>
+        <div className="ml-auto flex items-center gap-2">
         {feedbackButton}
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
@@ -1090,6 +1152,7 @@ function FooterActions({
             <Copy size={14} /> Sao chép {enterKbd}
           </Button>
         )}
+        </div>
       </div>
     )
   }

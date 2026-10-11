@@ -1,24 +1,22 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { conversations as mockConversations, initialGlossary, initialThreads } from './data/mock'
 import { loadHistory } from './lib/history'
 import { isTauri } from './lib/claude'
-import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, DEFAULT_TEMPLATES, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
+import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
 import type { Conversation, Scenario, Thread, ThreadMessage } from './types'
 
 const defaultSettings: Settings = {
   theme: 'system',
   defaultKeigo: 'formal',
   model: 'sonnet',
-  provider: 'cli',
+  aiProvider: 'claude',
+  openaiModel: '',
+  geminiModel: '',
+  aiFallback: false,
   hotkeys: { auto: 'Ctrl+Alt+T', jaVi: 'Ctrl+Alt+J', viJa: 'Ctrl+Alt+K', review: 'Ctrl+Alt+L', main: 'Ctrl+Alt+M' },
-  profilePrompt: [
-    'Tôi là Nguyễn Văn A (グエン・ヴァン・A), BrSE của Acme, đang làm dự án đặt phòng khách sạn cho CustomerX.',
-    'Khách hàng là công ty Nhật, tôi thường trao đổi với PM (Tanaka) và tester (Suzuki).',
-    'Khi viết tiếng Nhật, hãy xưng hô khiêm nhường, gọi khách là 〇〇様, và ký tên "Acme グエン" khi tin nhắn dài.',
-    'Thuật ngữ kỹ thuật (deploy, API, UAT) giữ nguyên tiếng Anh.',
-  ].join('\n'),
   quickActions: {
     enabled: true,
     appScope: 'selected',
@@ -28,13 +26,14 @@ const defaultSettings: Settings = {
   },
   // The prototype shows how a configured team glossary looks; the real app starts without one.
   glossaryPath: isTauri ? '' : 'D:\\projects\\customerx\\docs\\glossary.yaml',
-  templates: DEFAULT_TEMPLATES,
   retentionMonths: 0,
   autoUpdateCheck: true,
   autostart: true,
   blockedApps: ['1Password.exe', 'KeePass.exe'],
   hotkeysPaused: false,
   onboarded: false,
+  trayNoticeShown: false,
+  popupTipShown: false,
 }
 
 export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'threads' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
@@ -107,7 +106,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
   }, [])
 
   // In the real app the Rust side owns the settings: every window loads them, saves through it, and follows
-  // changes made in other windows (the popup uses the profile and keigo chosen in the main window).
+  // changes made in other windows (the popup uses the keigo and model chosen in the main window).
   const settingsRef = useRef(defaultSettings)
   const [settingsReady, setSettingsReady] = useState(!isTauri)
   const applySettings = useCallback((next: Settings) => {
@@ -151,12 +150,19 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     if (!isTauri) return
     let alive = true
     const merge = (saved: unknown) => {
-      if (alive && saved && typeof saved === 'object') applySettings({ ...defaultSettings, ...(saved as Partial<Settings>) })
+      if (!alive || !saved || typeof saved !== 'object') return
+      // `profilePrompt` belonged to the removed self-introduction prompt; drop it so it is not saved again.
+      const { profilePrompt: _removed, ...rest } = saved as Partial<Settings> & { profilePrompt?: unknown }
+      applySettings({ ...defaultSettings, ...rest })
     }
     void invoke('settings_get')
       .then(merge)
       .finally(() => alive && setSettingsReady(true))
-    const off = listen('settings:changed', (e) => merge(e.payload))
+    // Changes made in other windows (or the tray); this window already shows its own.
+    const self = getCurrentWindow().label
+    const off = listen<{ settings: unknown; from: string }>('settings:changed', (e) => {
+      if (e.payload.from !== self) merge(e.payload.settings)
+    })
     return () => {
       alive = false
       void off.then((f) => f())

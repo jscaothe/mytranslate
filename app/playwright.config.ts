@@ -23,6 +23,7 @@ export default defineConfig({
   webServer: {
     // Its own port, so a running `tauri dev` (5173) does not get in the way.
     command: 'npx vite --port 5174 --strictPort',
+    env: { VITE_CACHE_DIR: 'node_modules/.vite-e2e' },
     url: 'http://localhost:5174',
     reuseExistingServer: !process.env.CI,
   },

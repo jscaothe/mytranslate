@@ -1,4 +1,4 @@
-import { BookOpen, Languages, MessagesSquare, Settings, Users } from 'lucide-react'
+import { BookOpen, MessagesSquare, Settings, Users } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { AppMark, WindowFrame } from '../../components/ui'
 import { UpdateBanner } from '../../components/UpdatePanel'
@@ -9,10 +9,8 @@ import { ContactsView } from './ContactsView'
 import { GlossaryView } from './GlossaryView'
 import { SettingsView } from './SettingsView'
 import { ThreadsView } from './ThreadsView'
-import { TranslateView } from './TranslateView'
 
 const nav: { tab: MainTab; label: string; icon: ReactNode }[] = [
-  { tab: 'translate', label: 'Dịch', icon: <Languages size={19} /> },
   { tab: 'threads', label: 'Threads', icon: <MessagesSquare size={19} /> },
   { tab: 'glossary', label: 'Glossary', icon: <BookOpen size={19} /> },
   { tab: 'contacts', label: 'Người liên hệ', icon: <Users size={19} /> },
@@ -61,7 +59,6 @@ function MainContent() {
           <Settings size={19} />
         </NavButton>
       </nav>
-      {mainTab === 'translate' && <TranslateView />}
       {mainTab === 'threads' && <ThreadsView />}
       {mainTab === 'glossary' && <GlossaryView />}
       {mainTab === 'contacts' && <ContactsView />}

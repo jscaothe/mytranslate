@@ -78,8 +78,17 @@ fn units(text: &str) -> f64 {
         .sum()
 }
 
-/// Logical width for a text: narrow for a short line, wider for a paragraph.
-pub fn auto_width(text: &str) -> f64 {
+/// Narrowest popup whose bottom row (keigo choice, feedback and "replace in chat") fits on one line.
+pub const MIN_WIDTH_WITH_KEIGO: f64 = 440.0;
+
+/// Logical width for a text: narrow for a short line, wider for a paragraph. A popup that writes Japanese has
+/// the keigo choice in its bottom row and is never narrower than `MIN_WIDTH_WITH_KEIGO`.
+pub fn auto_width(text: &str, keigo_row: bool) -> f64 {
+    let w = auto_width_for_text(text);
+    if keigo_row { w.max(MIN_WIDTH_WITH_KEIGO) } else { w }
+}
+
+fn auto_width_for_text(text: &str) -> f64 {
     match units(text) {
         u if u <= 60.0 => 380.0,
         u if u <= 160.0 => 440.0,
@@ -176,9 +185,12 @@ mod tests {
 
     #[test]
     fn width_follows_text_length() {
-        assert_eq!(auto_width("確認しました。"), 380.0);
-        assert_eq!(auto_width(&"あ".repeat(70)), 440.0);
-        assert_eq!(auto_width(&"a".repeat(1000)), 600.0);
+        assert_eq!(auto_width("確認しました。", false), 380.0);
+        assert_eq!(auto_width(&"あ".repeat(70), false), 440.0);
+        assert_eq!(auto_width(&"a".repeat(1000), false), 600.0);
+        // The keigo row needs room even for a one-word message.
+        assert_eq!(auto_width("Cảm ơn", true), MIN_WIDTH_WITH_KEIGO);
+        assert_eq!(auto_width(&"a".repeat(1000), true), 600.0);
     }
 
     #[test]

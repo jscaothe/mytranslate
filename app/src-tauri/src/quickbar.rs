@@ -9,9 +9,8 @@ use tauri::{
 };
 use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GWL_EXSTYLE, GWL_STYLE, GetWindowLongPtrW, SW_HIDE, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_CAPTION, WS_EX_NOACTIVATE,
-    WS_EX_TOOLWINDOW, WS_POPUP, WS_THICKFRAME,
+    GWL_EXSTYLE, GetWindowLongPtrW, SW_HIDE, SW_SHOWNOACTIVATE, SetWindowLongPtrW, ShowWindow, WS_EX_APPWINDOW,
+    WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW,
 };
 
 use crate::context::{self, Context};
@@ -46,7 +45,9 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .title("MyTranslate")
         .inner_size(DEFAULT_SIZE.0, DEFAULT_SIZE.1)
         .decorations(false)
-        .shadow(true)
+        // No Tauri shadow: it keeps a hidden caption and sizing frame, and Windows will not let such a window
+        // be shorter than about 70 px. Windows 11 still draws the rounded corners and border (round_corners).
+        .shadow(false)
         .always_on_top(true)
         .skip_taskbar(true)
         .resizable(false)
@@ -60,24 +61,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
             SetWindowLongPtrW(
                 hwnd,
                 GWL_EXSTYLE,
-                ex | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize,
-            );
-            // A plain popup like Windows' own menus: a borderless Tauri window keeps a hidden caption and
-            // sizing frame, and Windows will not let such a window be shorter than about 70 px.
-            let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
-            SetWindowLongPtrW(
-                hwnd,
-                GWL_STYLE,
-                (style & !((WS_CAPTION.0 | WS_THICKFRAME.0) as isize)) | WS_POPUP.0 as isize,
-            );
-            let _ = SetWindowPos(
-                hwnd,
-                None,
-                0,
-                0,
-                0,
-                0,
-                SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE,
+                (ex | (WS_EX_NOACTIVATE.0 | WS_EX_TOOLWINDOW.0) as isize) & !(WS_EX_APPWINDOW.0 as isize),
             );
         }
     }
@@ -87,6 +71,21 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 
 /// Windows 11 rounds the corners of a borderless window only when asked, like its own menus and flyouts.
 /// Earlier Windows versions ignore the request.
+/// A tool window without the app-window flag: never a taskbar button or an Alt+Tab entry, however often it is
+/// shown again (Tauri's skip_taskbar alone can come back after a hide and show).
+pub fn keep_off_taskbar(window: &WebviewWindow) {
+    if let Ok(hwnd) = window.hwnd() {
+        unsafe {
+            let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
+            SetWindowLongPtrW(
+                hwnd,
+                GWL_EXSTYLE,
+                (ex | WS_EX_TOOLWINDOW.0 as isize) & !(WS_EX_APPWINDOW.0 as isize),
+            );
+        }
+    }
+}
+
 pub fn round_corners(window: &WebviewWindow) {
     if let Ok(hwnd) = window.hwnd() {
         let pref = DWMWCP_ROUND;
@@ -155,6 +154,12 @@ fn allowed(store: &SettingsStore, exe: &str) -> bool {
         && !store.hotkeys_paused()
         && !store.is_blocked(exe)
         && (qa.app_scope == "all" || qa.apps.iter().any(|a| a.exe.eq_ignore_ascii_case(exe)))
+}
+
+/// Whether the settings allow the toolbar in the app in front (cheap; checked before asking UI Automation).
+pub fn allowed_in_foreground(app: &AppHandle) -> bool {
+    let exe = context::foreground().exe;
+    !exe.is_empty() && allowed(&app.state::<SettingsStore>(), &exe)
 }
 
 /// A selection that started at height `start_y` just ended at (x, y): show the toolbar there if the settings
@@ -280,6 +285,7 @@ pub fn quickbar_action(app: AppHandle, action: String) {
     };
     hide(&app);
     let Some(target) = target else { return };
+    crate::ai::prewarm(&app);
     let (popup_action, auto_copy) = match action.as_str() {
         "review" => (popup::Action::Review, false),
         "copyTranslation" => (popup::Action::Auto, true),

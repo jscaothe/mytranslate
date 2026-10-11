@@ -10,30 +10,22 @@ test.beforeEach(async ({ page }) => {
   await expect(composer(page)).toBeVisible()
 })
 
-test('Vietnamese in the composer is translated, a template is added, and Enter puts it back in the chat', async ({ page }) => {
+test('Vietnamese in the composer is translated and Enter puts it back in the chat', async ({ page }) => {
   await composer(page).fill('Em đã sửa lỗi đăng nhập, anh kiểm tra giúp em nhé')
   await page.keyboard.press('Control+Alt+K')
 
   const draft = popup(page).locator('textarea[data-role=draft]')
   await expect(draft).toBeVisible()
   await expect(popup(page).getByText('Ý nghĩa khi đọc lại')).toBeVisible()
+  // Only the translation and its reading back: nothing else under it.
+  await expect(popup(page).getByText('Mẫu câu')).toHaveCount(0)
   const translated = await draft.inputValue()
   expect(translated).not.toBe('')
-
-  // A greeting goes before the message, a closing after it; pressing again takes it off.
-  const greeting = popup(page).getByRole('button', { name: 'お疲れ様です。' })
-  await greeting.click()
-  await expect(greeting).toHaveAttribute('aria-pressed', 'true')
-  await expect(draft).toHaveValue(`お疲れ様です。\n${translated}`)
-  await popup(page).getByRole('button', { name: 'よろしくお願いいたします。', exact: true }).click()
-  await expect(draft).toHaveValue(`お疲れ様です。\n${translated}\nよろしくお願いいたします。`)
-  await greeting.click()
-  await expect(draft).toHaveValue(`${translated}\nよろしくお願いいたします。`)
 
   await draft.focus()
   await page.keyboard.press('Enter')
   await expect(popup(page)).toBeHidden()
-  await expect(composer(page)).toHaveValue(`${translated}\nよろしくお願いいたします。`)
+  await expect(composer(page)).toHaveValue(translated)
 })
 
 test('a Japanese message is translated and Claude suggests replies that can be copied', async ({ page }) => {

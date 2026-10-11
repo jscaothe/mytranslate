@@ -41,6 +41,10 @@ pub struct Timing {
     pub warm: bool,
     pub model: String,
     pub prompt_version: u32,
+    /// claude, openai or gemini.
+    pub provider: String,
+    /// Set when this provider answered because the chosen one failed.
+    pub fallback_from: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +74,8 @@ pub enum TranslateEvent {
     Error {
         kind: ErrorKind,
         message: String,
+        /// Which provider failed (filled in by the router).
+        provider: Option<String>,
     },
     /// After `Done`: where the translation was filed in the history.
     Saved {
@@ -88,6 +94,12 @@ pub enum ErrorKind {
     Cancelled,
     Timeout,
     Cli,
+    /// ChatGPT or Gemini chosen but no API key saved.
+    MissingKey,
+    /// The vendor rejected the API key.
+    BadKey,
+    /// Could not reach the vendor.
+    Network,
 }
 
 struct Process {
@@ -105,6 +117,9 @@ pub struct ClaudeCli {
     model: std::sync::Mutex<String>,
     spare: Mutex<Option<Process>>,
     cancels: std::sync::Mutex<HashMap<u64, oneshot::Sender<()>>>,
+    /// Requests cancelled before they reached `translate` (the page cancels as soon as it no longer needs a
+    /// result, which can be before the translate call is being handled). They never start.
+    cancelled_early: std::sync::Mutex<std::collections::HashSet<u64>>,
     next_id: AtomicU64,
 }
 
@@ -117,6 +132,7 @@ impl ClaudeCli {
             model: std::sync::Mutex::new(model.to_string()),
             spare: Mutex::new(None),
             cancels: std::sync::Mutex::new(HashMap::new()),
+            cancelled_early: std::sync::Mutex::new(std::collections::HashSet::new()),
             next_id: AtomicU64::new(1),
         })
     }
@@ -172,9 +188,19 @@ impl ClaudeCli {
     }
 
     pub fn cancel(&self, request_id: u64) {
-        if let Some(tx) = self.cancels.lock().unwrap().remove(&request_id) {
-            let _ = tx.send(());
+        match self.cancels.lock().unwrap().remove(&request_id) {
+            Some(tx) => {
+                let _ = tx.send(());
+            }
+            None => {
+                self.cancelled_early.lock().unwrap().insert(request_id);
+            }
         }
+    }
+
+    #[cfg(test)]
+    fn spare_is_empty(&self) -> bool {
+        self.spare.try_lock().map(|s| s.is_none()).unwrap_or(false)
     }
 
     pub fn next_request_id(&self) -> u64 {
@@ -184,6 +210,21 @@ impl ClaudeCli {
     /// Runs one translation, reporting progress through `emit`. Always ends with `Done` or `Error`.
     pub async fn translate(self: &Arc<Self>, request_id: u64, req: TranslateRequest, emit: impl Fn(TranslateEvent)) {
         let start = Instant::now();
+        // Registered first, so a cancel from here on stops the request; one that came earlier is honoured too.
+        let (cancel_tx, mut cancel_rx) = oneshot::channel();
+        {
+            let mut cancels = self.cancels.lock().unwrap();
+            if self.cancelled_early.lock().unwrap().remove(&request_id) {
+                drop(cancels);
+                emit(TranslateEvent::Error {
+                    provider: None,
+                    kind: ErrorKind::Cancelled,
+                    message: "cancelled".into(),
+                });
+                return;
+            }
+            cancels.insert(request_id, cancel_tx);
+        }
         let model = self.current_model();
 
         let taken = self.spare.lock().await.take().filter(|p| p.model == model);
@@ -203,17 +244,32 @@ impl ClaudeCli {
                 } else {
                     ErrorKind::Cli
                 };
+                self.cancels.lock().unwrap().remove(&request_id);
                 emit(TranslateEvent::Error {
+                    provider: None,
                     kind,
                     message: e.to_string(),
                 });
                 return;
             }
         };
+        // Cancelled while waiting for a process: nothing was sent, so keep the process for the next request.
+        if cancel_rx.try_recv().is_ok() {
+            let mut spare = self.spare.lock().await;
+            if spare.is_none() {
+                *spare = Some(process);
+            } else {
+                let _ = process.child.start_kill();
+            }
+            drop(spare);
+            emit(TranslateEvent::Error {
+                provider: None,
+                kind: ErrorKind::Cancelled,
+                message: "cancelled".into(),
+            });
+            return;
+        }
         emit(TranslateEvent::Started { warm });
-
-        let (cancel_tx, mut cancel_rx) = oneshot::channel();
-        self.cancels.lock().unwrap().insert(request_id, cancel_tx);
 
         let message = serde_json::json!({
             "type": "user",
@@ -226,7 +282,9 @@ impl ClaudeCli {
         }
         .await;
         if let Err(e) = outcome {
+            self.cancels.lock().unwrap().remove(&request_id);
             emit(TranslateEvent::Error {
+                provider: None,
                 kind: ErrorKind::Cli,
                 message: format!("could not send the request: {e}"),
             });
@@ -304,10 +362,16 @@ impl ClaudeCli {
                     warm,
                     model,
                     prompt_version: prompt::PROMPT_VERSION,
+                    provider: "claude".into(),
+                    fallback_from: None,
                 },
                 rate_limit,
             }),
-            Err((kind, message)) => emit(TranslateEvent::Error { kind, message }),
+            Err((kind, message)) => emit(TranslateEvent::Error {
+                provider: None,
+                kind,
+                message,
+            }),
         }
     }
 
@@ -428,6 +492,31 @@ fn find_claude() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_request_cancelled_before_it_starts_never_runs() {
+        let cli = ClaudeCli::new(std::env::temp_dir().join("mytranslate-cancel-test"), "sonnet");
+        let id = cli.next_request_id();
+        cli.cancel(id);
+        let events = std::sync::Mutex::new(Vec::new());
+        tauri::async_runtime::block_on(cli.translate(
+            id,
+            TranslateRequest::task(prompt::Direction::JaVi, "確認しました", prompt::Keigo::Formal),
+            |e| events.lock().unwrap().push(e),
+        ));
+        let events = events.into_inner().unwrap();
+        assert!(matches!(
+            events.as_slice(),
+            [TranslateEvent::Error {
+                provider: None,
+                kind: ErrorKind::Cancelled,
+                ..
+            }]
+        ));
+        // Nothing was started, and the cancellation is used up.
+        assert!(cli.spare_is_empty());
+        assert!(cli.cancelled_early.lock().unwrap().is_empty());
+    }
 
     #[test]
     fn classifies_login_errors() {

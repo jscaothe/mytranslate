@@ -132,6 +132,36 @@ pub fn show_main(app: &AppHandle) {
     }
 }
 
+/// The first time the main window is closed, says that the app keeps running in the tray: otherwise a new user
+/// may think it quit and wonder why the hotkeys still work, or look for it in the Start menu.
+pub fn notice_still_running(app: &AppHandle) {
+    use tauri_plugin_notification::NotificationExt;
+    let store = app.state::<SettingsStore>();
+    if store.flag("trayNoticeShown") {
+        return;
+    }
+    let value = match store.set_field("trayNoticeShown", Value::Bool(true)) {
+        Ok(value) => value,
+        Err(e) => {
+            log::warn!("could not save settings: {e}");
+            return;
+        }
+    };
+    crate::settings::broadcast(app, &value, "tray");
+    let main = store.hotkeys().main;
+    if let Err(e) = app
+        .notification()
+        .builder()
+        .title("MyTranslate vẫn đang chạy ở khay hệ thống")
+        .body(format!(
+            "Bôi đen tin nhắn trong Teams hoặc Slack để dịch. Nhấn {main} hoặc bấm biểu tượng ở khay để mở lại."
+        ))
+        .show()
+    {
+        log::warn!("could not show the tray notice: {e}");
+    }
+}
+
 fn toggle_pause(app: &AppHandle) {
     let store = app.state::<SettingsStore>();
     let paused = !store.hotkeys_paused();
@@ -139,7 +169,7 @@ fn toggle_pause(app: &AppHandle) {
         Ok(value) => {
             hotkeys::apply(app);
             sync(app);
-            let _ = app.emit("settings:changed", value);
+            crate::settings::broadcast(app, &value, "tray");
         }
         Err(e) => log::warn!("could not save settings: {e}"),
     }

@@ -9,6 +9,16 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use serde_json::Value;
 
+/// Tells every window the settings changed. `from` is the window (or "tray") that changed them, so that window
+/// can ignore its own change.
+pub fn broadcast(app: &tauri::AppHandle, value: &Value, from: &str) {
+    use tauri::Emitter;
+    let _ = app.emit(
+        "settings:changed",
+        serde_json::json!({ "settings": value, "from": from }),
+    );
+}
+
 pub struct SettingsStore {
     path: PathBuf,
     value: Mutex<Value>,
@@ -83,6 +93,11 @@ impl SettingsStore {
 
     pub fn model(&self) -> Option<String> {
         self.field("model")
+    }
+
+    /// A true/false setting; missing counts as false.
+    pub fn flag(&self, key: &str) -> bool {
+        self.field(key).unwrap_or(false)
     }
 
     fn field<T: for<'de> Deserialize<'de>>(&self, key: &str) -> Option<T> {

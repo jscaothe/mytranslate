@@ -219,7 +219,7 @@ export function GlossaryView() {
             đó. Thuật ngữ cá nhân được ưu tiên khi trùng.
           </>
         ) : (
-          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho Claude. Glossary chung của team đặt trong Cài đặt.'
+          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho AI. Glossary chung của team đặt trong Cài đặt.'
         )}
       </div>
     </div>

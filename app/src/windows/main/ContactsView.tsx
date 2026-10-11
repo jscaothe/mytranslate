@@ -88,7 +88,7 @@ function ConversationCard({ conversation: c }: { conversation: Conversation }) {
         />
       </div>
       <label className="flex flex-col gap-1.5">
-        <span className="text-[12px] font-semibold text-ink-3">Ghi chú cho Claude</span>
+        <span className="text-[12px] font-semibold text-ink-3">Ghi chú cho AI</span>
         <textarea
           value={note}
           rows={2}

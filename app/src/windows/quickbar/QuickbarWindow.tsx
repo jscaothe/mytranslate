@@ -1,27 +1,16 @@
 import { invoke } from '@tauri-apps/api/core'
-import { listen } from '@tauri-apps/api/event'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { useStore } from '../../store'
-
-/** Hide after this long without the pointer on the toolbar. */
-const IDLE_MS = 4000
 
 /**
  * The page in the "quickbar" window: the toolbar shown next to a mouse selection in a chat app.
  * The language of the selection is not known until a button is pressed, so the translate button says "Dịch".
+ * It stays until the user clicks somewhere else (or presses one of its buttons).
  */
 export function QuickbarWindow() {
   const { settings } = useStore()
   const barRef = useRef<HTMLDivElement>(null)
-  const [shownAt, setShownAt] = useState(0)
-  const [hover, setHover] = useState(false)
-
-  useEffect(() => {
-    const off = listen('quickbar:shown', () => setShownAt(Date.now()))
-    return () => void off.then((f) => f())
-  }, [])
-
   // Report the toolbar's real size so the window fits it exactly.
   useEffect(() => {
     const el = barRef.current?.firstElementChild as HTMLElement | null
@@ -37,12 +26,6 @@ export function QuickbarWindow() {
     return () => ro.disconnect()
   }, [settings.quickActions.items, settings.quickActions.display])
 
-  useEffect(() => {
-    if (!shownAt || hover) return
-    const t = window.setTimeout(() => void invoke('quickbar_hide'), IDLE_MS)
-    return () => window.clearTimeout(t)
-  }, [shownAt, hover])
-
   return (
     <div ref={barRef} className="flex w-max">
       <QuickActionBar
@@ -52,7 +35,6 @@ export function QuickbarWindow() {
         display={settings.quickActions.display}
         onAction={(action) => void invoke('quickbar_action', { action })}
         onDismiss={() => void invoke('quickbar_hide')}
-        onHoverChange={setHover}
       />
     </div>
   )

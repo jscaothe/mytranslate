@@ -232,6 +232,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
         .visible(false)
         .build()?;
     crate::quickbar::round_corners(&window);
+    crate::quickbar::keep_off_taskbar(&window);
 
     let handle = app.clone();
     window.on_window_event(move |event| {
@@ -272,6 +273,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn on_hotkey(app: &AppHandle, action: Action) {
     // Right now, while Alt is still held: keep the app in front from opening its menu bar on Alt release.
     capture::mask_menu_key();
+    // ChatGPT or Gemini: connect now, while the text is being copied.
+    crate::ai::prewarm(app);
     run(app, action, None, false, None);
 }
 
@@ -403,7 +406,7 @@ fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Res
     let width = if geometry.user_width {
         geometry.width
     } else {
-        placement::auto_width(&payload.text)
+        placement::auto_width(&payload.text, payload.direction == Direction::ViJa)
     };
     // A Japanese result shows a second block: the reading back, or the suggestion's meaning.
     let with_back = payload.direction != Direction::JaVi;

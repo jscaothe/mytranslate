@@ -2,8 +2,10 @@ import { createContext, useContext } from 'react'
 import type { Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
-export type MainTab = 'translate' | 'threads' | 'glossary' | 'contacts' | 'settings'
+export type MainTab = 'threads' | 'glossary' | 'contacts' | 'settings'
 export type ThemePref = 'system' | 'light' | 'dark'
+
+export type AiProvider = 'claude' | 'openai' | 'gemini'
 
 export interface HotkeyMap {
   auto: string
@@ -16,17 +18,20 @@ export interface HotkeyMap {
 export interface Settings {
   theme: ThemePref
   defaultKeigo: Keigo
+  /** Claude model (Claude Code). */
   model: 'sonnet' | 'haiku'
-  provider: 'cli' | 'api'
+  /** Which AI translates. Claude goes through Claude Code; ChatGPT and Gemini through their APIs. */
+  aiProvider: AiProvider
+  /** Model ids for the API providers; empty uses the recommended one. */
+  openaiModel: string
+  geminiModel: string
+  /** When the chosen AI fails before answering, try the others that are set up. */
+  aiFallback: boolean
   hotkeys: HotkeyMap
-  /** Free-form self introduction that is added to every prompt. */
-  profilePrompt: string
   /** Mini toolbar shown when text is selected with the mouse. */
   quickActions: QuickActionSettings
   /** The team's shared glossary (YAML), read-only; empty when there is none. */
   glossaryPath: string
-  /** Fixed sentences that can be added before or after a Japanese result. */
-  templates: Template[]
   /** Messages older than this many months are deleted; 0 keeps everything. */
   retentionMonths: number
   /** Look for a new version after start-up and every few hours. */
@@ -36,24 +41,11 @@ export interface Settings {
   hotkeysPaused: boolean
   /** Whether the first-run guide has been completed. */
   onboarded: boolean
+  /** The one-time notice "still running in the tray" was shown (set by the Rust side on the first close). */
+  trayNoticeShown: boolean
+  /** The one-time tip in the first translation popup was shown. */
+  popupTipShown: boolean
 }
-
-export interface Template {
-  id: string
-  /** Japanese text as it is sent. */
-  ja: string
-  /** Its meaning, for the list. */
-  vi: string
-  /** Greetings go before the message, closings after it. */
-  position: 'before' | 'after'
-}
-
-export const DEFAULT_TEMPLATES: Template[] = [
-  { id: 'otsukare', ja: 'お疲れ様です。', vi: 'Chào anh/chị (lời chào trong công việc)', position: 'before' },
-  { id: 'osewa', ja: 'いつもお世話になっております。', vi: 'Cảm ơn anh/chị đã luôn giúp đỡ', position: 'before' },
-  { id: 'yoroshiku', ja: 'よろしくお願いいたします。', vi: 'Rất mong anh/chị giúp đỡ', position: 'after' },
-  { id: 'kakunin', ja: 'ご確認のほど、よろしくお願いいたします。', vi: 'Nhờ anh/chị kiểm tra giúp', position: 'after' },
-]
 
 export type QuickActionId = 'translate' | 'review' | 'copyTranslation'
 

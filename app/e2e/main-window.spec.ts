@@ -90,16 +90,6 @@ test('glossary: add a personal term and filter by scope', async ({ page }) => {
   await expect(page.getByRole('cell', { name: '受入テスト' })).toBeVisible()
 })
 
-test('settings: templates can be added and restored to the defaults', async ({ page }) => {
-  await openTab(page, 'Cài đặt')
-  await page.getByRole('textbox', { name: 'Câu tiếng Nhật' }).fill('引き続きよろしくお願いいたします。')
-  await page.getByRole('textbox', { name: 'Nghĩa' }).fill('Mong tiếp tục được giúp đỡ')
-  await page.locator('form').filter({ has: page.getByRole('textbox', { name: 'Câu tiếng Nhật' }) }).getByRole('button', { name: 'Thêm' }).click()
-  await expect(page.getByText('引き続きよろしくお願いいたします。')).toBeVisible()
-  await page.getByRole('button', { name: 'Khôi phục mẫu mặc định' }).click()
-  await expect(page.getByText('引き続きよろしくお願いいたします。')).toHaveCount(0)
-})
-
 test('settings: history retention and the two-step wipe', async ({ page }) => {
   await openTab(page, 'Cài đặt')
   const keep = page.getByRole('radiogroup', { name: 'Giữ lịch sử' })
@@ -125,4 +115,21 @@ test('settings: checking finds a new version and installing shows progress', asy
   // Other tabs show the waiting update as a banner, which can be put off.
   await page.getByRole('button', { name: 'Threads', exact: true }).click()
   await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
+})
+
+test('settings: choose ChatGPT, save a key and test it', async ({ page }) => {
+  await openTab(page, 'Cài đặt')
+  const ai = page.getByRole('radiogroup', { name: 'AI dùng để dịch' })
+  await ai.getByRole('radio', { name: 'ChatGPT' }).click()
+  await expect(ai.getByRole('radio', { name: 'ChatGPT' })).toHaveAttribute('aria-checked', 'true')
+  const key = page.getByRole('textbox', { name: 'API key ChatGPT' })
+  await key.fill('sk-test')
+  await page.getByRole('button', { name: 'Lưu', exact: true }).click()
+  await expect(key).toHaveValue('')
+  await page.getByRole('button', { name: 'Dịch thử' }).click()
+  await expect(page.getByText(/Chữ đầu tiên sau/)).toBeVisible()
+
+  // Gemini has no key yet in the prototype: testing is not possible until one is saved.
+  await ai.getByRole('radio', { name: 'Gemini' }).click()
+  await expect(page.getByRole('button', { name: 'Dịch thử' })).toBeDisabled()
 })

@@ -1,20 +1,19 @@
 import { invoke } from '@tauri-apps/api/core'
 import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
-import { AlertCircle, ArrowUpCircle, CheckCircle2, Loader2, RefreshCw, X } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
-import { ProfilePromptEditor } from '../../components/ProfilePromptEditor'
+import { ArrowUpCircle, Loader2, RefreshCw, X } from 'lucide-react'
+import { useState, type ReactNode } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { InstallProgress, UpToDate } from '../../components/UpdatePanel'
 import type { useUpdates } from '../../lib/updates'
 import { Button, Hotkey, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { keigoLabels } from '../../data/mock'
-import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
+import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
-import { DEFAULT_QUICK_ACTION_ITEMS, DEFAULT_TEMPLATES, useStore, type HotkeyMap } from '../../store'
+import { DEFAULT_QUICK_ACTION_ITEMS, useStore, type HotkeyMap } from '../../store'
 import { AppScopeEditor } from './AppScopeEditor'
 import { QuickActionOrderEditor } from './QuickActionOrderEditor'
-import { TemplatesEditor } from './TemplatesEditor'
+import { AiProvidersGroup } from './AiProvidersGroup'
 
 const hotkeyRows: { key: keyof HotkeyMap; label: string }[] = [
   { key: 'auto', label: 'Dịch, tự nhận diện hướng' },
@@ -176,15 +175,6 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           )}
         </Group>
 
-        <Group
-          title="Hồ sơ"
-          hint="Viết tự do về bạn. Nội dung này được thêm vào mọi yêu cầu gửi Claude để dịch đúng giọng, đúng xưng hô."
-        >
-          <div className="p-4">
-            <ProfilePromptEditor value={settings.profilePrompt} onChange={(v) => updateSettings({ profilePrompt: v })} />
-          </div>
-        </Group>
-
         <Group title="Dịch">
           <Row label="Mức kính ngữ mặc định">
             <Segmented
@@ -194,57 +184,9 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
               options={(['casual', 'polite', 'formal'] as const).map((k) => ({ value: k, label: keigoLabels[k] }))}
             />
           </Row>
-          <Row label="Model" hint="Haiku nhanh và tiết kiệm hạn mức hơn, Sonnet dịch tốt hơn.">
-            <Segmented
-              label="Model"
-              value={settings.model}
-              onChange={(m) => updateSettings({ model: m })}
-              options={[
-                { value: 'sonnet', label: 'Sonnet' },
-                { value: 'haiku', label: 'Haiku' },
-              ]}
-            />
-          </Row>
-          {isTauri ? (
-            <ClaudeConnectionRow />
-          ) : (
-          <>
-          <Row label="Kết nối Claude" hint={settings.provider === 'cli' ? 'Dùng Claude Code đã đăng nhập trên máy này.' : 'Dùng API key của công ty.'}>
-            <Segmented
-              label="Kết nối Claude"
-              value={settings.provider}
-              onChange={(p) => updateSettings({ provider: p })}
-              options={[
-                { value: 'cli', label: 'Claude Code' },
-                { value: 'api', label: 'API key' },
-              ]}
-            />
-          </Row>
-          {settings.provider === 'cli' ? (
-            <Row label="Trạng thái">
-              <span className="flex items-center gap-1.5 text-[13px] text-good">
-                <CheckCircle2 size={15} /> Đã đăng nhập (claude 2.x)
-              </span>
-            </Row>
-          ) : (
-            <Row label="API key">
-              <input type="password" className={cx(inputClass, 'w-64')} placeholder="sk-ant-..." />
-            </Row>
-          )}
-          </>
-          )}
         </Group>
 
-        <Group title="Mẫu câu" hint="Hiện dưới bản dịch tiếng Nhật; bấm để thêm vào đầu hoặc cuối tin trước khi dán hay sao chép.">
-          <TemplatesEditor templates={settings.templates} onChange={(templates) => updateSettings({ templates })} />
-          {JSON.stringify(settings.templates) !== JSON.stringify(DEFAULT_TEMPLATES) && (
-            <div className="flex justify-end px-4 py-1.5">
-              <Button size="sm" variant="ghost" onClick={() => updateSettings({ templates: DEFAULT_TEMPLATES })}>
-                Khôi phục mẫu mặc định
-              </Button>
-            </div>
-          )}
-        </Group>
+        <AiProvidersGroup group={Group} row={Row} />
 
         <Group title="Glossary chung">
           <Row label="File glossary dự án" hint="File YAML trong repo dự án hoặc thư mục đồng bộ OneDrive / SharePoint. App chỉ đọc, tự đọc lại khi file đổi.">
@@ -334,7 +276,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
               : 'Toàn bộ lịch sử dịch nằm trên máy này.'
           }
         >
-          <Row label="Hướng dẫn ban đầu" hint="Kiểm tra lại kết nối Claude Code, hồ sơ và thử dịch.">
+          <Row label="Hướng dẫn ban đầu" hint="Kiểm tra lại kết nối Claude Code và thử dịch.">
             <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>Xem lại</Button>
           </Row>
           <Row label="Giữ lịch sử" hint="Tin cũ hơn thời hạn này được tự xóa, thread không còn tin nào cũng bị xóa.">
@@ -428,42 +370,6 @@ function UpdatesGroup({ updates, auto, onAuto }: { updates: ReturnType<typeof us
         </>
       )}
     </Group>
-  )
-}
-
-/** The real Claude Code status, checked when Settings opens. */
-function ClaudeConnectionRow() {
-  const [status, setStatus] = useState<ClaudeStatus | null>(null)
-  useEffect(() => {
-    let alive = true
-    void claudeStatus()
-      .then((s) => alive && setStatus(s))
-      .catch((e) => alive && setStatus({ path: '', version: null, error: String(e) }))
-    return () => {
-      alive = false
-    }
-  }, [])
-  return (
-    <Row label="Claude Code" hint="Dịch bằng tài khoản Claude đã đăng nhập trong Claude Code trên máy này.">
-      {!status ? (
-        <span className="flex items-center gap-1.5 text-[13px] text-ink-2">
-          <Loader2 size={15} className="animate-spin" /> Đang kiểm tra…
-        </span>
-      ) : status.version ? (
-        <span className="flex items-center gap-1.5 text-[13px] text-good" title={status.path}>
-          <CheckCircle2 size={15} /> {status.version}
-        </span>
-      ) : (
-        <span className="flex items-center gap-2">
-          <span className="flex max-w-64 items-center gap-1.5 truncate text-[13px] text-bad" title={status.error ?? ''}>
-            <AlertCircle size={15} className="shrink-0" /> Không chạy được claude
-          </span>
-          <Button size="sm" onClick={() => void invoke('open_claude_login')}>
-            Mở Claude Code
-          </Button>
-        </span>
-      )}
-    </Row>
   )
 }
 

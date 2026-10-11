@@ -1,5 +1,5 @@
 import { X } from 'lucide-react'
-import { useEffect, type CSSProperties, type ReactNode } from 'react'
+import type { CSSProperties, ReactNode } from 'react'
 import type { QuickActionId, QuickActionItem } from '../store'
 import { quickActionMeta, visibleQuickActions } from './quickActions'
 import { cx } from './styles'
@@ -14,7 +14,6 @@ export function QuickActionBar({
   display = 'iconText',
   onAction,
   onDismiss,
-  onHoverChange,
   style,
   className,
   bare = false,
@@ -27,15 +26,11 @@ export function QuickActionBar({
   display?: 'iconText' | 'iconOnly'
   onAction: (a: QuickActionId) => void
   onDismiss?: () => void
-  onHoverChange?: (hover: boolean) => void
   style?: CSSProperties
   className?: string
-  /** In its own window, Windows draws the border and shadow. */
+  /** In its own window, Windows draws the border and rounded corners. */
   bare?: boolean
 }) {
-  // The bar can disappear under the pointer (after a click), which never fires mouseleave.
-  useEffect(() => () => onHoverChange?.(false), [onHoverChange])
-
   return (
     <div
       role="toolbar"
@@ -43,12 +38,11 @@ export function QuickActionBar({
       data-quick-bar
       style={style}
       onMouseDown={(e) => e.preventDefault()}
-      onMouseEnter={() => onHoverChange?.(true)}
-      onMouseLeave={() => onHoverChange?.(false)}
       className={cx(
-        // Same height, padding and icon size in both display modes; only the labels come and go.
-        'flex w-max items-center gap-0.5 bg-window p-1',
-        !bare && 'anim-popup rounded-[10px] border border-line shadow-popup',
+        // Same height, padding and icon size in both display modes; only the labels come and go. 32 px in all
+        // (4 + 24 + 4) is a whole number of pixels at 100/125/150/175 % scaling, so top and bottom stay even.
+        'flex h-8 w-max items-center gap-0.5 bg-window p-1',
+        !bare && 'anim-popup rounded-lg border border-line shadow-popup',
         className,
       )}
     >
@@ -59,7 +53,7 @@ export function QuickActionBar({
           <BarButton
             key={id}
             onClick={() => onAction(id)}
-            icon={<Icon size={16} strokeWidth={1.9} />}
+            icon={<Icon size={11} strokeWidth={2.2} />}
             primary={meta.primary}
             iconOnly={display === 'iconOnly'}
             nativeTooltip={bare}
@@ -71,15 +65,15 @@ export function QuickActionBar({
       })}
       {onDismiss && (
         <>
-          <span aria-hidden className="mx-1 h-5 w-px shrink-0 bg-line" />
+          <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-line" />
           <button
             type="button"
             aria-label="Ẩn thanh thao tác"
             title={bare ? 'Ẩn (Esc)' : undefined}
             onClick={onDismiss}
-            className="flex h-8 w-7 shrink-0 items-center justify-center rounded-md text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+            className="flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
           >
-            <X size={14} />
+            <X size={10} strokeWidth={2.2} />
           </button>
         </>
       )}
@@ -113,8 +107,8 @@ function BarButton({
       aria-label={iconOnly ? children : undefined}
       onClick={onClick}
       className={cx(
-        'group relative flex h-8 shrink-0 items-center justify-center rounded-md text-[13px] font-medium whitespace-nowrap transition-colors',
-        iconOnly ? 'w-8' : 'gap-1.5 pr-3 pl-2.5',
+        'group relative flex h-6 shrink-0 items-center justify-center rounded-[5px] text-[12px] font-medium whitespace-nowrap transition-colors',
+        iconOnly ? 'w-6' : 'gap-1 pr-2 pl-1.5',
         primary ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'text-ink-2 hover:bg-hover hover:text-ink',
       )}
     >

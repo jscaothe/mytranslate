@@ -38,6 +38,10 @@ export interface Timing {
   warm: boolean
   model: string
   promptVersion: number
+  /** claude, openai or gemini. */
+  provider: string
+  /** Set when this provider answered because the chosen one failed. */
+  fallbackFrom: string | null
 }
 
 export interface RateLimit {
@@ -47,14 +51,25 @@ export interface RateLimit {
   limitType: string | null
 }
 
-export type ErrorKind = 'not_installed' | 'not_logged_in' | 'rate_limited' | 'cancelled' | 'timeout' | 'cli'
+export type ErrorKind =
+  | 'not_installed'
+  | 'not_logged_in'
+  | 'rate_limited'
+  | 'cancelled'
+  | 'timeout'
+  | 'cli'
+  /** ChatGPT or Gemini chosen without an API key. */
+  | 'missing_key'
+  /** The vendor rejected the API key. */
+  | 'bad_key'
+  | 'network'
 
 export type TranslateEvent =
   | { type: 'started'; warm: boolean }
   | { type: 'thinking' }
   | { type: 'delta'; sections: Sections }
   | { type: 'done'; sections: Sections; timing: Timing; rateLimit: RateLimit | null }
-  | { type: 'error'; kind: ErrorKind; message: string }
+  | { type: 'error'; kind: ErrorKind; message: string; provider?: string | null }
   /** After `done`: where the result was filed in the history. */
   | { type: 'saved'; messageId: number; threadId: number; threadTitle: string }
 
@@ -63,7 +78,6 @@ export interface TranslateRequest {
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
   keigo: Keigo
-  profile?: string
   /** History: the chat window the text came from; the Rust side adds the thread's messages as context. */
   conversationId?: number | null
   /** History: the chosen thread; null starts a new one. */
@@ -116,7 +130,7 @@ function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => v
     onEvent({
       type: 'done',
       sections: final,
-      timing: { firstTokenMs: Math.round(first), totalMs: Math.round(performance.now() - start), thought: false, warm: true, model: 'mock', promptVersion: 0 },
+      timing: { firstTokenMs: Math.round(first), totalMs: Math.round(performance.now() - start), thought: false, warm: true, model: 'mock', promptVersion: 0, provider: 'claude', fallbackFrom: null },
       rateLimit: null,
     })
   }

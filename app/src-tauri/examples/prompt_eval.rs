@@ -2,16 +2,18 @@
 //! Markdown sheet for a BrSE to score (1-5) each result. Every case is one request on the user's Claude plan.
 //!
 //!   cargo run --example prompt_eval -- ../../spikes/sp5-prompt-quality/cases.json ../../spikes/sp5-prompt-quality/results.md
+//!   PROVIDER=gemini GEMINI_API_KEY=... cargo run --example prompt_eval -- cases.json results-gemini.md
 
 use std::sync::{Arc, Mutex};
 
 use mytranslate_lib::prompt::{Direction, Keigo, PROMPT_VERSION, TranslateRequest};
 use mytranslate_lib::provider::claude_cli::{ClaudeCli, TranslateEvent};
+use mytranslate_lib::provider::http_api::Api;
+use mytranslate_lib::provider::{Route, Router};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Cases {
-    profile: String,
     cases: Vec<Case>,
 }
 
@@ -35,25 +37,46 @@ fn main() {
         std::process::exit(2);
     };
     let cases: Cases = serde_json::from_str(&std::fs::read_to_string(input).expect("read cases")).expect("parse cases");
-    let model = std::env::var("MODEL").unwrap_or_else(|_| "sonnet".into());
+    // PROVIDER=claude (default, Claude Code), openai or gemini (key in OPENAI_API_KEY / GEMINI_API_KEY).
+    let provider = std::env::var("PROVIDER").unwrap_or_else(|_| "claude".into());
+    let api = match provider.as_str() {
+        "openai" => Some(Api::OpenAi),
+        "gemini" => Some(Api::Gemini),
+        _ => None,
+    };
+    let model = std::env::var("MODEL").unwrap_or_else(|_| match api {
+        Some(api) => api.default_model().to_string(),
+        None => "sonnet".into(),
+    });
+    let route = match api {
+        None => Route::Claude,
+        Some(api) => Route::Api {
+            api,
+            model: model.clone(),
+            key: std::env::var(format!("{}_API_KEY", api.id().to_uppercase())).ok(),
+        },
+    };
 
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let rows = runtime.block_on(async {
         let workdir = std::env::temp_dir().join("mytranslate-prompt-eval");
         let cli = ClaudeCli::new(workdir, &model);
-        cli.refill();
+        if api.is_none() {
+            cli.refill();
+        }
+        let router = Router::new(cli);
         let mut rows = Vec::new();
         for case in &cases.cases {
-            let mut req = TranslateRequest::task(case.direction, &case.text, case.keigo);
-            req.profile = cases.profile.clone();
+            let req = TranslateRequest::task(case.direction, &case.text, case.keigo);
             let done: Arc<Mutex<Option<TranslateEvent>>> = Arc::default();
             let out = done.clone();
-            cli.translate(cli.next_request_id(), req, move |e| {
-                if matches!(e, TranslateEvent::Done { .. } | TranslateEvent::Error { .. }) {
-                    *out.lock().unwrap() = Some(e);
-                }
-            })
-            .await;
+            router
+                .translate(router.next_request_id(), req, std::slice::from_ref(&route), move |e| {
+                    if matches!(e, TranslateEvent::Done { .. } | TranslateEvent::Error { .. }) {
+                        *out.lock().unwrap() = Some(e);
+                    }
+                })
+                .await;
             let event = done.lock().unwrap().take();
             eprintln!(
                 "{}: {}",

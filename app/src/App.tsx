@@ -32,7 +32,7 @@ export default function App() {
   if (isTauri) {
     const windowLabel = getCurrentWindow().label
     return (
-      <StoreProvider initialScreen="main" initialMainTab="translate">
+      <StoreProvider initialScreen="main" initialMainTab="threads">
         {windowLabel === 'popup' ? <PopupShell /> : windowLabel === 'quickbar' ? <QuickbarShell /> : <TauriShell />}
       </StoreProvider>
     )
@@ -68,6 +68,11 @@ function PopupShell() {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+  // A real window: content longer than it scrolls inside the popup's body, never the whole page.
+  useEffect(() => {
+    document.documentElement.style.overflow = 'hidden'
+    document.body.style.overflow = 'hidden'
+  }, [])
   return <PopupWindow />
 }
 

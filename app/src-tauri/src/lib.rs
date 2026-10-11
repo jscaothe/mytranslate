@@ -1,5 +1,8 @@
+mod ai;
 mod capture;
+mod chat_apps;
 mod context;
+mod credentials;
 mod export;
 mod history;
 mod hotkeys;
@@ -13,6 +16,7 @@ mod settings;
 mod team_glossary;
 mod threads;
 mod tray;
+mod ui_selection;
 mod updates;
 
 use std::sync::{Arc, Mutex};
@@ -28,6 +32,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 use history::{History, NewMessage};
 use hotkeys::{HotkeyAction, HotkeyState};
 use prompt::{Direction, Keigo, ThreadMessage, TranslateRequest};
+use provider::Router;
 use provider::claude_cli::{ClaudeCli, Timing, TranslateEvent};
 use provider::stream_parser::Sections;
 use settings::SettingsStore;
@@ -125,24 +130,26 @@ fn conversation_note(app: &AppHandle, conversation_id: Option<i64>) -> String {
 }
 
 /// Runs a request to the end and returns its sections (for tasks that are not streamed to a page).
-async fn complete(cli: &Arc<ClaudeCli>, request: TranslateRequest) -> Result<Sections, String> {
+async fn complete(app: &AppHandle, router: &Arc<Router>, request: TranslateRequest) -> Result<Sections, String> {
     let result: Arc<Mutex<Option<Result<Sections, String>>>> = Arc::default();
     let out = result.clone();
-    cli.translate(cli.next_request_id(), request, move |event| match event {
-        TranslateEvent::Done { sections, .. } => *out.lock().unwrap() = Some(Ok(sections)),
-        TranslateEvent::Error { message, .. } => *out.lock().unwrap() = Some(Err(message)),
-        _ => {}
-    })
-    .await;
+    let routes = ai::routes(app);
+    router
+        .translate(router.next_request_id(), request, &routes, move |event| match event {
+            TranslateEvent::Done { sections, .. } => *out.lock().unwrap() = Some(Ok(sections)),
+            TranslateEvent::Error { message, .. } => *out.lock().unwrap() = Some(Err(message)),
+            _ => {}
+        })
+        .await;
     let r = result.lock().unwrap().take();
-    r.unwrap_or_else(|| Err("Claude không trả lời".into()))
+    r.unwrap_or_else(|| Err("AI không trả lời".into()))
 }
 
 /// Translates with the thread's recent messages as context, then files the result in the history.
 #[tauri::command]
 async fn translate(
     app: AppHandle,
-    cli: State<'_, Arc<ClaudeCli>>,
+    router: State<'_, Arc<Router>>,
     request_id: u64,
     mut request: TranslateRequest,
     on_event: Channel<TranslateEvent>,
@@ -172,20 +179,22 @@ async fn translate(
     request.glossary = glossary_for(&app, &request.text);
     request.conversation_note = conversation_note(&app, request.conversation_id);
 
-    let cli = cli.inner().clone();
+    let router = router.inner().clone();
     let filed = request.clone();
-    cli.translate(request_id, request, move |event| {
-        let saved = match &event {
-            TranslateEvent::Done { sections, timing, .. } => file_result(&app, &filed, sections, timing),
-            _ => None,
-        };
-        let _ = on_event.send(event);
-        if let Some(saved) = saved {
-            let _ = on_event.send(saved);
-            let _ = app.emit("history:changed", ());
-        }
-    })
-    .await;
+    let routes = ai::routes(&app);
+    router
+        .translate(request_id, request, &routes, move |event| {
+            let saved = match &event {
+                TranslateEvent::Done { sections, timing, .. } => file_result(&app, &filed, sections, timing),
+                _ => None,
+            };
+            let _ = on_event.send(event);
+            if let Some(saved) = saved {
+                let _ = on_event.send(saved);
+                let _ = app.emit("history:changed", ());
+            }
+        })
+        .await;
     Ok(())
 }
 
@@ -457,7 +466,7 @@ async fn history_export(app: AppHandle, thread_id: i64) -> Result<Option<String>
 #[tauri::command]
 async fn thread_summarize(
     app: AppHandle,
-    cli: State<'_, Arc<ClaudeCli>>,
+    router: State<'_, Arc<Router>>,
     thread_id: i64,
 ) -> Result<history::ThreadInfo, String> {
     let history = app.state::<History>();
@@ -468,7 +477,7 @@ async fn thread_summarize(
     let mut request = TranslateRequest::task(Direction::Summarize, "", Keigo::Polite);
     request.thread_title = Some(title);
     request.thread_messages = messages;
-    let sections = complete(cli.inner(), request).await?;
+    let sections = complete(&app, router.inner(), request).await?;
     if sections.summary.trim().is_empty() {
         return Err("Claude không trả về tóm tắt".into());
     }
@@ -492,7 +501,7 @@ struct Reply {
 #[tauri::command]
 async fn suggest_replies(
     app: AppHandle,
-    cli: State<'_, Arc<ClaudeCli>>,
+    router: State<'_, Arc<Router>>,
     text: String,
     keigo: Keigo,
     conversation_id: Option<i64>,
@@ -507,7 +516,7 @@ async fn suggest_replies(
     }
     request.glossary = glossary_for(&app, &text);
     request.conversation_note = conversation_note(&app, conversation_id);
-    let sections = complete(cli.inner(), request).await?;
+    let sections = complete(&app, router.inner(), request).await?;
     let replies = parse_replies(&sections.replies);
     if replies.is_empty() {
         return Err("Claude không trả về gợi ý".into());
@@ -606,13 +615,13 @@ fn history_rename_thread(app: AppHandle, thread_id: i64, title: String) -> Resul
 }
 
 #[tauri::command]
-fn cancel_translation(cli: State<'_, Arc<ClaudeCli>>, request_id: u64) {
-    cli.cancel(request_id);
+fn cancel_translation(router: State<'_, Arc<Router>>, request_id: u64) {
+    router.cancel(request_id);
 }
 
 #[tauri::command]
-fn next_request_id(cli: State<'_, Arc<ClaudeCli>>) -> u64 {
-    cli.next_request_id()
+fn next_request_id(router: State<'_, Arc<Router>>) -> u64 {
+    router.next_request_id()
 }
 
 #[derive(Serialize)]
@@ -643,6 +652,17 @@ async fn claude_status(cli: State<'_, Arc<ClaudeCli>>) -> Result<ClaudeStatus, S
         version,
         error,
     })
+}
+
+/// Teams and Slack, when installed, for the getting-started screen's "Mở Teams" / "Mở Slack".
+#[tauri::command]
+fn chat_apps_installed() -> Vec<chat_apps::ChatApp> {
+    chat_apps::installed()
+}
+
+#[tauri::command]
+fn open_chat_app(app: chat_apps::ChatApp) -> Result<(), String> {
+    chat_apps::open(app)
 }
 
 /// Opens a console running `claude`, where the user signs in with their Claude account.
@@ -676,7 +696,7 @@ struct SettingsSaved {
 
 /// Saves the settings, applies what the Rust side owns (hotkeys, model, autostart) and tells every window.
 #[tauri::command]
-async fn settings_set(app: AppHandle, value: Value) -> Result<SettingsSaved, String> {
+async fn settings_set(app: AppHandle, window: tauri::WebviewWindow, value: Value) -> Result<SettingsSaved, String> {
     let store = app.state::<SettingsStore>();
     let before = store.get();
     store.set(value.clone()).map_err(|e| e.to_string())?;
@@ -698,7 +718,9 @@ async fn settings_set(app: AppHandle, value: Value) -> Result<SettingsSaved, Str
     if changed("retentionMonths") {
         apply_retention(&app);
     }
-    let _ = app.emit("settings:changed", &value);
+    // The window that made the change already shows it; echoing it back would overwrite what the user typed
+    // since (a stale value arriving after the next keystroke breaks fast typing and Vietnamese input methods).
+    settings::broadcast(&app, &value, window.label());
     Ok(SettingsSaved { failed_hotkeys })
 }
 
@@ -742,6 +764,7 @@ pub fn run() {
         .manage(updates::UpdateState::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -788,6 +811,7 @@ pub fn run() {
             let cli = ClaudeCli::new(workdir, &model);
             cli.refill();
             cli.keep_fresh();
+            app.manage(Router::new(cli.clone()));
             app.manage(cli);
 
             popup::create(app.handle())?;
@@ -804,6 +828,7 @@ pub fn run() {
                     if let WindowEvent::CloseRequested { api, .. } = event {
                         api.prevent_close();
                         let _ = window.hide();
+                        tray::notice_still_running(window.app_handle());
                     }
                 });
                 if !std::env::args().any(|a| a == BACKGROUND_ARG) {
@@ -818,6 +843,8 @@ pub fn run() {
             next_request_id,
             claude_status,
             open_claude_login,
+            chat_apps_installed,
+            open_chat_app,
             settings_get,
             settings_set,
             show_main_window,
@@ -835,6 +862,10 @@ pub fn run() {
             data_backup,
             data_restore,
             data_wipe,
+            ai::ai_keys_status,
+            ai::ai_key_set,
+            ai::ai_models,
+            ai::ai_test,
             updates::update_status,
             updates::update_check,
             updates::update_install,

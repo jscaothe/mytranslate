@@ -7,7 +7,9 @@ export type TranslationPhase = 'waiting' | 'thinking' | 'streaming' | 'done' | '
 export interface TranslationState {
   phase: TranslationPhase
   sections: Sections
-  error: { kind: ErrorKind; message: string } | null
+  error: { kind: ErrorKind; message: string; provider: string } | null
+  /** Which AI answered, and which one failed first when the answer came from a fallback. */
+  answeredBy: { provider: string; model: string; fallbackFrom: string | null } | null
   /** Plan usage reported by the CLI with the result, when it reported any. */
   rateLimit: RateLimit | null
   /** Where the result was filed in the history (real app only). */
@@ -18,6 +20,7 @@ const initial: TranslationState = {
   phase: 'waiting',
   sections: emptySections,
   error: null,
+  answeredBy: null,
   rateLimit: null,
   saved: null,
 }
@@ -37,7 +40,6 @@ export function useTranslation({
   direction,
   text,
   keigo,
-  profile,
   runKey,
   enabled,
   scenario,
@@ -46,7 +48,6 @@ export function useTranslation({
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
   keigo: Keigo
-  profile: string
   runKey: number
   enabled: boolean
   scenario: Scenario
@@ -66,16 +67,23 @@ export function useTranslation({
 
     const fake = !isTauri ? simulatedError[scenario] : undefined
     if (fake) {
-      const t = window.setTimeout(() => update({ phase: 'error', error: { kind: fake, message: 'Lỗi giả lập (prototype)' } }), 600)
+      const t = window.setTimeout(() => update({ phase: 'error', error: { kind: fake, message: 'Lỗi giả lập (prototype)', provider: 'claude' } }), 600)
       return () => window.clearTimeout(t)
     }
 
-    void startTranslation({ direction, text, keigo, profile, ...thread }, (e) => {
+    void startTranslation({ direction, text, keigo, ...thread }, (e) => {
       if (e.type === 'thinking') update({ phase: 'thinking' })
       if (e.type === 'delta') update({ phase: 'streaming', sections: e.sections })
-      if (e.type === 'done') update({ phase: 'done', sections: e.sections, rateLimit: e.rateLimit })
+      if (e.type === 'done')
+        update({
+          phase: 'done',
+          sections: e.sections,
+          rateLimit: e.rateLimit,
+          answeredBy: { provider: e.timing.provider, model: e.timing.model, fallbackFrom: e.timing.fallbackFrom },
+        })
       if (e.type === 'saved') update({ saved: { messageId: e.messageId, threadId: e.threadId, threadTitle: e.threadTitle } })
-      if (e.type === 'error' && e.kind !== 'cancelled') update({ phase: 'error', error: { kind: e.kind, message: e.message } })
+      if (e.type === 'error' && e.kind !== 'cancelled')
+        update({ phase: 'error', error: { kind: e.kind, message: e.message, provider: e.provider ?? 'claude' } })
     }).then((c) => {
       if (alive) cancel = c
       else c()
@@ -84,7 +92,7 @@ export function useTranslation({
       alive = false
       cancel?.()
     }
-    // `profile` and `thread` are read when a run starts; editing them should not restart the current translation.
+    // `thread` is read when a run starts; editing it should not restart the current translation.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

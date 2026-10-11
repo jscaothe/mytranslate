@@ -14,8 +14,6 @@ import { ChatApp } from './ChatApp'
 
 type Action = 'auto' | 'jaVi' | 'viJa' | 'review'
 
-const QUICK_BAR_IDLE_MS = 4000
-
 const samples = [
   { label: 'Câu tiếng Việt', text: 'Em đã deploy bản sửa rồi, nhờ anh kiểm tra lại giúp em' },
   { label: 'Trả lời lịch release', text: 'Thứ Tư tuần sau được ạ, em sẽ gửi lịch chi tiết sau' },
@@ -34,7 +32,6 @@ export function Playground() {
   const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
   /** Where the current mouse selection started, to keep the toolbar off the selected lines. */
   const downY = useRef(0)
-  const [quickHover, setQuickHover] = useState(false)
 
   const rootRef = useRef<HTMLDivElement>(null)
   const composerRef = useRef<HTMLTextAreaElement>(null)
@@ -173,8 +170,6 @@ export function Playground() {
     const onKey = (e: KeyboardEvent) => {
       const combo = comboFromEvent(e)
       if (!combo) return
-      // Typing means the user is on the keyboard now; the mouse toolbar gets out of the way.
-      setQuick(null)
       const { hotkeys } = settings
       const map: Record<string, Action> = {
         [hotkeys.auto]: 'auto',
@@ -191,26 +186,15 @@ export function Playground() {
     return () => window.removeEventListener('keydown', onKey)
   }, [settings, trigger])
 
+  // Like the real app: the toolbar stays until the user clicks somewhere else.
   useEffect(() => {
     if (!quick) return
     const onDown = (e: MouseEvent) => {
       if (!(e.target as HTMLElement).closest('[data-quick-bar]')) setQuick(null)
     }
-    const onScroll = () => setQuick(null)
     document.addEventListener('mousedown', onDown)
-    document.addEventListener('scroll', onScroll, true)
-    return () => {
-      document.removeEventListener('mousedown', onDown)
-      document.removeEventListener('scroll', onScroll, true)
-    }
+    return () => document.removeEventListener('mousedown', onDown)
   }, [quick])
-
-  // Fade away after a few idle seconds, but never while the pointer is on it.
-  useEffect(() => {
-    if (!quick || quickHover) return
-    const t = window.setTimeout(() => setQuick(null), QUICK_BAR_IDLE_MS)
-    return () => window.clearTimeout(t)
-  }, [quick, quickHover])
 
   // Clicking outside the popup closes it unless it is pinned (the popup handles pin by ignoring this).
   const popupPinnedRef = useRef(false)
@@ -381,7 +365,6 @@ export function Playground() {
           display={settings.quickActions.display}
           onAction={runQuick}
           onDismiss={() => setQuick(null)}
-          onHoverChange={setQuickHover}
           className="absolute z-30"
           style={{
             left: Math.max(8, Math.min(quick.x - 16, size.width - (settings.quickActions.display === 'iconOnly' ? 170 : 400))),
