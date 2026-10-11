@@ -325,6 +325,8 @@ function ThreadDetail({ thread }: { thread: Thread }) {
       </div>
 
       <div ref={timelineRef} className="scroll-thin min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        {/* A readable line length on a maximized window, like Settings. */}
+        <div className="mx-auto max-w-[860px]">
         <SummaryCard thread={thread} busy={summarizing} canSummarize={messages.length > 0} onSummarize={summarize} />
 
         <div className="flex flex-col gap-3">
@@ -345,6 +347,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
             </div>
           ))}
           {messages.length === 0 && <p className="py-8 text-center text-[13px] text-ink-3">Thread này chưa có tin nào</p>}
+        </div>
         </div>
       </div>
     </div>

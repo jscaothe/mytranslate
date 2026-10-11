@@ -1175,18 +1175,20 @@ function FooterActions({
 
   if (direction === 'ja_vi') {
     return (
-      <div className="flex items-center gap-2">
+      // Wraps instead of overflowing when the popup is made narrow: copy moves under reply and suggest.
+      <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={onReply}>
           <Reply size={14} /> Trả lời <Kbd>↵</Kbd>
         </Button>
         <Button size="sm" disabled={!ready || suggesting} onClick={onSuggest} title="AI gợi ý 3 câu trả lời tiếng Nhật">
           <Sparkles size={14} /> Gợi ý <Kbd>G</Kbd>
         </Button>
-        <div className="flex-1" />
-        {feedbackButton}
-        <Button size="sm" disabled={!ready} onClick={onCopy}>
-          <Copy size={14} /> Sao chép
-        </Button>
+        <div className="ml-auto flex items-center gap-2">
+          {feedbackButton}
+          <Button size="sm" disabled={!ready} onClick={onCopy}>
+            <Copy size={14} /> Sao chép
+          </Button>
+        </div>
       </div>
     )
   }
@@ -1218,7 +1220,7 @@ function FooterActions({
     )
   }
   return (
-    <div className="flex items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" onClick={onKeep}>
         Giữ nguyên <Kbd>Esc</Kbd>
       </Button>

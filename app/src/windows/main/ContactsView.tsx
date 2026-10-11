@@ -36,7 +36,8 @@ export function ContactsView() {
         <span className="text-[12.5px] text-ink-3">Kính ngữ và ghi chú được dùng cho mọi bản dịch trong cuộc hội thoại đó</span>
       </div>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto p-5">
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-3">
+        {/* Wide enough for the keigo control with its longest labels, so it never spills out of a card. */}
+        <div className="grid grid-cols-[repeat(auto-fill,minmax(400px,1fr))] gap-3">
           {conversations.map((c) => (
             <ConversationCard key={c.id} conversation={c} />
           ))}
