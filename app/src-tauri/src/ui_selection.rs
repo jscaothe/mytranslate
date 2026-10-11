@@ -59,33 +59,30 @@ impl SelectionProbe {
         }
     }
 
-    /// Where the selection in the focused control is, physical pixels: its left edge, the top of its first line
-    /// and the bottom of its last, cut to the control's visible area. None when nothing is selected or the
-    /// control does not say where its text is.
-    pub fn focused_selection_span(&self) -> Option<Span> {
-        unsafe { self.span().ok().flatten() }
+    /// Where the text in the focused control is, physical pixels: the left edge, the top of the first line and
+    /// the bottom of the last, cut to the control's visible area. That is the selection, or with `whole_control`
+    /// the whole control. None when nothing is selected or the control does not say where its text is.
+    pub fn focused_text_span(&self, whole_control: bool) -> Option<Span> {
+        unsafe { self.span(whole_control).ok().flatten() }
     }
 
-    unsafe fn span(&self) -> windows::core::Result<Option<Span>> {
+    unsafe fn span(&self, whole_control: bool) -> windows::core::Result<Option<Span>> {
         unsafe {
             let Some((text, control)) = self.text_control(self.uia.GetFocusedElement()?)? else {
                 return Ok(None);
             };
+            let r = control.CurrentBoundingRectangle()?;
+            let visible = (r.left as f64, r.top as f64, r.right as f64, r.bottom as f64);
+            if whole_control {
+                let (left, top, right, bottom) = visible;
+                return Ok(span_of(&[[left, top, right - left, bottom - top]], visible));
+            }
             let ranges = text.GetSelection()?;
             let mut lines = Vec::new();
             for i in 0..ranges.Length()? {
                 lines.extend(rectangles(ranges.GetElement(i)?.GetBoundingRectangles()?));
             }
-            let visible = control.CurrentBoundingRectangle()?;
-            Ok(span_of(
-                &lines,
-                (
-                    visible.left as f64,
-                    visible.top as f64,
-                    visible.right as f64,
-                    visible.bottom as f64,
-                ),
-            ))
+            Ok(span_of(&lines, visible))
         }
     }
 
