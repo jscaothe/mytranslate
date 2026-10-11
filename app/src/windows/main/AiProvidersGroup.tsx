@@ -4,29 +4,14 @@ import { AlertCircle, Check, CheckCircle2, ChevronDown, KeyRound, Loader2, Searc
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
-import { AI_NAMES, choiceLabel, defaultChoice, modelName, RECOMMENDED_MODELS } from '../../lib/ai'
+import { AI_NAMES, choiceLabel, defaultChoice, KEY_HELP, modelName, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
 import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
 import { useStore, type AiProvider } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 
-const KEY_HELP = {
-  openai: { url: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' },
-  gemini: { url: 'https://aistudio.google.com/apikey', placeholder: 'AIza...' },
-} as const
-
 const PROTOTYPE_MODELS = {
   openai: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'],
-}
-
-interface TestResult {
-  ok: boolean
-  model: string
-  firstTokenMs: number | null
-  totalMs: number
-  translation: string
-  error: string | null
-  errorKind: string | null
 }
 
 type Keys = { openai: boolean; gemini: boolean }
@@ -400,14 +385,7 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
 
 function TestLine({ result }: { result: TestResult }) {
   if (!result.ok) {
-    const why =
-      result.errorKind === 'bad_key'
-        ? 'Key không đúng hoặc đã bị thu hồi'
-        : result.errorKind === 'rate_limited'
-          ? 'Hết hạn mức hoặc chưa nạp tiền'
-          : result.errorKind === 'network'
-            ? 'Không kết nối được'
-            : 'Không dịch được'
+    const why = testFailure(result.errorKind)
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-bad" title={result.error ?? ''}>
         <AlertCircle size={15} className="shrink-0" /> <span className="truncate">{why}</span>
