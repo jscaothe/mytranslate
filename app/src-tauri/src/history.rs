@@ -390,6 +390,30 @@ impl History {
         tx.commit()
     }
 
+    /// Deletes a thread and its messages for good.
+    pub fn delete_thread(&self, id: i64) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "DELETE FROM thread_corrections WHERE from_thread = ?1 OR to_thread = ?1",
+            [id],
+        )?;
+        // Messages go with it (ON DELETE CASCADE).
+        tx.execute("DELETE FROM threads WHERE id = ?1", [id])?;
+        tx.commit()
+    }
+
+    /// Deletes a conversation with its keigo and note, its threads and their messages. A new translation from
+    /// the same chat starts it again from scratch.
+    pub fn delete_conversation(&self, id: i64) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute("DELETE FROM thread_corrections WHERE conversation_id = ?1", [id])?;
+        // Threads and messages go with it (ON DELETE CASCADE).
+        tx.execute("DELETE FROM conversations WHERE id = ?1", [id])?;
+        tx.commit()
+    }
+
     /// Stores a summary covering the thread's current messages.
     pub fn set_summary(&self, id: i64, summary: &str) -> rusqlite::Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -760,6 +784,44 @@ mod tests {
         let other = h.upsert_conversation("teams", "Suzuki", "").unwrap();
         let elsewhere = h.create_thread(other, "Khác").unwrap();
         assert!(h.merge_threads(into, elsewhere).is_err());
+    }
+
+    #[test]
+    fn deleting_a_thread_removes_its_messages_only() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let gone = h.create_thread(conv, "Xóa").unwrap();
+        let kept = h.create_thread(conv, "Giữ").unwrap();
+        h.add_message(gone, &msg("ja_vi", "a", "b")).unwrap();
+        h.add_message(kept, &msg("ja_vi", "c", "d")).unwrap();
+        h.record_correction(conv, Some(gone), kept).unwrap();
+        h.delete_thread(gone).unwrap();
+        assert!(h.thread(gone).unwrap().is_none());
+        assert_eq!(h.thread(kept).unwrap().unwrap().message_count, 1);
+        assert!(h.conversation(conv).unwrap().is_some());
+        let left: i64 = h
+            .conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(left, 1);
+    }
+
+    #[test]
+    fn deleting_a_conversation_removes_everything_in_it() {
+        let h = History::in_memory();
+        let gone = h.upsert_conversation("teams", "Spam", "").unwrap();
+        let kept = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let t = h.create_thread(gone, "x").unwrap();
+        h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
+        let k = h.create_thread(kept, "y").unwrap();
+        h.add_message(k, &msg("ja_vi", "c", "d")).unwrap();
+        h.delete_conversation(gone).unwrap();
+        assert!(h.conversation(gone).unwrap().is_none());
+        assert!(h.thread(t).unwrap().is_none());
+        assert_eq!(h.conversations().unwrap().len(), 1);
+        assert_eq!(h.all_threads().unwrap().len(), 1);
     }
 
     #[test]

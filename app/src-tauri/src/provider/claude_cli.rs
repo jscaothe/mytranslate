@@ -208,7 +208,14 @@ impl ClaudeCli {
     }
 
     /// Runs one translation, reporting progress through `emit`. Always ends with `Done` or `Error`.
-    pub async fn translate(self: &Arc<Self>, request_id: u64, req: TranslateRequest, emit: impl Fn(TranslateEvent)) {
+    /// `model` overrides the configured model for this request (a spare booted with another model is not used).
+    pub async fn translate(
+        self: &Arc<Self>,
+        request_id: u64,
+        req: TranslateRequest,
+        model: Option<&str>,
+        emit: impl Fn(TranslateEvent),
+    ) {
         let start = Instant::now();
         // Registered first, so a cancel from here on stops the request; one that came earlier is honoured too.
         let (cancel_tx, mut cancel_rx) = oneshot::channel();
@@ -225,7 +232,7 @@ impl ClaudeCli {
             }
             cancels.insert(request_id, cancel_tx);
         }
-        let model = self.current_model();
+        let model = model.map(str::to_string).unwrap_or_else(|| self.current_model());
 
         let taken = self.spare.lock().await.take().filter(|p| p.model == model);
         let warm = taken.is_some();
@@ -502,6 +509,7 @@ mod tests {
         tauri::async_runtime::block_on(cli.translate(
             id,
             TranslateRequest::task(prompt::Direction::JaVi, "確認しました", prompt::Keigo::Formal),
+            None,
             |e| events.lock().unwrap().push(e),
         ));
         let events = events.into_inner().unwrap();

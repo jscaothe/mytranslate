@@ -1,11 +1,11 @@
 import { listen } from '@tauri-apps/api/event'
-import { Archive, ArchiveRestore, ChevronLeft, Download, Loader2, Merge, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronLeft, Download, Loader2, Merge, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { isTauri } from '../../lib/claude'
-import { exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
+import { deleteThread as removeThread, exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
 import { useStore } from '../../store'
 import type { Conversation, Thread, ThreadMessage } from '../../types'
 import { GettingStarted } from './GettingStarted'
@@ -133,8 +133,8 @@ export function ThreadsView() {
 
 /** Keyed by thread id so menus and title editing reset when another thread is opened. */
 function ThreadDetail({ thread }: { thread: Thread }) {
-  const { conversations, threads, updateThread, mergeThread, showToast } = useStore()
-  const [menu, setMenu] = useState<'closed' | 'main' | 'merge'>('closed')
+  const { conversations, threads, updateThread, mergeThread, deleteThread, showToast } = useStore()
+  const [menu, setMenu] = useState<'closed' | 'main' | 'merge' | 'delete'>('closed')
   const [editingTitle, setEditingTitle] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
   const timelineRef = useRef<HTMLDivElement>(null)
@@ -209,6 +209,8 @@ function ThreadDetail({ thread }: { thread: Thread }) {
 
   const merge = (into: Thread) =>
     act(() => mergeThreads(thread.id, into.id), () => mergeThread(thread.id, into.id), `Đã gộp vào "${into.title}"`)
+
+  const remove = () => act(() => removeThread(thread.id), () => deleteThread(thread.id), `Đã xóa thread "${thread.title}"`)
 
   const exportMarkdown = () => {
     setMenu('closed')
@@ -288,6 +290,25 @@ function ThreadDetail({ thread }: { thread: Thread }) {
                 label={thread.archived ? 'Bỏ lưu trữ' : 'Lưu trữ'}
                 onClick={toggleArchive}
               />
+              <div className="my-1 h-px bg-line" />
+              <MenuItem icon={<Trash2 size={14} />} label="Xóa thread" danger onClick={() => setMenu('delete')} />
+            </div>
+          )}
+          {menu === 'delete' && (
+            <div role="alertdialog" aria-label="Xóa thread" className="absolute top-10 right-0 z-10 w-80 rounded-lg border border-line bg-surface p-3.5 shadow-popup">
+              <p className="text-[13.5px] font-semibold text-ink">Xóa thread này?</p>
+              <p className="mt-1 text-[12.5px] leading-relaxed text-pretty text-ink-2">
+                {messages.length > 0 ? `${messages.length.toLocaleString('vi-VN')} tin đã dịch` : 'Thread'} trong "{thread.title}" sẽ bị xóa vĩnh viễn, không thể hoàn
+                tác. Muốn ẩn đi mà vẫn giữ lại thì dùng Lưu trữ.
+              </p>
+              <div className="mt-3 flex justify-end gap-2">
+                <Button size="sm" autoFocus onClick={() => setMenu('closed')}>
+                  Hủy
+                </Button>
+                <Button size="sm" variant="danger" onClick={remove}>
+                  Xóa thread
+                </Button>
+              </div>
             </div>
           )}
           {menu === 'merge' && (
@@ -366,16 +387,33 @@ function SummaryCard({ thread, busy, canSummarize, onSummarize }: { thread: Thre
   )
 }
 
-function MenuItem({ icon, label, hint, disabled, onClick }: { icon?: React.ReactNode; label: string; hint?: string; disabled?: boolean; onClick: () => void }) {
+function MenuItem({
+  icon,
+  label,
+  hint,
+  disabled,
+  danger,
+  onClick,
+}: {
+  icon?: React.ReactNode
+  label: string
+  hint?: string
+  disabled?: boolean
+  danger?: boolean
+  onClick: () => void
+}) {
   return (
     <button
       type="button"
       role="menuitem"
       disabled={disabled}
       onClick={onClick}
-      className="flex h-8 w-full items-center gap-2.5 px-3 text-left text-[13px] text-ink hover:bg-hover disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent"
+      className={cx(
+        'flex h-8 w-full items-center gap-2.5 px-3 text-left text-[13px] hover:bg-hover disabled:cursor-default disabled:text-ink-3 disabled:hover:bg-transparent',
+        danger ? 'text-bad' : 'text-ink',
+      )}
     >
-      {icon && <span className="text-ink-2">{icon}</span>}
+      {icon && <span className={danger ? 'text-bad' : 'text-ink-2'}>{icon}</span>}
       <span className="flex-1 truncate">{label}</span>
       {hint && <span className="shrink-0 text-[11.5px] text-ink-3">{hint}</span>}
     </button>

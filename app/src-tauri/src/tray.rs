@@ -1,7 +1,7 @@
 //! The system tray icon: the app lives here when its windows are closed.
 
 use serde_json::Value;
-use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem};
+use tauri::menu::{CheckMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 
@@ -13,6 +13,12 @@ const MENU_OPEN: &str = "open";
 const MENU_PAUSE: &str = "pause";
 const MENU_QUIT: &str = "quit";
 const MENU_UPDATE: &str = "update";
+/// Prefix of the AI switcher items: `ai|<provider>|<model>`.
+const MENU_AI: &str = "ai|";
+const MENU_AI_SETTINGS: &str = "ai-settings";
+
+/// The "AI dịch" submenu, rebuilt when the choice, the favourites or the API keys change.
+struct AiMenu(Submenu<Wry>);
 
 /// The "pause hotkeys" item, kept so its tick can follow changes made on the Settings page.
 struct PauseItem(CheckMenuItem<Wry>);
@@ -43,7 +49,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     )?;
     let quit = MenuItem::with_id(app, MENU_QUIT, "Thoát", true, None::<&str>)?;
     app.manage(PauseItem(pause.clone()));
-    let menu = Menu::with_items(app, &[&open, &pause, &PredefinedMenuItem::separator(app)?, &quit])?;
+    let ai = Submenu::with_id(app, "ai", "AI dịch", true)?;
+    app.manage(AiMenu(ai.clone()));
+    fill_ai(app, &ai)?;
+    let menu = Menu::with_items(app, &[&open, &ai, &pause, &PredefinedMenuItem::separator(app)?, &quit])?;
     app.manage(UpdateItem {
         menu: menu.clone(),
         item: MenuItem::with_id(app, MENU_UPDATE, "", true, None::<&str>)?,
@@ -59,6 +68,16 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             MENU_PAUSE => toggle_pause(app),
             MENU_QUIT => app.exit(0),
             MENU_UPDATE => install_update(app),
+            MENU_AI_SETTINGS => {
+                show_main(app);
+                let _ = app.emit("ui:open-tab", "settings");
+            }
+            id if id.starts_with(MENU_AI) => {
+                let mut parts = id[MENU_AI.len()..].splitn(2, '|');
+                if let (Some(provider), Some(model)) = (parts.next(), parts.next()) {
+                    crate::ai::set_default(app, provider, model);
+                }
+            }
             _ => {}
         })
         .on_tray_icon_event(|tray, event| {
@@ -76,6 +95,47 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     }
     builder.build(app)?;
     Ok(())
+}
+
+/// The AI switcher: every quick choice, ticked on the current one; AIs without a key are shown but disabled.
+fn fill_ai(app: &AppHandle, menu: &Submenu<Wry>) -> tauri::Result<()> {
+    for item in menu.items()? {
+        menu.remove(&item)?;
+    }
+    for c in crate::ai::quick_choices(app) {
+        let text = if c.available {
+            c.label.clone()
+        } else {
+            format!("{} (chưa có API key)", c.label)
+        };
+        let item = CheckMenuItem::with_id(
+            app,
+            format!("{MENU_AI}{}|{}", c.provider, c.model),
+            text,
+            c.available,
+            c.current,
+            None::<&str>,
+        )?;
+        menu.append(&item)?;
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&MenuItem::with_id(
+        app,
+        MENU_AI_SETTINGS,
+        "Thêm AI hoặc model…",
+        true,
+        None::<&str>,
+    )?)?;
+    Ok(())
+}
+
+/// Refreshes the AI switcher after a change of choice, favourites or keys.
+pub fn sync_ai(app: &AppHandle) {
+    if let Some(menu) = app.try_state::<AiMenu>()
+        && let Err(e) = fill_ai(app, &menu.0)
+    {
+        log::warn!("could not refresh the AI menu: {e}");
+    }
 }
 
 /// Keeps the tray menu's tick in line with the settings (they can also change from the Settings page).

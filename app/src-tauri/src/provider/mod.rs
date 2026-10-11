@@ -19,7 +19,8 @@ use crate::prompt::TranslateRequest;
 /// Where one attempt goes.
 #[derive(Debug, Clone)]
 pub enum Route {
-    Claude,
+    /// `model` overrides the Claude model chosen in Settings for this request.
+    Claude { model: Option<String> },
     Api {
         api: Api,
         model: String,
@@ -30,7 +31,7 @@ pub enum Route {
 impl Route {
     pub fn id(&self) -> &'static str {
         match self {
-            Route::Claude => "claude",
+            Route::Claude { .. } => "claude",
             Route::Api { api, .. } => api.id(),
         }
     }
@@ -133,7 +134,11 @@ impl Router {
                 };
 
                 match route {
-                    Route::Claude => self.cli.translate(request_id, req.clone(), &forward).await,
+                    Route::Claude { model } => {
+                        self.cli
+                            .translate(request_id, req.clone(), model.as_deref(), &forward)
+                            .await
+                    }
                     Route::Api { api, model, key } => match key {
                         None => forward(TranslateEvent::Error {
                             kind: ErrorKind::MissingKey,

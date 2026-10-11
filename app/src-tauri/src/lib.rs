@@ -181,7 +181,7 @@ async fn translate(
 
     let router = router.inner().clone();
     let filed = request.clone();
-    let routes = ai::routes(&app);
+    let routes = ai::routes_for(&app, request.ai.take().as_ref());
     router
         .translate(request_id, request, &routes, move |event| {
             let saved = match &event {
@@ -415,6 +415,24 @@ fn history_set_pinned(app: AppHandle, thread_id: i64, pinned: bool) -> Result<()
 fn history_set_archived(app: AppHandle, thread_id: i64, archived: bool) -> Result<(), String> {
     app.state::<History>()
         .set_archived(thread_id, archived)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn history_delete_thread(app: AppHandle, thread_id: i64) -> Result<(), String> {
+    app.state::<History>()
+        .delete_thread(thread_id)
+        .map_err(|e| e.to_string())?;
+    let _ = app.emit("history:changed", ());
+    Ok(())
+}
+
+#[tauri::command]
+fn history_delete_conversation(app: AppHandle, conversation_id: i64) -> Result<(), String> {
+    app.state::<History>()
+        .delete_conversation(conversation_id)
         .map_err(|e| e.to_string())?;
     let _ = app.emit("history:changed", ());
     Ok(())
@@ -707,6 +725,14 @@ async fn settings_set(app: AppHandle, window: tauri::WebviewWindow, value: Value
         failed_hotkeys = hotkeys::apply(&app);
         tray::sync(&app);
     }
+    if changed("aiProvider")
+        || changed("model")
+        || changed("openaiModel")
+        || changed("geminiModel")
+        || changed("aiQuickModels")
+    {
+        tray::sync_ai(&app);
+    }
     if changed("model")
         && let Some(model) = store.model()
     {
@@ -866,11 +892,14 @@ pub fn run() {
             ai::ai_key_set,
             ai::ai_models,
             ai::ai_test,
+            ai::ai_choices,
             updates::update_status,
             updates::update_check,
             updates::update_install,
             history_set_archived,
             history_merge,
+            history_delete_thread,
+            history_delete_conversation,
             history_export,
             thread_summarize,
             suggest_replies,

@@ -25,9 +25,12 @@ import { diffChars } from '../../lib/diff'
 import { relativeTime, setFeedback, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
 import { useStore } from '../../store'
+import { defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
+import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
 import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
+import { AiSwitcher } from './AiSwitcher'
 import { ThreadPicker } from './ThreadPicker'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
 import { useFloatingFrame } from './useFloatingFrame'
@@ -67,6 +70,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const [runKey, setRunKey] = useState(0)
   const [pinned, setPinned] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
+  // The AI switcher: a choice made here translates again with it (and becomes the default).
+  const [aiMenuOpen, setAiMenuOpen] = useState(false)
+  const [aiOverride, setAiOverride] = useState<AiChoice | null>(null)
   const [replyMode, setReplyMode] = useState(false)
   const [replyText, setReplyText] = useState('')
   /** User edits of the finished result, tied to the stream run they belong to. */
@@ -113,7 +119,32 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     enabled: longConfirmed && !notice,
     scenario,
     thread: windowed ? { conversationId, threadId: realChoice.id, newThreadTitle: realChoice.newTitle } : undefined,
+    ai: aiOverride,
   })
+
+  const aiChoices = useQuickChoices(settings)
+  const currentAi = aiOverride ?? defaultChoice(settings)
+  const answeredAi: AiChoice | null =
+    // Only a fallback differs from what was asked for.
+    live.answeredBy?.fallbackFrom && ['claude', 'openai', 'gemini'].includes(live.answeredBy.provider)
+      ? { provider: live.answeredBy.provider as AiChoice['provider'], model: live.answeredBy.model }
+      : null
+  const pickAi = (c: AiChoice) => {
+    setAiMenuOpen(false)
+    rootRef.current?.focus()
+    if (c.provider === currentAi.provider && c.model === currentAi.model) return
+    setAiOverride(c)
+    // Also the default from now on: the user switches when a model suits them better.
+    store.updateSettings(c.provider === 'claude' ? { aiProvider: 'claude', model: c.model as 'sonnet' | 'haiku' } : { aiProvider: c.provider, [modelField(c.provider)]: c.model })
+  }
+  const manageAi = () => {
+    setAiMenuOpen(false)
+    if (!windowed) {
+      store.openMain('settings')
+      return
+    }
+    void invoke('show_main_window').then(() => emit('ui:open-tab', 'settings'))
+  }
 
   // The translation was filed when it finished. If the user picked another thread (before or after that), move it.
   const saved = live.saved
@@ -313,9 +344,19 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (pickerOpen) setPickerOpen(false)
+      if (aiMenuOpen) {
+        setAiMenuOpen(false)
+        rootRef.current?.focus()
+      } else if (pickerOpen) setPickerOpen(false)
       else if (replyMode) setReplyMode(false)
       else close()
+      return
+    }
+    // Keys inside the AI menu belong to it (Enter picks the focused entry).
+    if (target.closest('[role="menu"]')) return
+    if (e.ctrlKey && e.key.toLowerCase() === 'm') {
+      e.preventDefault()
+      setAiMenuOpen((o) => !o)
       return
     }
     if (inReply) {
@@ -366,6 +407,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       aria-label="MyTranslate"
       tabIndex={-1}
       data-popup
+      data-direction={direction}
       onKeyDown={onKeyDown}
       style={frame.style}
       className={cx(
@@ -465,7 +507,16 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         </button>
         )}
         <div className="h-full min-w-3 flex-1" />
-        <DirectionBadge direction={direction} verdict={resultReady ? reviewResult?.verdict : undefined} />
+        {isReview && <DirectionBadge direction={direction} verdict={resultReady ? reviewResult?.verdict : undefined} />}
+        <AiSwitcher
+          choices={aiChoices}
+          current={currentAi}
+          answeredBy={answeredAi}
+          open={aiMenuOpen}
+          onOpenChange={setAiMenuOpen}
+          onPick={pickAi}
+          onManage={manageAi}
+        />
         {((container && frame.customized) || windowed?.customized) && (
           <IconButton label="Đặt lại vị trí và kích thước" onClick={windowed ? windowed.onReset : frame.reset}>
             <RotateCcw size={13} />
@@ -586,7 +637,17 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             {aiName(live.answeredBy.fallbackFrom)} không dịch được, đã dịch bằng {aiName(live.answeredBy.provider)} ({live.answeredBy.model})
           </div>
         )}
-        {tipVisible && <FirstTip direction={direction} origin={origin} onDismiss={() => setTipOpen(false)} />}
+        {tipVisible && (
+          <FirstTip
+            direction={direction}
+            origin={origin}
+            onDismiss={() => {
+              setTipOpen(false)
+              // The button goes away with the tip; keep the popup's keys (Enter, Esc) working.
+              rootRef.current?.focus()
+            }}
+          />
+        )}
         {resultReady && <QuotaLine rate={live.rateLimit} />}
         {resultReady && windowed && <UpdateLine />}
         </>
@@ -819,7 +880,7 @@ function TranslationBody({
       {stream.done && direction === 'vi_ja' && back && (
         <Section className="bg-subtle">
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Ý nghĩa khi đọc lại</div>
-          <p lang="vi" className="text-[13.5px] leading-relaxed text-ink-2">
+          <p lang="vi" className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
             {back}
           </p>
         </Section>
@@ -871,7 +932,7 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
       {result.verdict !== 'ok' && (
         <Section>
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Đề xuất</div>
-          <p lang="ja" className="text-[15px] leading-relaxed">
+          <p lang="ja" className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {result.diff.map((part, i) => (
               <span
                 key={i}
@@ -885,7 +946,7 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
             ))}
           </p>
           {result.suggestionVi && (
-            <p lang="vi" className="mt-1.5 text-[13px] text-ink-2">
+            <p lang="vi" className="mt-1.5 text-[13px] whitespace-pre-wrap text-ink-2">
               Nghĩa: {result.suggestionVi}
             </p>
           )}

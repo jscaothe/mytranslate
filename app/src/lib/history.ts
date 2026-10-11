@@ -102,6 +102,16 @@ export async function setArchived(threadId: string, archived: boolean): Promise<
   await invoke('history_set_archived', { threadId: Number(threadId), archived })
 }
 
+/** Deletes the thread and its messages for good. */
+export async function deleteThread(threadId: string): Promise<void> {
+  await invoke('history_delete_thread', { threadId: Number(threadId) })
+}
+
+/** Deletes the conversation with its keigo, note, threads and messages. */
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await invoke('history_delete_conversation', { conversationId: Number(conversationId) })
+}
+
 export async function mergeThreads(from: string, into: string): Promise<void> {
   await invoke('history_merge', { from: Number(from), into: Number(into) })
 }

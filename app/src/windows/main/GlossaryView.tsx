@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import { Lock, Plus, Search, Share2, Trash2 } from 'lucide-react'
+import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
+import { CircleAlert, FileText, Lock, Plus, Search, Share2, Trash2, Users } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import { Button, IconButton, Segmented } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
@@ -24,11 +25,11 @@ interface TeamGlossary {
 }
 
 /**
- * The glossary. Personal terms live in the database on this PC; the team's terms are read from the shared YAML
- * file set in Settings. Terms that occur in a text are sent to Claude with it; personal ones win.
+ * The glossary. Personal terms live in the database on this PC; the team's terms are read from a shared YAML
+ * file chosen at the bottom of this screen. Terms that occur in a text are sent to the AI with it; personal ones win.
  */
 export function GlossaryView() {
-  const { glossary, setGlossary, showToast, settings } = useStore()
+  const { glossary, setGlossary, showToast, settings, updateSettings } = useStore()
   const [team, setTeam] = useState<TeamGlossary | null>(null)
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<Filter>('all')
@@ -57,15 +58,16 @@ export function GlossaryView() {
   }, [settings.glossaryPath])
 
   const teamName = isTauri ? team?.project || 'Dự án' : 'CustomerX'
+  const hasTeam = isTauri ? Boolean(team?.path) : Boolean(settings.glossaryPath)
+  // The prototype's sample data mixes in the team's terms; they go away with the file.
   const all = isTauri
     ? [...glossary, ...(team?.terms ?? []).map((t, i) => ({ ...t, id: `team-${i}`, scope: 'project' as const }))]
-    : glossary
-  const hasTeam = !isTauri || Boolean(team?.path)
+    : glossary.filter((t) => hasTeam || t.scope === 'personal')
 
   const q = query.trim().toLowerCase()
   const rows = all.filter(
     (t) =>
-      (filter === 'all' || t.scope === filter) &&
+      (!hasTeam || filter === 'all' || t.scope === filter) &&
       (!q || t.ja.includes(q) || t.vi.toLowerCase().includes(q) || t.note.toLowerCase().includes(q)),
   )
 
@@ -96,6 +98,17 @@ export function GlossaryView() {
     const done = () => showToast('Đã sao chép đoạn YAML, dán vào mục terms của file glossary chung')
     if (isTauri) void invoke('clipboard_write', { text }).then(done)
     else void navigator.clipboard.writeText(text).then(done, done)
+  }
+
+  const chooseTeamFile = () => {
+    if (!isTauri) {
+      updateSettings({ glossaryPath: 'D:\\projects\\customerx\\docs\\glossary.yaml' })
+      showToast('Mô phỏng: đã chọn file glossary chung')
+      return
+    }
+    void openFileDialog({ title: 'Chọn file glossary chung', filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }] }).then(
+      (path) => typeof path === 'string' && updateSettings({ glossaryPath: path }),
+    )
   }
 
   const remove = (id: string) => {
@@ -208,20 +221,70 @@ export function GlossaryView() {
         </table>
       </div>
 
-      <div className="shrink-0 border-t border-line px-5 py-2 text-[12px] text-ink-3">
-        {team?.error ? (
-          <span className="text-bad">
-            Glossary chung <code className="rounded bg-subtle px-1">{team.path}</code>: {team.error}
-          </span>
-        ) : hasTeam ? (
-          <>
-            Thuật ngữ dự án đọc từ <code className="rounded bg-subtle px-1">{isTauri ? team?.path : settings.glossaryPath}</code> và chỉ sửa được trong file
-            đó. Thuật ngữ cá nhân được ưu tiên khi trùng.
-          </>
-        ) : (
-          'Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được gửi kèm cho AI. Glossary chung của team đặt trong Cài đặt.'
-        )}
+      <TeamSource
+        path={isTauri ? (team?.path ?? '') : settings.glossaryPath}
+        project={teamName}
+        count={all.filter((t) => t.scope === 'project').length}
+        error={team?.error ?? null}
+        onChoose={chooseTeamFile}
+        onStop={() => updateSettings({ glossaryPath: '' })}
+      />
+    </div>
+  )
+}
+
+/** Where the team's terms come from, with the controls to pick, change or stop using the shared file. */
+function TeamSource({
+  path,
+  project,
+  count,
+  error,
+  onChoose,
+  onStop,
+}: {
+  path: string
+  project: string
+  count: number
+  error: string | null
+  onChoose: () => void
+  onStop: () => void
+}) {
+  if (!path) {
+    return (
+      <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-2.5 text-[12.5px]">
+        <Users size={15} className="shrink-0 text-ink-3" />
+        <p className="min-w-0 flex-1 text-ink-2">
+          Dùng chung thuật ngữ với team: chọn file <code className="rounded bg-subtle px-1">glossary.yaml</code> của dự án, trong repo hoặc thư mục
+          OneDrive / SharePoint.
+        </p>
+        <Button size="sm" onClick={onChoose}>
+          Chọn file...
+        </Button>
       </div>
+    )
+  }
+  return (
+    <div className="flex shrink-0 items-center gap-3 border-t border-line px-5 py-2.5 text-[12.5px]">
+      {error ? <CircleAlert size={15} className="shrink-0 text-bad" /> : <FileText size={15} className="shrink-0 text-ink-3" />}
+      <div className="min-w-0 flex-1">
+        {error ? (
+          <p className="text-bad">Không đọc được glossary chung: {error}</p>
+        ) : (
+          <p className="text-ink-2">
+            Glossary chung <span className="font-semibold text-ink">{project}</span>, {count.toLocaleString('vi-VN')} thuật ngữ. App chỉ đọc file này;
+            thuật ngữ cá nhân được ưu tiên khi trùng.
+          </p>
+        )}
+        <p className="truncate text-[12px] text-ink-3" title={path}>
+          {path}
+        </p>
+      </div>
+      <Button size="sm" onClick={onChoose}>
+        Đổi file...
+      </Button>
+      <Button size="sm" variant="ghost" onClick={onStop}>
+        Bỏ dùng
+      </Button>
     </div>
   )
 }

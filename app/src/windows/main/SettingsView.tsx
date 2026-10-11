@@ -1,5 +1,4 @@
 import { invoke } from '@tauri-apps/api/core'
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog'
 import { ArrowUpCircle, Loader2, RefreshCw, X } from 'lucide-react'
 import { useState, type ReactNode } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
@@ -187,33 +186,6 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
         </Group>
 
         <AiProvidersGroup group={Group} row={Row} />
-
-        <Group title="Glossary chung">
-          <Row label="File glossary dự án" hint="File YAML trong repo dự án hoặc thư mục đồng bộ OneDrive / SharePoint. App chỉ đọc, tự đọc lại khi file đổi.">
-            <div className="flex w-80 gap-2">
-              <input
-                aria-label="Đường dẫn file glossary dự án"
-                className={cx(inputClass, 'min-w-0 flex-1')}
-                placeholder="Chưa dùng glossary chung"
-                value={settings.glossaryPath}
-                onChange={(e) => updateSettings({ glossaryPath: e.target.value })}
-              />
-              <Button
-                onClick={() => {
-                  if (!isTauri) {
-                    showToast('Mô phỏng: mở hộp thoại chọn file')
-                    return
-                  }
-                  void openFileDialog({ title: 'Chọn file glossary chung', filters: [{ name: 'YAML', extensions: ['yaml', 'yml'] }] }).then(
-                    (path) => typeof path === 'string' && updateSettings({ glossaryPath: path }),
-                  )
-                }}
-              >
-                Chọn...
-              </Button>
-            </div>
-          </Row>
-        </Group>
 
         <Group title="Giao diện và hệ thống">
           <Row label="Chủ đề">

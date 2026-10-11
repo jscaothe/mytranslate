@@ -16,6 +16,7 @@ const defaultSettings: Settings = {
   openaiModel: '',
   geminiModel: '',
   aiFallback: false,
+  aiQuickModels: { openai: [], gemini: [] },
   hotkeys: { auto: 'Ctrl+Alt+T', jaVi: 'Ctrl+Alt+J', viJa: 'Ctrl+Alt+K', review: 'Ctrl+Alt+L', main: 'Ctrl+Alt+M' },
   quickActions: {
     enabled: true,
@@ -101,6 +102,15 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     selectThread(into)
   }, [])
 
+  const deleteThread = useCallback((id: string) => {
+    setThreads((ts) => ts.filter((t) => t.id !== id))
+  }, [])
+
+  const deleteConversation = useCallback((id: string) => {
+    setThreads((ts) => ts.filter((t) => t.conversationId !== id))
+    setConversations((cs) => cs.filter((c) => c.id !== id))
+  }, [])
+
   const updateConversation = useCallback((id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => {
     setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
   }, [])
@@ -127,6 +137,13 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     },
     [applySettings, showToast],
   )
+
+  // Real app: the tray menu and the popup can ask the main window to open a tab (for example Settings).
+  useEffect(() => {
+    if (!isTauri) return
+    const off = listen<MainTab>('ui:open-tab', (e) => setMainTab(e.payload))
+    return () => void off.then((f) => f())
+  }, [])
 
   // Real app: the Threads screen shows the history on this PC and refreshes after every filed translation.
   useEffect(() => {
@@ -186,6 +203,8 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       createThread,
       updateThread,
       mergeThread,
+      deleteThread,
+      deleteConversation,
       updateConversation,
       glossary,
       setGlossary,
@@ -197,7 +216,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       popupGeometry,
       setPopupGeometry,
     }),
-    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, mergeThread, updateConversation, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
+    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, mergeThread, deleteThread, deleteConversation, updateConversation, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

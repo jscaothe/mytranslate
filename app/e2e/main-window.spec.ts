@@ -90,6 +90,51 @@ test('glossary: add a personal term and filter by scope', async ({ page }) => {
   await expect(page.getByRole('cell', { name: '受入テスト' })).toBeVisible()
 })
 
+test('a thread is deleted only after confirming', async ({ page }) => {
+  await openTab(page, 'Threads')
+  await threadList(page).getByRole('button', { name: /Lịch release tháng 11/ }).click()
+  await page.getByRole('button', { name: 'Thêm' }).click()
+  await page.getByRole('menuitem', { name: 'Xóa thread' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Xóa thread' })
+  await expect(confirm).toContainText('không thể hoàn tác')
+  await confirm.getByRole('button', { name: 'Hủy' }).click()
+  await expect(threadList(page).getByRole('button', { name: /Lịch release tháng 11/ })).toBeVisible()
+
+  await page.getByRole('button', { name: 'Thêm' }).click()
+  await page.getByRole('menuitem', { name: 'Xóa thread' }).click()
+  await confirm.getByRole('button', { name: 'Xóa thread' }).click()
+  await expect(threadList(page).getByRole('button', { name: /Lịch release tháng 11/ })).toHaveCount(0)
+  // Another thread opens in its place.
+  await expect(header(page)).not.toHaveText('Lịch release tháng 11')
+})
+
+test('deleting a contact removes its threads too', async ({ page }) => {
+  await openTab(page, 'Người liên hệ')
+  await page.getByRole('button', { name: 'Xóa general' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Xóa general' })
+  await expect(confirm).toContainText('1 thread')
+  await confirm.getByRole('button', { name: 'Xóa' }).click()
+  await expect(page.getByRole('radiogroup', { name: 'Mức kính ngữ với #general' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Threads', exact: true }).click()
+  await expect(threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ })).toHaveCount(0)
+})
+
+test('glossary: the team file is chosen and dropped from the Glossary tab', async ({ page }) => {
+  await openTab(page, 'Glossary')
+  await expect(page.getByText(/Glossary chung CustomerX, 3 thuật ngữ/)).toBeVisible()
+  await page.getByRole('button', { name: 'Bỏ dùng' }).click()
+  await expect(page.getByRole('cell', { name: '受入テスト' })).toHaveCount(0)
+  await expect(page.getByRole('radiogroup', { name: 'Lọc phạm vi' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Chọn file...' }).click()
+  await expect(page.getByRole('cell', { name: '受入テスト' })).toBeVisible()
+
+  // Settings no longer has it.
+  await page.getByRole('button', { name: 'Cài đặt', exact: true }).click()
+  await expect(page.getByText('Glossary chung')).toHaveCount(0)
+})
+
 test('settings: history retention and the two-step wipe', async ({ page }) => {
   await openTab(page, 'Cài đặt')
   const keep = page.getByRole('radiogroup', { name: 'Giữ lịch sử' })
@@ -117,19 +162,22 @@ test('settings: checking finds a new version and installing shows progress', asy
   await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
 })
 
-test('settings: choose ChatGPT, save a key and test it', async ({ page }) => {
+test('settings: set up ChatGPT in its card, star a model, and make it the default', async ({ page }) => {
   await openTab(page, 'Cài đặt')
-  const ai = page.getByRole('radiogroup', { name: 'AI dùng để dịch' })
-  await ai.getByRole('radio', { name: 'ChatGPT' }).click()
-  await expect(ai.getByRole('radio', { name: 'ChatGPT' })).toHaveAttribute('aria-checked', 'true')
-  const key = page.getByRole('textbox', { name: 'API key ChatGPT' })
+  const card = page.getByRole('region', { name: 'ChatGPT' })
+  await card.getByRole('button', { name: /ChatGPT/ }).first().click()
+  const key = card.getByRole('textbox', { name: 'API key ChatGPT' })
   await key.fill('sk-test')
-  await page.getByRole('button', { name: 'Lưu', exact: true }).click()
+  await card.getByRole('button', { name: 'Lưu', exact: true }).click()
   await expect(key).toHaveValue('')
-  await page.getByRole('button', { name: 'Dịch thử' }).click()
-  await expect(page.getByText(/Chữ đầu tiên sau/)).toBeVisible()
+  await card.getByRole('button', { name: 'Dịch thử' }).click()
+  await expect(card.getByText(/Chữ đầu tiên sau/)).toBeVisible()
 
-  // Gemini has no key yet in the prototype: testing is not possible until one is saved.
-  await ai.getByRole('radio', { name: 'Gemini' }).click()
-  await expect(page.getByRole('button', { name: 'Dịch thử' })).toBeDisabled()
+  // A favourite shows up in the quick switcher; the default model cannot be un-starred.
+  await card.getByRole('button', { name: 'Thêm gpt-6-astra vào menu chọn nhanh' }).click()
+  await expect(card.getByRole('button', { name: 'Bỏ gpt-6-astra khỏi menu chọn nhanh' })).toHaveAttribute('aria-pressed', 'true')
+
+  await card.getByRole('button', { name: 'Dùng ChatGPT' }).click()
+  await expect(card.getByText('Đang dùng')).toBeVisible()
+  await expect(page.getByText('ChatGPT · GPT-5.6 Luna')).toBeVisible()
 })

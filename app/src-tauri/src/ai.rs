@@ -9,7 +9,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
 
 use crate::credentials;
-use crate::prompt::{Direction, Keigo, TranslateRequest};
+use crate::prompt::{AiChoice, Direction, Keigo, TranslateRequest};
 use crate::provider::Route;
 use crate::provider::Router;
 use crate::provider::claude_cli::TranslateEvent;
@@ -30,22 +30,37 @@ fn credential_name(api: Api) -> String {
     format!("{}-api-key", api.id())
 }
 
-fn route_for(settings: &Value, id: &str) -> Route {
+/// The settings field holding a provider's default model.
+fn model_field(id: &str) -> &'static str {
+    match id {
+        "openai" => "openaiModel",
+        "gemini" => "geminiModel",
+        _ => "model",
+    }
+}
+
+/// The default model of a provider: from Settings, else the recommended one.
+fn default_model(settings: &Value, id: &str) -> String {
+    let fallback = match api(id) {
+        Some(api) => api.default_model(),
+        None => "sonnet",
+    };
+    settings
+        .get(model_field(id))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .unwrap_or(fallback)
+        .to_string()
+}
+
+fn route_for(settings: &Value, id: &str, model: Option<&str>) -> Route {
     match api(id) {
-        None => Route::Claude,
+        None => Route::Claude {
+            model: model.map(str::to_string),
+        },
         Some(api) => {
-            let field = if api == Api::OpenAi {
-                "openaiModel"
-            } else {
-                "geminiModel"
-            };
-            let model = settings
-                .get(field)
-                .and_then(Value::as_str)
-                .map(str::trim)
-                .filter(|m| !m.is_empty())
-                .unwrap_or(api.default_model())
-                .to_string();
+            let model = model.map(str::to_string).unwrap_or_else(|| default_model(settings, id));
             Route::Api {
                 api,
                 model,
@@ -58,22 +73,132 @@ fn route_for(settings: &Value, id: &str) -> Route {
 /// The chosen provider first; with fallback on, then the others that are set up (Claude always is; ChatGPT and
 /// Gemini once they have a key).
 pub fn routes(app: &AppHandle) -> Vec<Route> {
+    routes_for(app, None)
+}
+
+/// Like `routes`, but starting with `choice` (the popup's AI switcher) when given.
+pub fn routes_for(app: &AppHandle, choice: Option<&AiChoice>) -> Vec<Route> {
     let settings = app.state::<SettingsStore>().get();
-    let primary = settings
-        .get("aiProvider")
-        .and_then(Value::as_str)
+    let primary = choice
+        .map(|c| c.provider.as_str())
+        .or_else(|| settings.get("aiProvider").and_then(Value::as_str))
         .filter(|p| ORDER.contains(p))
         .unwrap_or("claude");
-    let mut routes = vec![route_for(&settings, primary)];
+    let model = choice.and_then(|c| c.model.as_deref()).filter(|m| !m.trim().is_empty());
+    let mut routes = vec![route_for(&settings, primary, model)];
     if settings.get("aiFallback").and_then(Value::as_bool).unwrap_or(false) {
         for id in ORDER.iter().filter(|id| **id != primary) {
-            let route = route_for(&settings, id);
+            let route = route_for(&settings, id, None);
             if !matches!(route, Route::Api { key: None, .. }) {
                 routes.push(route);
             }
         }
     }
     routes
+}
+
+/// One entry of the quick AI switcher (popup and tray): a provider and one of its models.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct QuickChoice {
+    pub provider: String,
+    pub model: String,
+    pub label: String,
+    /// Usable now: Claude always; ChatGPT and Gemini once a key is saved.
+    pub available: bool,
+    /// The current default.
+    pub current: bool,
+}
+
+/// Human name of a model: Claude's models by name, API models by id.
+pub fn label(provider: &str, model: &str) -> String {
+    match provider {
+        "openai" => format!("ChatGPT · {model}"),
+        "gemini" => format!("Gemini · {model}"),
+        _ => match model {
+            "haiku" => "Claude Haiku".into(),
+            _ => "Claude Sonnet".into(),
+        },
+    }
+}
+
+/// Every model offered in the quick switcher: Claude's two, and for ChatGPT and Gemini the default model plus the
+/// favourites ticked in Settings. Kept short on purpose: the full model lists live in Settings.
+pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice> {
+    let current_provider = settings
+        .get("aiProvider")
+        .and_then(Value::as_str)
+        .filter(|p| ORDER.contains(p))
+        .unwrap_or("claude");
+    let mut out = Vec::new();
+    for id in ORDER {
+        let default = default_model(settings, id);
+        let mut models = match id {
+            "claude" => vec!["sonnet".to_string(), "haiku".to_string()],
+            _ => {
+                let mut m = vec![default.clone()];
+                if let Some(list) = settings["aiQuickModels"][id].as_array() {
+                    m.extend(list.iter().filter_map(Value::as_str).map(str::to_string));
+                }
+                m
+            }
+        };
+        models.dedup();
+        let mut seen = std::collections::HashSet::new();
+        models.retain(|m| seen.insert(m.clone()));
+        let available = match id {
+            "openai" => keys.openai,
+            "gemini" => keys.gemini,
+            _ => true,
+        };
+        for model in models {
+            out.push(QuickChoice {
+                label: label(id, &model),
+                current: id == current_provider && model == default,
+                provider: id.to_string(),
+                model,
+                available,
+            });
+        }
+    }
+    out
+}
+
+pub fn quick_choices(app: &AppHandle) -> Vec<QuickChoice> {
+    quick_choices_from(&app.state::<SettingsStore>().get(), &ai_keys_status())
+}
+
+/// Makes `provider` + `model` the default (from the tray menu), and tells every window.
+pub fn set_default(app: &AppHandle, provider: &str, model: &str) {
+    if !ORDER.contains(&provider) {
+        return;
+    }
+    let store = app.state::<SettingsStore>();
+    let mut value = store.get();
+    if !value.is_object() {
+        value = serde_json::json!({});
+    }
+    value["aiProvider"] = Value::from(provider);
+    value[model_field(provider)] = Value::from(model);
+    if let Err(e) = store.set(value.clone()) {
+        log::warn!("could not save the AI choice: {e}");
+        return;
+    }
+    if provider == "claude"
+        && let Some(cli) = app.try_state::<Arc<crate::provider::claude_cli::ClaudeCli>>()
+    {
+        let cli = cli.inner().clone();
+        let model = model.to_string();
+        tauri::async_runtime::spawn(async move { cli.set_model(&model).await });
+    }
+    crate::settings::broadcast(app, &value, "tray");
+    crate::tray::sync_ai(app);
+}
+
+/// The quick switcher entries, for the popup.
+#[tauri::command]
+pub fn ai_choices(app: AppHandle) -> Vec<QuickChoice> {
+    quick_choices(&app)
 }
 
 /// When a hotkey fires: open the HTTPS connection while the selected text is still being copied.
@@ -103,7 +228,7 @@ pub fn ai_keys_status() -> KeyStatus {
 
 /// Saves an API key in the Windows Credential Manager; an empty key deletes it.
 #[tauri::command]
-pub fn ai_key_set(provider: String, key: String) -> Result<(), String> {
+pub fn ai_key_set(app: AppHandle, provider: String, key: String) -> Result<(), String> {
     let api = api(&provider).ok_or("unknown provider")?;
     let key = key.trim();
     let result = if key.is_empty() {
@@ -111,7 +236,11 @@ pub fn ai_key_set(provider: String, key: String) -> Result<(), String> {
     } else {
         credentials::set(&credential_name(api), key)
     };
-    result.map_err(|e| e.to_string())
+    result.map_err(|e| e.to_string())?;
+    // The switchers show which AIs are usable.
+    crate::tray::sync_ai(&app);
+    let _ = tauri::Emitter::emit(&app, "ai:keys-changed", ());
+    Ok(())
 }
 
 /// Text models the saved key can use, for the model picker.
@@ -143,10 +272,8 @@ pub async fn ai_test(
     provider: String,
     model: Option<String>,
 ) -> Result<TestResult, String> {
-    let mut route = route_for(&app.state::<SettingsStore>().get(), &provider);
-    if let (Route::Api { model: m, .. }, Some(chosen)) = (&mut route, model.filter(|m| !m.trim().is_empty())) {
-        *m = chosen;
-    }
+    let chosen = model.filter(|m| !m.trim().is_empty());
+    let route = route_for(&app.state::<SettingsStore>().get(), &provider, chosen.as_deref());
     let request = TranslateRequest::task(Direction::JaVi, "確認しました。ありがとうございます。", Keigo::Polite);
     let start = Instant::now();
     let outcome: Mutex<Option<TestResult>> = Mutex::new(None);
@@ -185,4 +312,52 @@ pub async fn ai_test(
         )
         .await;
     outcome.into_inner().unwrap().ok_or_else(|| "no answer".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quick_choices_list_defaults_and_favourites_once() {
+        let settings = serde_json::json!({
+            "aiProvider": "gemini",
+            "model": "haiku",
+            "geminiModel": "gemini-a",
+            "aiQuickModels": { "gemini": ["gemini-b", "gemini-a"], "openai": ["gpt-x"] }
+        });
+        let keys = KeyStatus {
+            openai: false,
+            gemini: true,
+        };
+        let c = quick_choices_from(&settings, &keys);
+        let ids: Vec<(String, String, bool, bool)> = c
+            .iter()
+            .map(|q| (q.provider.clone(), q.model.clone(), q.available, q.current))
+            .collect();
+        assert_eq!(
+            ids,
+            [
+                ("claude".into(), "sonnet".into(), true, false),
+                ("claude".into(), "haiku".into(), true, false),
+                ("openai".into(), "gpt-5.6-luna".into(), false, false),
+                ("openai".into(), "gpt-x".into(), false, false),
+                ("gemini".into(), "gemini-a".into(), true, true),
+                ("gemini".into(), "gemini-b".into(), true, false),
+            ]
+        );
+        assert_eq!(c[1].label, "Claude Haiku");
+        assert_eq!(c[5].label, "Gemini · gemini-b");
+    }
+
+    #[test]
+    fn a_choice_overrides_provider_and_model() {
+        let settings = serde_json::json!({ "aiProvider": "claude", "model": "sonnet" });
+        assert!(
+            matches!(route_for(&settings, "claude", Some("haiku")), Route::Claude { model: Some(m) } if m == "haiku")
+        );
+        assert!(
+            matches!(route_for(&settings, "gemini", None), Route::Api { model, .. } if model == "gemini-3.6-flash")
+        );
+    }
 }

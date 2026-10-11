@@ -28,11 +28,23 @@ test('Vietnamese in the composer is translated and Enter puts it back in the cha
   await expect(composer(page)).toHaveValue(translated)
 })
 
+test('a message of several lines keeps its lines in the reading back', async ({ page }) => {
+  await composer(page).fill('・Đã sửa lỗi đăng nhập\n・Đã cập nhật spec màn hình B')
+  await page.keyboard.press('Control+Alt+K')
+
+  const draft = popup(page).locator('textarea[data-role=draft]')
+  await expect(draft).toBeVisible()
+  expect((await draft.inputValue()).split('\n')).toHaveLength(2)
+  // innerText follows the rendering, so lines collapsed by CSS would come back joined by a space.
+  const back = popup(page).getByText('Ý nghĩa khi đọc lại').locator('..').locator('p[lang=vi]')
+  expect((await back.innerText()).split('\n')).toHaveLength(2)
+})
+
 test('a Japanese message is translated and Claude suggests replies that can be copied', async ({ page }) => {
   await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
   await page.keyboard.press('Control+Alt+J')
 
-  await expect(popup(page).getByText('JA → VI')).toBeVisible()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   const suggest = popup(page).getByRole('button', { name: /Gợi ý/ })
   await expect(suggest).toBeEnabled()
   await popup(page).press('g')
@@ -85,4 +97,23 @@ test('selecting text with the mouse shows the quick toolbar', async ({ page }) =
   await expect(bar).toBeVisible()
   await bar.getByRole('button', { name: /Dịch/ }).first().click()
   await expect(popup(page)).toBeVisible()
+})
+
+test('the AI can be switched from the popup, which translates again with it', async ({ page }) => {
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+K')
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+  const chip = popup(page).getByRole('button', { name: /^AI dịch: Claude Sonnet/ })
+  await expect(chip).toBeVisible()
+
+  await popup(page).press('Control+m')
+  const menu = popup(page).getByRole('menu', { name: 'Chọn AI dịch' })
+  await expect(menu).toBeVisible()
+  // No key for Gemini in the prototype: shown, but not selectable.
+  await expect(menu.getByRole('menuitemradio', { name: 'Gemini 3.6 Flash' })).toBeDisabled()
+  await menu.getByRole('menuitemradio', { name: 'Haiku' }).click()
+
+  await expect(menu).toBeHidden()
+  await expect(popup(page).getByRole('button', { name: /^AI dịch: Claude Haiku/ })).toBeVisible()
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
 })
