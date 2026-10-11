@@ -2,6 +2,7 @@
 // so every screen still works without Tauri.
 import { Channel, invoke } from '@tauri-apps/api/core'
 import type { Keigo } from '../types'
+import type { Lang } from './i18n'
 import { review as mockReview, translate as mockTranslate } from './mockEngine'
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
@@ -88,8 +89,13 @@ export interface TranslateRequest {
 }
 
 /** Starts a translation; returns a function that cancels it. */
-export async function startTranslation(request: TranslateRequest, onEvent: (e: TranslateEvent) => void): Promise<() => void> {
-  if (!isTauri) return mockStream(request, onEvent)
+/** `lang` is the user's language; the real app reads it from the settings, the prototype's canned answers need it. */
+export async function startTranslation(
+  request: TranslateRequest,
+  onEvent: (e: TranslateEvent) => void,
+  lang: Lang = 'vi',
+): Promise<() => void> {
+  if (!isTauri) return mockStream(request, onEvent, lang)
   const requestId = await invoke<number>('next_request_id')
   const channel = new Channel<TranslateEvent>()
   channel.onmessage = onEvent
@@ -106,13 +112,13 @@ export interface ClaudeStatus {
 }
 
 export async function claudeStatus(): Promise<ClaudeStatus> {
-  if (!isTauri) return { path: 'claude.exe (giả lập)', version: '2.x (giả lập)', error: null }
+  if (!isTauri) return { path: 'claude.exe (mock)', version: '2.x (mock)', error: null }
   return invoke<ClaudeStatus>('claude_status')
 }
 
 
-function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => void): () => void {
-  const final = mockSections(request)
+function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => void, lang: Lang): () => void {
+  const final = mockSections(request, lang)
   // Stream the field the user reads first, like Claude does.
   const field: keyof Sections = request.direction === 'review_ja' ? 'suggestion' : 'translation'
   const full = final[field]
@@ -143,9 +149,9 @@ function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => v
   }
 }
 
-function mockSections(request: TranslateRequest): Sections {
+function mockSections(request: TranslateRequest, lang: Lang): Sections {
   if (request.direction === 'review_ja') {
-    const r = mockReview(request.text)
+    const r = mockReview(request.text, lang)
     return {
       ...emptySections,
       verdict: r.verdict,
@@ -154,6 +160,6 @@ function mockSections(request: TranslateRequest): Sections {
       suggestionVi: r.suggestionVi,
     }
   }
-  const r = mockTranslate(request.text, request.direction, request.keigo)
+  const r = mockTranslate(request.text, request.direction, request.keigo, lang)
   return { ...emptySections, translation: r.translation, backTranslation: r.backTranslation ?? '' }
 }

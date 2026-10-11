@@ -5,7 +5,8 @@ import { useStore } from '../../store'
 
 /**
  * The page in the "quickbar" window: the toolbar shown next to a mouse selection in a chat app.
- * The language of the selection is not known until a button is pressed, so the translate button says "Dịch".
+ * The language of the selection is not known until a button is pressed, so the translate button says "Dịch"
+ * ("翻訳" for a Japanese user).
  * It stays until the user clicks somewhere else (or presses one of its buttons).
  */
 export function QuickbarWindow() {
@@ -24,7 +25,7 @@ export function QuickbarWindow() {
     ro.observe(el)
     fit()
     return () => ro.disconnect()
-  }, [settings.quickActions.items, settings.quickActions.display])
+  }, [settings.quickActions.items, settings.quickActions.display, settings.language])
 
   return (
     <div ref={barRef} className="flex w-max">

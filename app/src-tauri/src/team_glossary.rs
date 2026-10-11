@@ -15,8 +15,26 @@ pub struct TeamGlossary {
     pub path: String,
     pub project: String,
     pub terms: Vec<TeamTerm>,
-    /// Why the file could not be read, in Vietnamese for the Glossary screen.
-    pub error: Option<String>,
+    /// Why the file could not be read; the Glossary screen words it in the user's language.
+    pub error: Option<FileError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileError {
+    /// `not_found`, `bad_format` or `unreadable`.
+    pub kind: &'static str,
+    /// The system's or the YAML parser's message (English), shown after the explanation.
+    pub detail: String,
+}
+
+impl FileError {
+    fn new(kind: &'static str, detail: impl ToString) -> Self {
+        Self {
+            kind,
+            detail: detail.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
@@ -89,10 +107,10 @@ fn load(path: &Path) -> TeamGlossary {
                 out.project = project;
                 out.terms = terms;
             }
-            Err(e) => out.error = Some(format!("File không đúng định dạng YAML của glossary: {e}")),
+            Err(e) => out.error = Some(FileError::new("bad_format", e)),
         },
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => out.error = Some("Không tìm thấy file".into()),
-        Err(e) => out.error = Some(format!("Không đọc được file: {e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => out.error = Some(FileError::new("not_found", "")),
+        Err(e) => out.error = Some(FileError::new("unreadable", e)),
     }
     out
 }
@@ -123,13 +141,10 @@ mod tests {
     fn reports_bad_files_and_reloads_on_change() {
         let path = std::env::temp_dir().join(format!("mytranslate-team-{}.yaml", std::process::id()));
         let cache = TeamGlossaryCache::default();
-        assert_eq!(
-            cache.get(path.to_str().unwrap()).error.as_deref(),
-            Some("Không tìm thấy file")
-        );
+        assert_eq!(cache.get(path.to_str().unwrap()).error.unwrap().kind, "not_found");
 
         std::fs::write(&path, "terms: [oops").unwrap();
-        assert!(cache.get(path.to_str().unwrap()).error.unwrap().contains("YAML"));
+        assert_eq!(cache.get(path.to_str().unwrap()).error.unwrap().kind, "bad_format");
 
         std::fs::write(&path, "terms:\n  - ja: 仕訳\n    vi: bút toán\n").unwrap();
         // Same mtime resolution on some file systems: make the change visible.

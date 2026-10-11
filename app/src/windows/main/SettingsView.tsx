@@ -6,59 +6,87 @@ import { InstallProgress, UpToDate } from '../../components/UpdatePanel'
 import type { useUpdates } from '../../lib/updates'
 import { Button, Hotkey, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
-import { keigoLabels } from '../../data/mock'
+import { keigoLabel } from '../../data/mock'
 import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
+import { useT, type T } from '../../lib/i18n'
 import { DEFAULT_QUICK_ACTION_ITEMS, useStore, type HotkeyMap } from '../../store'
 import { AppScopeEditor } from './AppScopeEditor'
 import { QuickActionOrderEditor } from './QuickActionOrderEditor'
 import { AiProvidersGroup } from './AiProvidersGroup'
 
-const hotkeyRows: { key: keyof HotkeyMap; label: string }[] = [
-  { key: 'auto', label: 'Dịch, tự nhận diện hướng' },
-  { key: 'jaVi', label: 'Dịch tiếng Nhật sang tiếng Việt' },
-  { key: 'viJa', label: 'Dịch tiếng Việt sang tiếng Nhật' },
-  { key: 'review', label: 'Kiểm tra câu tiếng Nhật' },
-  { key: 'main', label: 'Mở cửa sổ chính' },
-]
+/** The hotkeys: one translates either way, the language of the text decides. */
+function hotkeyRows(t: T): { key: keyof HotkeyMap; label: string }[] {
+  return [
+    { key: 'auto', label: t('Dịch (tự chọn ngôn ngữ đích)', '翻訳（翻訳先の言語を自動で判断）') },
+    { key: 'review', label: t('Kiểm tra câu tiếng Nhật', '日本語をチェック') },
+    { key: 'main', label: t('Mở cửa sổ chính', 'メイン画面を開く') },
+  ]
+}
 
 export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdates> }) {
   const { settings, updateSettings, showToast, setScreen } = useStore()
+  const t = useT()
   const [recording, setRecording] = useState<keyof HotkeyMap | null>(null)
   const [confirm, setConfirm] = useState<'restore' | 'wipe' | null>(null)
   const [newBlocked, setNewBlocked] = useState('')
   const qa = settings.quickActions
+  const rows = hotkeyRows(t)
   const setQa = (patch: Partial<typeof qa>) => updateSettings({ quickActions: { ...qa, ...patch } })
   const failed = (what: string) => (e: unknown) => showToast(`${what}: ${String(e)}`)
   const backup = () => {
-    if (!isTauri) return showToast('Mô phỏng: lưu file mytranslate-YYYY-MM-DD.db')
+    if (!isTauri) return showToast(t('Mô phỏng: lưu file mytranslate-YYYY-MM-DD.db', 'シミュレーション: mytranslate-YYYY-MM-DD.db を保存'))
     invoke<string | null>('data_backup')
-      .then((path) => path && showToast(`Đã sao lưu vào ${path}`))
-      .catch(failed('Không sao lưu được'))
+      .then((path) => path && showToast(t(`Đã sao lưu vào ${path}`, `${path} にバックアップしました`)))
+      .catch(failed(t('Không sao lưu được', 'バックアップできません')))
   }
   const restore = () => {
     setConfirm(null)
-    if (!isTauri) return showToast('Mô phỏng: đã khôi phục từ bản sao lưu')
+    if (!isTauri) return showToast(t('Mô phỏng: đã khôi phục từ bản sao lưu', 'シミュレーション: バックアップから復元しました'))
     invoke<boolean>('data_restore')
-      .then((done) => done && showToast('Đã khôi phục dữ liệu'))
-      .catch(failed('Không khôi phục được'))
+      .then((done) => done && showToast(t('Đã khôi phục dữ liệu', 'データを復元しました')))
+      .catch(failed(t('Không khôi phục được', '復元できません')))
   }
   const wipe = () => {
     setConfirm(null)
-    if (!isTauri) return showToast('Mô phỏng: đã xóa dữ liệu (prototype không xóa thật)')
+    if (!isTauri) return showToast(t('Mô phỏng: đã xóa dữ liệu (prototype không xóa thật)', 'シミュレーション: データを削除しました（実際には削除しません）'))
     invoke('data_wipe')
-      .then(() => showToast('Đã xóa toàn bộ dữ liệu'))
-      .catch(failed('Không xóa được'))
+      .then(() => showToast(t('Đã xóa toàn bộ dữ liệu', 'すべてのデータを削除しました')))
+      .catch(failed(t('Không xóa được', '削除できません')))
   }
-  const previewAction = () => showToast('Đây là bản xem trước, hãy thử ở màn hình Mô phỏng sử dụng')
+  const previewAction = () =>
+    showToast(t('Đây là bản xem trước, hãy thử ở màn hình Mô phỏng sử dụng', 'これはプレビューです。「使ってみる」画面でお試しください'))
 
   return (
     <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex max-w-[720px] flex-col gap-6 px-6 py-6">
-        <h2 className="text-[20px] font-semibold">Cài đặt</h2>
+        <h2 className="text-[20px] font-semibold">{t('Cài đặt', '設定')}</h2>
 
-        <Group title="Phím tắt" hint="Phím tắt hoạt động trong mọi ứng dụng. Bấm vào một tổ hợp để đổi.">
-          {hotkeyRows.map((row) => (
+        <Group title={t('Ngôn ngữ', '言語')}>
+          <Row
+            label={t('Ngôn ngữ của bạn', 'あなたの言語')}
+            hint={t(
+              'Ngôn ngữ của app. Bạn đọc tin của bên kia và viết trả lời bằng ngôn ngữ này.',
+              'アプリの表示言語です。相手のメッセージをこの言語で読み、この言語で返信を書きます。',
+            )}
+          >
+            <Segmented
+              label={t('Ngôn ngữ của bạn', 'あなたの言語')}
+              value={settings.language}
+              onChange={(language) => updateSettings({ language })}
+              options={[
+                { value: 'vi', label: 'Tiếng Việt' },
+                { value: 'ja', label: '日本語' },
+              ]}
+            />
+          </Row>
+        </Group>
+
+        <Group
+          title={t('Phím tắt', 'ショートカット')}
+          hint={t('Phím tắt hoạt động trong mọi ứng dụng. Bấm vào một tổ hợp để đổi.', 'どのアプリでも使えます。組み合わせをクリックすると変更できます。')}
+        >
+          {rows.map((row) => (
             <Row key={row.key} label={row.label}>
               <button
                 type="button"
@@ -74,35 +102,39 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                   const combo = comboFromEvent(e)
                   if (!combo) return
                   if (!e.ctrlKey && !e.altKey && !e.metaKey) {
-                    showToast('Phím tắt toàn cục cần có Ctrl, Alt hoặc Win')
+                    showToast(t('Phím tắt toàn cục cần có Ctrl, Alt hoặc Win', 'ショートカットには Ctrl、Alt、Win のいずれかが必要です'))
                     return
                   }
-                  const clash = hotkeyRows.find((r) => r.key !== row.key && settings.hotkeys[r.key] === combo)
+                  const clash = rows.find((r) => r.key !== row.key && settings.hotkeys[r.key] === combo)
                   if (clash) {
-                    showToast(`${combo} đang dùng cho "${clash.label}"`)
+                    showToast(t(`${combo} đang dùng cho "${clash.label}"`, `${combo} は「${clash.label}」で使用中です`))
                     return
                   }
                   updateSettings({ hotkeys: { ...settings.hotkeys, [row.key]: combo } })
                   setRecording(null)
                 }}
+                aria-label={t(`Phím tắt: ${row.label}`, `ショートカット: ${row.label}`)}
                 className={cx(
                   'flex h-8 min-w-[150px] items-center justify-center rounded-md border px-3',
                   recording === row.key ? 'border-accent bg-accent-soft text-[12.5px] text-accent' : 'border-line bg-surface hover:bg-hover',
                 )}
               >
-                {recording === row.key ? 'Nhấn tổ hợp phím mới...' : <Hotkey combo={settings.hotkeys[row.key]} />}
+                {recording === row.key ? t('Nhấn tổ hợp phím mới...', '新しい組み合わせを押してください…') : <Hotkey combo={settings.hotkeys[row.key]} />}
               </button>
             </Row>
           ))}
         </Group>
 
         <Group
-          title="Thao tác nhanh khi bôi đen"
-          hint="Bôi đen chữ bằng chuột sẽ hiện một thanh nhỏ để chọn luôn thao tác, không cần chuyển sang bàn phím."
+          title={t('Thao tác nhanh khi bôi đen', '選択時のクイック操作')}
+          hint={t(
+            'Bôi đen chữ bằng chuột sẽ hiện một thanh nhỏ để chọn luôn thao tác, không cần chuyển sang bàn phím.',
+            'マウスで文字を選択すると小さなツールバーが表示され、キーボードを使わずに操作できます。',
+          )}
         >
-          <Row label="Hiện thanh thao tác khi bôi đen bằng chuột">
+          <Row label={t('Hiện thanh thao tác khi bôi đen bằng chuột', 'マウスで選択したときにツールバーを表示')}>
             <Switch
-              label="Hiện thanh thao tác khi bôi đen bằng chuột"
+              label={t('Hiện thanh thao tác khi bôi đen bằng chuột', 'マウスで選択したときにツールバーを表示')}
               checked={qa.enabled}
               onChange={(v) => setQa({ enabled: v })}
             />
@@ -112,20 +144,20 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
               <div className="flex flex-col gap-3 px-4 py-3.5">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="text-[13.5px] text-ink">Hiện trong ứng dụng nào</div>
+                    <div className="text-[13.5px] text-ink">{t('Hiện trong ứng dụng nào', '表示するアプリ')}</div>
                     <div className="mt-0.5 text-[12px] text-ink-3">
                       {qa.appScope === 'all'
-                        ? 'Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Giao diện và hệ thống.'
-                        : 'Chỉ các ứng dụng trong danh sách dưới đây.'}
+                        ? t('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Giao diện và hệ thống.', 'すべてのアプリ（「表示とシステム」で除外したアプリを除く）。')
+                        : t('Chỉ các ứng dụng trong danh sách dưới đây.', '下のリストのアプリだけ。')}
                     </div>
                   </div>
                   <Segmented
-                    label="Hiện trong ứng dụng nào"
+                    label={t('Hiện trong ứng dụng nào', '表示するアプリ')}
                     value={qa.appScope}
                     onChange={(v) => setQa({ appScope: v })}
                     options={[
-                      { value: 'selected', label: 'Ứng dụng đã chọn' },
-                      { value: 'all', label: 'Mọi ứng dụng' },
+                      { value: 'selected', label: t('Ứng dụng đã chọn', '選んだアプリ') },
+                      { value: 'all', label: t('Mọi ứng dụng', 'すべてのアプリ') },
                     ]}
                   />
                 </div>
@@ -134,16 +166,21 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
               <div className="px-4 pt-3.5 pb-1">
                 <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="text-[13.5px] text-ink">Các nút và thứ tự hiển thị</div>
-                    <div className="mt-0.5 text-[12px] text-ink-3">Kéo tay nắm hoặc dùng mũi tên để sắp xếp. Nút đứng đầu nằm gần con trỏ nhất.</div>
+                    <div className="text-[13.5px] text-ink">{t('Các nút và thứ tự hiển thị', 'ボタンと表示順')}</div>
+                    <div className="mt-0.5 text-[12px] text-ink-3">
+                      {t(
+                        'Kéo tay nắm hoặc dùng mũi tên để sắp xếp. Nút đứng đầu nằm gần con trỏ nhất.',
+                        'つまみをドラッグするか矢印で並べ替えます。先頭のボタンがカーソルの一番近くに表示されます。',
+                      )}
+                    </div>
                   </div>
                   <Segmented
-                    label="Kiểu hiển thị nút"
+                    label={t('Kiểu hiển thị nút', 'ボタンの表示')}
                     value={qa.display}
                     onChange={(v) => setQa({ display: v })}
                     options={[
-                      { value: 'iconText', label: 'Icon và chữ' },
-                      { value: 'iconOnly', label: 'Chỉ icon' },
+                      { value: 'iconText', label: t('Icon và chữ', 'アイコンと文字') },
+                      { value: 'iconOnly', label: t('Chỉ icon', 'アイコンのみ') },
                     ]}
                   />
                 </div>
@@ -157,16 +194,16 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                     disabled={JSON.stringify(qa.items) === JSON.stringify(DEFAULT_QUICK_ACTION_ITEMS)}
                     onClick={() => setQa({ items: DEFAULT_QUICK_ACTION_ITEMS })}
                   >
-                    Khôi phục thứ tự mặc định
+                    {t('Khôi phục thứ tự mặc định', '既定の順番に戻す')}
                   </Button>
                 </div>
               </div>
               <div className="flex flex-col gap-2.5 px-4 py-3.5">
-                <div className="text-[13.5px] text-ink">Xem trước</div>
-                <PreviewLine label="Khi bôi đen tiếng Nhật">
+                <div className="text-[13.5px] text-ink">{t('Xem trước', 'プレビュー')}</div>
+                <PreviewLine label={t('Khi bôi đen tiếng Nhật', '日本語を選択したとき')}>
                   <QuickActionBar japanese items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
                 </PreviewLine>
-                <PreviewLine label="Khi bôi đen tiếng Việt">
+                <PreviewLine label={t('Khi bôi đen tiếng Việt', 'ベトナム語を選択したとき')}>
                   <QuickActionBar japanese={false} items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
                 </PreviewLine>
               </div>
@@ -174,36 +211,39 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           )}
         </Group>
 
-        <Group title="Dịch">
-          <Row label="Mức kính ngữ mặc định">
+        <Group title={t('Dịch', '翻訳')}>
+          <Row
+            label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
+            hint={t('Dùng khi dịch câu bạn viết sang tiếng Nhật.', 'ベトナム語で送るときの言葉づかいです。')}
+          >
             <Segmented
-              label="Mức kính ngữ mặc định"
+              label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
               value={settings.defaultKeigo}
               onChange={(k) => updateSettings({ defaultKeigo: k })}
-              options={(['casual', 'polite', 'formal'] as const).map((k) => ({ value: k, label: keigoLabels[k] }))}
+              options={(['casual', 'polite', 'formal'] as const).map((k) => ({ value: k, label: keigoLabel(k, settings.language) }))}
             />
           </Row>
         </Group>
 
         <AiProvidersGroup group={Group} row={Row} />
 
-        <Group title="Giao diện và hệ thống">
-          <Row label="Chủ đề">
+        <Group title={t('Giao diện và hệ thống', '表示とシステム')}>
+          <Row label={t('Chủ đề', 'テーマ')}>
             <Segmented
-              label="Chủ đề"
+              label={t('Chủ đề', 'テーマ')}
               value={settings.theme}
-              onChange={(t) => updateSettings({ theme: t })}
+              onChange={(theme) => updateSettings({ theme })}
               options={[
-                { value: 'system', label: 'Theo hệ thống' },
-                { value: 'light', label: 'Sáng' },
-                { value: 'dark', label: 'Tối' },
+                { value: 'system', label: t('Theo hệ thống', 'システムに合わせる') },
+                { value: 'light', label: t('Sáng', 'ライト') },
+                { value: 'dark', label: t('Tối', 'ダーク') },
               ]}
             />
           </Row>
-          <Row label="Khởi động cùng Windows">
-            <Switch label="Khởi động cùng Windows" checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
+          <Row label={t('Khởi động cùng Windows', 'Windows 起動時に開始')}>
+            <Switch label={t('Khởi động cùng Windows', 'Windows 起動時に開始')} checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
           </Row>
-          <Row label="Ứng dụng bị chặn" hint="Phím tắt không hoạt động trong các ứng dụng này.">
+          <Row label={t('Ứng dụng bị chặn', '除外するアプリ')} hint={t('Phím tắt không hoạt động trong các ứng dụng này.', 'これらのアプリではショートカットが動作しません。')}>
             <div className="flex w-80 flex-col gap-2">
               <div className="flex flex-wrap gap-1.5">
                 {settings.blockedApps.map((a) => (
@@ -211,7 +251,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                     {a}
                     <button
                       type="button"
-                      aria-label={`Bỏ chặn ${a}`}
+                      aria-label={t(`Bỏ chặn ${a}`, `${a} の除外を解除`)}
                       onClick={() => updateSettings({ blockedApps: settings.blockedApps.filter((x) => x !== a) })}
                       className="flex size-4 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink"
                     >
@@ -229,9 +269,14 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                   setNewBlocked('')
                 }}
               >
-                <input className={cx(inputClass, 'flex-1')} placeholder="vd: Bitwarden.exe" value={newBlocked} onChange={(e) => setNewBlocked(e.target.value)} />
+                <input
+                  className={cx(inputClass, 'flex-1')}
+                  placeholder={t('vd: Bitwarden.exe', '例: Bitwarden.exe')}
+                  value={newBlocked}
+                  onChange={(e) => setNewBlocked(e.target.value)}
+                />
                 <Button type="submit" disabled={!newBlocked.trim()}>
-                  Thêm
+                  {t('Thêm', '追加')}
                 </Button>
               </form>
             </div>
@@ -241,55 +286,73 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
         <UpdatesGroup updates={updates} auto={settings.autoUpdateCheck} onAuto={(v) => updateSettings({ autoUpdateCheck: v })} />
 
         <Group
-          title="Dữ liệu"
+          title={t('Dữ liệu', 'データ')}
           hint={
             isTauri
-              ? 'Lịch sử dịch, thread và glossary nằm trên máy này, trong %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db.'
-              : 'Toàn bộ lịch sử dịch nằm trên máy này.'
+              ? t(
+                  'Lịch sử dịch, thread và glossary nằm trên máy này, trong %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db.',
+                  '翻訳履歴、スレッド、用語集はこのPCの %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db にあります。',
+                )
+              : t('Toàn bộ lịch sử dịch nằm trên máy này.', '翻訳履歴はすべてこのPCにあります。')
           }
         >
-          <Row label="Hướng dẫn ban đầu" hint="Kiểm tra lại kết nối Claude Code và thử dịch.">
-            <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>Xem lại</Button>
+          <Row label={t('Hướng dẫn ban đầu', '初期設定ガイド')} hint={t('Kiểm tra lại kết nối Claude Code và thử dịch.', 'Claude Code との接続を確認し、翻訳を試します。')}>
+            <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>{t('Xem lại', 'もう一度見る')}</Button>
           </Row>
-          <Row label="Giữ lịch sử" hint="Tin cũ hơn thời hạn này được tự xóa, thread không còn tin nào cũng bị xóa.">
+          <Row
+            label={t('Giữ lịch sử', '履歴の保存期間')}
+            hint={t(
+              'Tin cũ hơn thời hạn này được tự xóa, thread không còn tin nào cũng bị xóa.',
+              '期間より古いメッセージは自動で削除され、空になったスレッドも削除されます。',
+            )}
+          >
             <Segmented
-              label="Giữ lịch sử"
+              label={t('Giữ lịch sử', '履歴の保存期間')}
               value={String(settings.retentionMonths)}
               onChange={(v) => updateSettings({ retentionMonths: Number(v) })}
               options={[
-                { value: '0', label: 'Luôn giữ' },
-                { value: '3', label: '3 tháng' },
-                { value: '6', label: '6 tháng' },
-                { value: '12', label: '1 năm' },
+                { value: '0', label: t('Luôn giữ', '無期限') },
+                { value: '3', label: t('3 tháng', '3か月') },
+                { value: '6', label: t('6 tháng', '6か月') },
+                { value: '12', label: t('1 năm', '1年') },
               ]}
             />
           </Row>
-          <Row label="Sao lưu" hint="Một file .db chứa toàn bộ lịch sử, thread, người liên hệ và glossary cá nhân.">
-            <Button onClick={backup}>Sao lưu...</Button>
+          <Row
+            label={t('Sao lưu', 'バックアップ')}
+            hint={t('Một file .db chứa toàn bộ lịch sử, thread, người liên hệ và glossary cá nhân.', '履歴、スレッド、連絡先、個人用語集をすべて含む .db ファイルです。')}
+          >
+            <Button onClick={backup}>{t('Sao lưu...', 'バックアップ…')}</Button>
           </Row>
-          <Row label="Khôi phục" hint="Thay toàn bộ dữ liệu hiện tại bằng một bản sao lưu.">
+          <Row label={t('Khôi phục', '復元')} hint={t('Thay toàn bộ dữ liệu hiện tại bằng một bản sao lưu.', '現在のデータをすべてバックアップの内容に置き換えます。')}>
             {confirm === 'restore' ? (
               <div className="flex gap-2">
-                <Button onClick={() => setConfirm(null)}>Hủy</Button>
+                <Button onClick={() => setConfirm(null)}>{t('Hủy', 'キャンセル')}</Button>
                 <Button variant="primary" onClick={restore}>
-                  Chọn file và thay dữ liệu
+                  {t('Chọn file và thay dữ liệu', 'ファイルを選んで置き換える')}
                 </Button>
               </div>
             ) : (
-              <Button onClick={() => setConfirm('restore')}>Khôi phục...</Button>
+              <Button onClick={() => setConfirm('restore')}>{t('Khôi phục...', '復元…')}</Button>
             )}
           </Row>
-          <Row label="Xóa toàn bộ dữ liệu" hint="Xóa lịch sử, thread, người liên hệ và glossary cá nhân. Cài đặt được giữ lại. Không thể hoàn tác.">
+          <Row
+            label={t('Xóa toàn bộ dữ liệu', 'すべてのデータを削除')}
+            hint={t(
+              'Xóa lịch sử, thread, người liên hệ và glossary cá nhân. Cài đặt được giữ lại. Không thể hoàn tác.',
+              '履歴、スレッド、連絡先、個人用語集を削除します。設定は残ります。元に戻せません。',
+            )}
+          >
             {confirm === 'wipe' ? (
               <div className="flex gap-2">
-                <Button onClick={() => setConfirm(null)}>Hủy</Button>
+                <Button onClick={() => setConfirm(null)}>{t('Hủy', 'キャンセル')}</Button>
                 <Button variant="danger" onClick={wipe}>
-                  Xác nhận xóa
+                  {t('Xác nhận xóa', '削除する')}
                 </Button>
               </div>
             ) : (
               <Button className="text-bad" onClick={() => setConfirm('wipe')}>
-                Xóa dữ liệu...
+                {t('Xóa dữ liệu...', 'データを削除…')}
               </Button>
             )}
           </Row>
@@ -300,41 +363,53 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
 }
 
 function UpdatesGroup({ updates, auto, onAuto }: { updates: ReturnType<typeof useUpdates>; auto: boolean; onAuto: (v: boolean) => void }) {
+  const t = useT()
   const { status, checking, check, install, installNow } = updates
   const busy = install.phase === 'downloading' || install.phase === 'installing'
   return (
-    <Group title="Cập nhật" hint={status ? `Phiên bản đang dùng: ${status.current}` : undefined}>
+    <Group title={t('Cập nhật', 'アップデート')} hint={status ? t(`Phiên bản đang dùng: ${status.current}`, `現在のバージョン: ${status.current}`) : undefined}>
       {status && !status.configured ? (
-        <Row label="Kiểm tra cập nhật" hint="Bản cài này không có nguồn cập nhật. Hãy cài bản do team phát hành.">
-          <span className="text-[13px] text-ink-3">Không có</span>
+        <Row
+          label={t('Kiểm tra cập nhật', 'アップデートの確認')}
+          hint={t('Bản cài này không có nguồn cập nhật. Hãy cài bản do team phát hành.', 'このインストール版には更新元がありません。チームが配布する版をインストールしてください。')}
+        >
+          <span className="text-[13px] text-ink-3">{t('Không có', 'なし')}</span>
         </Row>
       ) : (
         <>
-          <Row label="Tự kiểm tra cập nhật" hint="Sau khi mở app và mỗi 6 giờ. Chỉ cài khi bạn bấm cập nhật.">
-            <Switch label="Tự kiểm tra cập nhật" checked={auto} onChange={onAuto} />
+          <Row
+            label={t('Tự kiểm tra cập nhật', 'アップデートを自動で確認')}
+            hint={t('Sau khi mở app và mỗi 6 giờ. Chỉ cài khi bạn bấm cập nhật.', '起動後と6時間ごとに確認します。インストールはボタンを押したときだけです。')}
+          >
+            <Switch label={t('Tự kiểm tra cập nhật', 'アップデートを自動で確認')} checked={auto} onChange={onAuto} />
           </Row>
           {status?.available ? (
             <div className="flex flex-col gap-2.5 px-4 py-3">
               <div className="flex items-center gap-3">
                 <ArrowUpCircle size={18} className="shrink-0 text-accent" />
                 <div className="min-w-0 flex-1">
-                  <div className="text-[13.5px] font-semibold text-ink">Có phiên bản mới {status.available.version}</div>
+                  <div className="text-[13.5px] font-semibold text-ink">
+                    {t(`Có phiên bản mới ${status.available.version}`, `新しいバージョン ${status.available.version} があります`)}
+                  </div>
                   {status.available.notes && <p className="mt-0.5 text-[12.5px] whitespace-pre-wrap text-ink-2">{status.available.notes}</p>}
                 </div>
                 <Button variant="primary" disabled={busy} onClick={() => void installNow()}>
                   {busy && <Loader2 size={14} className="animate-spin" />}
-                  Cập nhật và khởi động lại
+                  {t('Cập nhật và khởi động lại', 'アップデートして再起動')}
                 </Button>
               </div>
               <InstallProgress install={install} />
             </div>
           ) : (
-            <Row label="Trạng thái" hint={status?.error ? `Lần kiểm tra trước bị lỗi: ${status.error}` : undefined}>
+            <Row
+              label={t('Trạng thái', '状態')}
+              hint={status?.error ? t(`Lần kiểm tra trước bị lỗi: ${status.error}`, `前回の確認でエラー: ${status.error}`) : undefined}
+            >
               <span className="flex items-center gap-3">
                 {status?.checkedAt && !status.error && <UpToDate status={status} />}
                 <Button disabled={checking} onClick={() => void check()}>
                   {checking ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                  {checking ? 'Đang kiểm tra…' : 'Kiểm tra ngay'}
+                  {checking ? t('Đang kiểm tra…', '確認中…') : t('Kiểm tra ngay', '今すぐ確認')}
                 </Button>
               </span>
             </Row>

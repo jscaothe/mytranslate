@@ -2,6 +2,8 @@
 
 MyTranslate dịch Nhật - Việt ngay tại ô chat Teams/Slack bằng phím tắt, dùng tài khoản Claude của chính bạn.
 Tài liệu này dành cho người dùng trong team; thiết kế chi tiết ở [design.md](design.md).
+Người dùng Nhật xem bản tiếng Nhật: [install-ja.md](install-ja.md).
+App hiện tiếng Nhật khi Windows dùng tiếng Nhật; đổi ở Cài đặt > Ngôn ngữ, đổi ngôn ngữ thì hướng "đọc" và "viết" cũng đổi theo.
 
 ## Yêu cầu
 
@@ -14,11 +16,10 @@ Tài liệu này dành cho người dùng trong team; thiết kế chi tiết �
 ## Cài đặt
 
 1. Chạy file `MyTranslate_<phiên bản>_x64-setup.exe` (cài cho riêng bạn, không cần quyền admin) hoặc `MyTranslate_<phiên bản>_x64_en-US.msi` (dùng khi IT cài hàng loạt).
-2. Mở MyTranslate từ menu Start.
-   Lần đầu, app hiện **Hướng dẫn ban đầu**: kiểm tra Claude Code và dịch thử một câu.
+2. Cài xong, app tự chạy và thu nhỏ xuống **khay hệ thống** (góc dưới bên phải, có thể nằm trong mũi tên ^); Windows hiện thông báo app đang chạy ngầm.
+   Bấm icon MyTranslate ở khay (hoặc nhấn `Ctrl+Alt+M`) để mở **Hướng dẫn ban đầu**: kiểm tra Claude Code và dịch thử một câu.
 3. Xong hướng dẫn, trang **Bắt đầu dùng MyTranslate** nhắc lại ba cách dùng chính và có nút mở Teams / Slack.
 4. Đóng cửa sổ: app vẫn chạy ở **khay hệ thống** (góc dưới bên phải) và phím tắt luôn sẵn sàng.
-   Lần đầu đóng, Windows hiện một thông báo nhắc điều này.
 
 ### Nếu Windows chặn file cài đặt
 
@@ -33,10 +34,8 @@ Bản thử nghiệm hiện **chưa được ký số**.
 
 | Phím tắt | Việc |
 | --- | --- |
-| `Ctrl+Alt+J` | Bôi đen tin tiếng Nhật, nhấn: xem bản dịch tiếng Việt |
-| `Ctrl+Alt+K` | Gõ tiếng Việt trong ô chat (không cần bôi đen), nhấn: xem bản tiếng Nhật, **Enter** để thay vào ô chat |
-| `Ctrl+Alt+L` | Câu tiếng Nhật bạn tự viết: kiểm tra ngữ pháp, kính ngữ, **Enter** để dùng câu đề xuất |
-| `Ctrl+Alt+T` | Tự nhận diện hướng dịch |
+| `Ctrl+Alt+T` | Dịch, app tự chọn ngôn ngữ đích. Bôi đen tin tiếng Nhật rồi nhấn: xem bản dịch tiếng Việt. Gõ tiếng Việt trong ô chat (không cần bôi đen) rồi nhấn: xem bản tiếng Nhật, **Enter** để thay vào ô chat |
+| `Ctrl+Alt+C` | Câu tiếng Nhật bạn tự viết: kiểm tra ngữ pháp, kính ngữ, **Enter** để dùng câu đề xuất |
 | `Ctrl+Alt+M` | Mở cửa sổ chính |
 
 Trong popup:
@@ -90,7 +89,7 @@ Muốn kiểm tra ngay: Cài đặt > Cập nhật > Kiểm tra ngay.
 | Hiện tượng | Cách xử lý |
 | --- | --- |
 | Nhấn phím tắt không có gì xảy ra | Kiểm tra icon MyTranslate ở khay còn không; chuột phải icon, bỏ chọn "Tạm dừng phím tắt"; tổ hợp có thể bị app khác chiếm, đổi trong Cài đặt > Phím tắt |
-| Popup báo "Chưa chọn đoạn văn bản nào" | Bôi đen lại tin cần dịch; với `Ctrl+Alt+K` đặt con trỏ trong ô chat có chữ |
+| Popup báo "Chưa chọn đoạn văn bản nào" | Bôi đen lại tin cần dịch; muốn dịch chữ trong ô chat thì đặt con trỏ trong ô có chữ rồi nhấn `Ctrl+Alt+T` |
 | Popup báo "Claude Code chưa đăng nhập" | Mở terminal, chạy `claude`, đăng nhập, rồi bấm "Thử lại" |
 | Popup báo hết hạn mức | Gói Claude đã dùng hết hạn mức của kỳ; chờ đến giờ làm mới ghi trong thông báo |
 | Bản dịch hơi chậm (4-7 giây) thỉnh thoảng | Model đôi khi "suy nghĩ" trước khi trả lời; hiện chưa tắt được qua Claude Code (xem `spikes/sp1-latency/README.md`) |

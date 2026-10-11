@@ -3,30 +3,52 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { QuickActionBar } from '../components/QuickActionBar'
 import { Hotkey, Segmented } from '../components/ui'
 import { cx } from '../components/styles'
-import { chatChannels } from '../data/mock'
+import { mockData } from '../data/mock'
 import { comboFromEvent } from '../lib/hotkeys'
+import { locale, route, useLang, useT, type Action, type Lang } from '../lib/i18n'
 import { isJapanese, translate } from '../lib/mockEngine'
 import { useStore, type QuickActionId } from '../store'
-import type { ChatApp as ChatAppKind, ChatChannel, Direction } from '../types'
+import type { ChatApp as ChatAppKind, ChatChannel } from '../types'
 import { Popup } from '../windows/popup/Popup'
 import type { PopupRequest } from '../windows/popup/types'
 import { ChatApp } from './ChatApp'
 
-type Action = 'auto' | 'jaVi' | 'viJa' | 'review'
+/** Texts to try, typed into the message box: what each user writes, and Japanese worth checking. */
+const samples: Record<Lang, { label: string; text: string }[]> = {
+  vi: [
+    { label: 'Câu tiếng Việt', text: 'Em đã deploy bản sửa rồi, nhờ anh kiểm tra lại giúp em' },
+    { label: 'Trả lời lịch release', text: 'Thứ Tư tuần sau được ạ, em sẽ gửi lịch chi tiết sau' },
+    { label: 'Tiếng Nhật cần sửa', text: '明日までに確認してください。' },
+  ],
+  ja: [
+    { label: 'リリース日程への返信', text: '来週の水曜日で大丈夫です。詳しいスケジュールを送ってください。' },
+    { label: '本番反映の依頼', text: '確認しました。本番に反映してください。' },
+    { label: 'チェックしたい日本語', text: '明日までに確認してください。' },
+  ],
+}
 
-const samples = [
-  { label: 'Câu tiếng Việt', text: 'Em đã deploy bản sửa rồi, nhờ anh kiểm tra lại giúp em' },
-  { label: 'Trả lời lịch release', text: 'Thứ Tư tuần sau được ạ, em sẽ gửi lịch chi tiết sau' },
-  { label: 'Tiếng Nhật cần sửa', text: '明日までに確認してください。' },
-]
+function firstChannels(lang: Lang): Record<ChatAppKind, string> {
+  const { chatChannels } = mockData(lang)
+  return { slack: chatChannels.slack[0].id, teams: chatChannels.teams[0].id }
+}
 
 export function Playground() {
   const { settings, showToast, scenario } = useStore()
+  const t = useT()
+  const lang = useLang()
   const [app, setApp] = useState<ChatAppKind>('slack')
-  const [channels, setChannels] = useState<Record<ChatAppKind, ChatChannel[]>>(chatChannels)
-  const [activeId, setActiveId] = useState<Record<ChatAppKind, string>>({ slack: 'devqa', teams: 'tanaka' })
+  const [channels, setChannels] = useState<Record<ChatAppKind, ChatChannel[]>>(() => mockData(lang).chatChannels)
+  const [activeId, setActiveId] = useState<Record<ChatAppKind, string>>(() => firstChannels(lang))
   const [composer, setComposer] = useState('')
   const [request, setRequest] = useState<PopupRequest | null>(null)
+  // A user of the other language chats with other people.
+  const [shownLang, setShownLang] = useState(lang)
+  if (shownLang !== lang) {
+    setShownLang(lang)
+    setChannels(mockData(lang).chatChannels)
+    setActiveId(firstChannels(lang))
+    setRequest(null)
+  }
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [guideOpen, setGuideOpen] = useState(true)
   const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
@@ -89,26 +111,17 @@ export function Playground() {
   const trigger = useCallback(
     (action: Action) => {
       if (settings.hotkeysPaused) {
-        showToast('Phím tắt đang tạm dừng, bật lại trong menu khay hệ thống')
+        showToast(t('Phím tắt đang tạm dừng, bật lại trong menu khay hệ thống', 'ショートカットは一時停止中です。タスクトレイのメニューで再開できます'))
         return
       }
       const got = capture()
       if (!got?.text) {
-        showToast('Chưa chọn đoạn văn bản nào')
+        showToast(t('Chưa chọn đoạn văn bản nào', 'テキストが選択されていません'))
         return
       }
       if (got.range) replaceRange.current = got.range
 
-      const direction: Direction =
-        action === 'jaVi'
-          ? 'ja_vi'
-          : action === 'viJa'
-            ? 'vi_ja'
-            : action === 'review'
-              ? 'review_ja'
-              : isJapanese(got.text)
-                ? 'ja_vi'
-                : 'vi_ja'
+      const { direction, origin } = route(action, got.text, lang, got.origin)
 
       setQuick(null)
       requestSeq.current += 1
@@ -116,14 +129,14 @@ export function Playground() {
         id: requestSeq.current,
         direction,
         source: got.text,
-        origin: got.origin,
+        origin,
         conversationId: channel.conversationId,
         app,
         anchor: got.anchor,
         placement: got.placement,
       })
     },
-    [app, capture, channel.conversationId, settings.hotkeysPaused, showToast],
+    [app, capture, channel.conversationId, settings.hotkeysPaused, showToast, t, lang],
   )
 
   // Mouse users get a small toolbar after selecting text, so they never have to reach for the keyboard.
@@ -157,12 +170,18 @@ export function Playground() {
     setQuick(null)
     if (!got?.text) return
     if (scenario === 'not_logged_in' || scenario === 'quota' || scenario === 'network') {
-      showToast('Không dịch được: Claude đang báo lỗi, thử lại bằng popup để xem chi tiết')
+      showToast(
+        t(
+          'Không dịch được: Claude đang báo lỗi, thử lại bằng popup để xem chi tiết',
+          '翻訳できません: Claude でエラーが発生しています。ポップアップで再試行すると詳細を確認できます',
+        ),
+      )
       return
     }
-    const result = translate(got.text, isJapanese(got.text) ? 'ja_vi' : 'vi_ja', settings.defaultKeigo)
+    const result = translate(got.text, isJapanese(got.text) ? 'ja_vi' : 'vi_ja', settings.defaultKeigo, lang)
     void navigator.clipboard.writeText(result.translation).catch(() => undefined)
-    showToast(`Đã dịch và sao chép: ${result.translation.slice(0, 36)}${result.translation.length > 36 ? '...' : ''}`)
+    const preview = `${result.translation.slice(0, 36)}${result.translation.length > 36 ? '...' : ''}`
+    showToast(t(`Đã dịch và sao chép: ${preview}`, `翻訳してコピーしました: ${preview}`))
   }
 
   // Global shortcuts (in the real app these are OS-wide).
@@ -171,12 +190,7 @@ export function Playground() {
       const combo = comboFromEvent(e)
       if (!combo) return
       const { hotkeys } = settings
-      const map: Record<string, Action> = {
-        [hotkeys.auto]: 'auto',
-        [hotkeys.jaVi]: 'jaVi',
-        [hotkeys.viJa]: 'viJa',
-        [hotkeys.review]: 'review',
-      }
+      const map: Record<string, Action> = { [hotkeys.auto]: 'auto', [hotkeys.review]: 'review' }
       const action = map[combo]
       if (!action) return
       e.preventDefault()
@@ -235,11 +249,12 @@ export function Playground() {
   const send = () => {
     const text = composer.trim()
     if (!text) return
-    const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+    const time = new Date().toLocaleTimeString(locale(lang), { hour: '2-digit', minute: '2-digit' })
+    const author = mockData(lang).me
     setChannels((all) => ({
       ...all,
       [app]: all[app].map((c) =>
-        c.id === channel.id ? { ...c, messages: [...c.messages, { id: `me-${Date.now()}`, author: 'Nguyễn Văn A', me: true, time, text }] } : c,
+        c.id === channel.id ? { ...c, messages: [...c.messages, { id: `me-${Date.now()}`, author, me: true, time, text }] } : c,
       ),
     }))
     setComposer('')
@@ -293,15 +308,15 @@ export function Playground() {
           className="flex h-11 w-full items-center gap-2 border-b border-line px-4 text-left"
         >
           <MousePointerClick size={16} className="text-accent" />
-          <span className="flex-1 text-[13.5px] font-semibold">Thử nghiệm</span>
+          <span className="flex-1 text-[13.5px] font-semibold">{t('Thử nghiệm', '試してみる')}</span>
           {guideOpen ? <ChevronUp size={16} className="text-ink-3" /> : <ChevronDown size={16} className="text-ink-3" />}
         </button>
         {guideOpen && (
           <div className="flex flex-col gap-4 p-4 text-[13px] leading-snug">
             <div className="flex items-center justify-between">
-              <span className="text-ink-2">App chat</span>
+              <span className="text-ink-2">{t('App chat', 'チャットアプリ')}</span>
               <Segmented
-                label="App chat"
+                label={t('App chat', 'チャットアプリ')}
                 value={app}
                 onChange={(v) => {
                   setApp(v)
@@ -314,29 +329,50 @@ export function Playground() {
               />
             </div>
 
-            <Step n={1} title="Đọc tin của khách">
-              Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.jaVi} />
-              {settings.quickActions.enabled ? ', hoặc bấm "Dịch sang Việt" trên thanh thao tác hiện ra.' : '.'}
-            </Step>
-            <Step n={2} title="Trả lời bằng tiếng Việt">
-              Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.viJa} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
-              <Hotkey combo="Enter" /> để thay vào ô chat.
-            </Step>
-            <Step n={3} title="Kiểm tra câu tiếng Nhật">
-              Viết tiếng Nhật vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />.
-            </Step>
-            <Step n={4} title="Đổi thread">
-              Trong popup, bấm tên thread hoặc nhấn <Hotkey combo="Ctrl+T" />.
-            </Step>
-            <Step n={5} title="Di chuyển và đổi kích thước popup">
-              Kéo thanh tiêu đề để di chuyển; kéo mép trái, phải, dưới hoặc góc dưới để đổi kích thước. Popup sau sẽ mở đúng như vậy cho đến
-              khi tắt app.
-            </Step>
+            {lang === 'ja' ? (
+              <>
+                <Step n={1} title="ベトナム側のメッセージを読む">
+                  ベトナム語のメッセージを選択して <Hotkey combo={settings.hotkeys.auto} />
+                  {settings.quickActions.enabled ? '、または表示されたツールバーの「日本語に翻訳」をクリック。' : '。'}
+                </Step>
+                <Step n={2} title="日本語で返信する">
+                  入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.auto} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
+                  <Hotkey combo="Enter" /> でベトナム語訳を入力欄に貼り付けます。
+                </Step>
+                <Step n={3} title="スレッドを変更">
+                  ポップアップでスレッド名をクリックするか、<Hotkey combo="Ctrl+T" /> を押します。
+                </Step>
+                <Step n={4} title="ポップアップの移動とサイズ変更">
+                  タイトルバーをドラッグして移動、左右・下の端や下の角をドラッグしてサイズを変更できます。次のポップアップもアプリを終了するまで同じ位置とサイズで開きます。
+                </Step>
+              </>
+            ) : (
+              <>
+                <Step n={1} title="Đọc tin của khách">
+                  Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.auto} />
+                  {settings.quickActions.enabled ? ', hoặc bấm "Dịch sang Việt" trên thanh thao tác hiện ra.' : '.'}
+                </Step>
+                <Step n={2} title="Trả lời bằng tiếng Việt">
+                  Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
+                  <Hotkey combo="Enter" /> để thay vào ô chat.
+                </Step>
+                <Step n={3} title="Kiểm tra câu tiếng Nhật">
+                  Viết tiếng Nhật vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />.
+                </Step>
+                <Step n={4} title="Đổi thread">
+                  Trong popup, bấm tên thread hoặc nhấn <Hotkey combo="Ctrl+T" />.
+                </Step>
+                <Step n={5} title="Di chuyển và đổi kích thước popup">
+                  Kéo thanh tiêu đề để di chuyển; kéo mép trái, phải, dưới hoặc góc dưới để đổi kích thước. Popup sau sẽ mở đúng như vậy cho
+                  đến khi tắt app.
+                </Step>
+              </>
+            )}
 
             <div>
-              <div className="mb-1.5 text-[12px] font-semibold text-ink-3">Điền nhanh vào ô chat</div>
+              <div className="mb-1.5 text-[12px] font-semibold text-ink-3">{t('Điền nhanh vào ô chat', '入力欄にサンプルを入れる')}</div>
               <div className="flex flex-wrap gap-1.5">
-                {samples.map((s) => (
+                {samples[lang].map((s) => (
                   <button
                     key={s.label}
                     type="button"
@@ -350,10 +386,17 @@ export function Playground() {
               </div>
             </div>
 
-            <p className="border-t border-line pt-3 text-[12px] text-ink-3">
-              <Hotkey combo={settings.hotkeys.auto} /> tự nhận diện hướng dịch. <Hotkey combo={settings.hotkeys.main} /> hoặc icon khay
-              hệ thống để mở cửa sổ chính. Đổi "Trạng thái giả lập" trên thanh công cụ để xem các màn hình lỗi.
-            </p>
+            {lang === 'ja' ? (
+              <p className="border-t border-line pt-3 text-[12px] text-ink-3">
+                翻訳は <Hotkey combo={settings.hotkeys.auto} /> ひとつで、文の言語から向きを自動で判断します。<Hotkey combo={settings.hotkeys.main} />{' '}
+                またはタスクトレイのアイコンでメイン画面を開きます。ツールバーの「シミュレーション」でエラー画面を確認できます。
+              </p>
+            ) : (
+              <p className="border-t border-line pt-3 text-[12px] text-ink-3">
+                Chỉ cần một phím <Hotkey combo={settings.hotkeys.auto} />: app tự nhận ngôn ngữ để chọn hướng dịch. <Hotkey combo={settings.hotkeys.main} /> hoặc icon khay
+                hệ thống để mở cửa sổ chính. Đổi "Trạng thái giả lập" trên thanh công cụ để xem các màn hình lỗi.
+              </p>
+            )}
           </div>
         )}
       </aside>

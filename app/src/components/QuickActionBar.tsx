@@ -1,5 +1,6 @@
 import { X } from 'lucide-react'
 import type { CSSProperties, ReactNode } from 'react'
+import { useLang, useT } from '../lib/i18n'
 import type { QuickActionId, QuickActionItem } from '../store'
 import { quickActionMeta, visibleQuickActions } from './quickActions'
 import { cx } from './styles'
@@ -31,10 +32,12 @@ export function QuickActionBar({
   /** In its own window, Windows draws the border and rounded corners. */
   bare?: boolean
 }) {
+  const t = useT()
+  const meta = quickActionMeta(useLang())
   return (
     <div
       role="toolbar"
-      aria-label="Thao tác nhanh MyTranslate"
+      aria-label={t('Thao tác nhanh MyTranslate', 'MyTranslate クイック操作')}
       data-quick-bar
       style={style}
       onMouseDown={(e) => e.preventDefault()}
@@ -47,19 +50,19 @@ export function QuickActionBar({
       )}
     >
       {visibleQuickActions(items, japanese).map((id) => {
-        const meta = quickActionMeta[id]
-        const Icon = meta.icon
+        const action = meta[id]
+        const Icon = action.icon
         return (
           <BarButton
             key={id}
             onClick={() => onAction(id)}
             icon={<Icon size={11} strokeWidth={2.2} />}
-            primary={meta.primary}
+            primary={action.primary}
             iconOnly={display === 'iconOnly'}
             nativeTooltip={bare}
-            title={meta.title}
+            title={action.title}
           >
-            {meta.label(japanese)}
+            {action.label(japanese)}
           </BarButton>
         )
       })}
@@ -68,8 +71,8 @@ export function QuickActionBar({
           <span aria-hidden className="mx-0.5 h-3.5 w-px shrink-0 bg-line" />
           <button
             type="button"
-            aria-label="Ẩn thanh thao tác"
-            title={bare ? 'Ẩn (Esc)' : undefined}
+            aria-label={t('Ẩn thanh thao tác', 'ツールバーを隠す')}
+            title={bare ? t('Ẩn (Esc)', '隠す (Esc)') : undefined}
             onClick={onDismiss}
             className="flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
           >

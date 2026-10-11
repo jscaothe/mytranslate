@@ -6,14 +6,17 @@ import { Button, IconButton } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { isTauri } from '../../lib/claude'
 import { deleteThread as removeThread, exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
+import { locale, useLang, useT, type T } from '../../lib/i18n'
 import { useStore } from '../../store'
 import type { Conversation, Thread, ThreadMessage } from '../../types'
 import { GettingStarted } from './GettingStarted'
 
-const appName = (c: Conversation) => (c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : 'Ứng dụng khác')
+const appName = (c: Conversation, t: T) => (c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : t('Ứng dụng khác', 'その他のアプリ'))
 
 export function ThreadsView() {
   const { conversations, threads, selectedThreadId, selectThread } = useStore()
+  const t = useT()
+  const lang = useLang()
   const [query, setQuery] = useState('')
   const [showArchived, setShowArchived] = useState(false)
 
@@ -23,24 +26,24 @@ export function ThreadsView() {
   useEffect(() => {
     if (!isTauri || !q) return
     let alive = true
-    const t = window.setTimeout(() => void searchThreads(q).then((ids) => alive && setFound({ q, ids })), 150)
+    const timer = window.setTimeout(() => void searchThreads(q).then((ids) => alive && setFound({ q, ids })), 150)
     return () => {
       alive = false
-      window.clearTimeout(t)
+      window.clearTimeout(timer)
     }
   }, [q, threads])
-  const archivedCount = threads.filter((t) => t.archived).length
+  const archivedCount = threads.filter((th) => th.archived).length
   const visible = useMemo(
     () =>
       threads.filter(
-        (t) =>
-          Boolean(t.archived) === showArchived &&
+        (th) =>
+          Boolean(th.archived) === showArchived &&
           (!q ||
             (isTauri
-              ? found?.q === q && found.ids.has(t.id)
-              : t.title.toLowerCase().includes(q) ||
-                t.summary.toLowerCase().includes(q) ||
-                t.messages.some((m) => m.ja.toLowerCase().includes(q) || m.vi.toLowerCase().includes(q)))),
+              ? found?.q === q && found.ids.has(th.id)
+              : th.title.toLowerCase().includes(q) ||
+                th.summary.toLowerCase().includes(q) ||
+                th.messages.some((m) => m.ja.toLowerCase().includes(q) || m.vi.toLowerCase().includes(q)))),
       ),
     [threads, q, showArchived, found],
   )
@@ -66,7 +69,7 @@ export function ThreadsView() {
               onClick={() => setShowArchived(false)}
               className="flex h-7 items-center gap-1 self-start rounded-md pr-2 pl-1 text-[12.5px] font-medium text-ink-2 hover:bg-hover hover:text-ink"
             >
-              <ChevronLeft size={14} /> Thread đang dùng
+              <ChevronLeft size={14} /> {t('Thread đang dùng', '使用中のスレッド')}
             </button>
           )}
           <label className="flex h-8 items-center gap-2 rounded-md border border-line bg-surface px-2.5 focus-within:border-accent">
@@ -74,14 +77,18 @@ export function ThreadsView() {
             <input
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder={showArchived ? 'Tìm trong thread đã lưu trữ' : 'Tìm trong tiếng Nhật và tiếng Việt'}
+              placeholder={
+                showArchived ? t('Tìm trong thread đã lưu trữ', 'アーカイブしたスレッドを検索') : t('Tìm trong tiếng Nhật và tiếng Việt', '日本語とベトナム語で検索')
+              }
               className="flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-3 focus:outline-none"
             />
           </label>
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           {groups.length === 0 && (
-            <p className="px-2 py-6 text-center text-[13px] text-ink-3">{q ? 'Không tìm thấy thread nào' : 'Không có thread nào'}</p>
+            <p className="px-2 py-6 text-center text-[13px] text-ink-3">
+              {q ? t('Không tìm thấy thread nào', '該当するスレッドはありません') : t('Không có thread nào', 'スレッドはありません')}
+            </p>
           )}
           {groups.map((g) => (
             <div key={g.conversation.id} className="mb-2">
@@ -89,25 +96,30 @@ export function ThreadsView() {
                 <AppBadge app={g.conversation.app} className="size-3.5 text-[8px]" />
                 <span className="truncate">{[g.conversation.workspace, g.conversation.name].filter(Boolean).join(' · ')}</span>
               </div>
-              {g.threads.map((t) => (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => selectThread(t.id)}
-                  className={cx('flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left', t.id === thread?.id ? 'bg-selected' : 'hover:bg-hover')}
-                >
-                  <span className="flex items-center gap-1.5">
-                    {t.pinned && <Pin size={12} className="shrink-0 text-accent" aria-label="Đang ghim" />}
-                    <span className="flex-1 truncate text-[13.5px] font-semibold text-ink">{t.title}</span>
-                    <span className="shrink-0 text-[11.5px] text-ink-3">{t.lastActive}</span>
-                  </span>
-                  {(t.messages.at(-1)?.vi ?? t.summary) && (
-                    <span lang="vi" className="truncate text-[12.5px] text-ink-2">
-                      {t.messages.at(-1)?.vi ?? t.summary}
+              {g.threads.map((th) => {
+                // The last message in the user's language, else the summary (also in their language).
+                const last = th.messages.at(-1)
+                const preview = (last && (lang === 'ja' ? last.ja : last.vi)) || th.summary
+                return (
+                  <button
+                    key={th.id}
+                    type="button"
+                    onClick={() => selectThread(th.id)}
+                    className={cx('flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left', th.id === thread?.id ? 'bg-selected' : 'hover:bg-hover')}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      {th.pinned && <Pin size={12} className="shrink-0 text-accent" aria-label={t('Đang ghim', 'ピン留め中')} />}
+                      <span className="flex-1 truncate text-[13.5px] font-semibold text-ink">{th.title}</span>
+                      <span className="shrink-0 text-[11.5px] text-ink-3">{th.lastActive}</span>
                     </span>
-                  )}
-                </button>
-              ))}
+                    {preview && (
+                      <span lang={lang} className="truncate text-[12.5px] text-ink-2">
+                        {preview}
+                      </span>
+                    )}
+                  </button>
+                )
+              })}
             </div>
           ))}
         </div>
@@ -117,7 +129,7 @@ export function ThreadsView() {
             onClick={() => setShowArchived(true)}
             className="flex h-10 shrink-0 items-center gap-2 border-t border-line px-4 text-[12.5px] text-ink-2 hover:bg-hover hover:text-ink"
           >
-            <Archive size={14} /> Đã lưu trữ ({archivedCount})
+            <Archive size={14} /> {t(`Đã lưu trữ (${archivedCount})`, `アーカイブ（${archivedCount}）`)}
           </button>
         )}
       </div>
@@ -125,7 +137,7 @@ export function ThreadsView() {
       {thread ? (
         <ThreadDetail key={thread.id} thread={thread} />
       ) : (
-        <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">Chọn một thread</div>
+        <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">{t('Chọn một thread', 'スレッドを選択してください')}</div>
       )}
     </div>
   )
@@ -134,6 +146,8 @@ export function ThreadsView() {
 /** Keyed by thread id so menus and title editing reset when another thread is opened. */
 function ThreadDetail({ thread }: { thread: Thread }) {
   const { conversations, threads, updateThread, mergeThread, deleteThread, showToast } = useStore()
+  const t = useT()
+  const lang = useLang()
   const [menu, setMenu] = useState<'closed' | 'main' | 'merge' | 'delete'>('closed')
   const [editingTitle, setEditingTitle] = useState(false)
   const [summarizing, setSummarizing] = useState(false)
@@ -143,19 +157,19 @@ function ThreadDetail({ thread }: { thread: Thread }) {
   // The real app loads a thread's messages on demand and follows new ones as they are filed.
   const [loaded, setLoaded] = useState<ThreadMessage[] | null>(null)
   const messages = isTauri ? (loaded ?? []) : thread.messages
-  const mergeTargets = threads.filter((t) => t.conversationId === thread.conversationId && t.id !== thread.id && !t.archived)
+  const mergeTargets = threads.filter((th) => th.conversationId === thread.conversationId && th.id !== thread.id && !th.archived)
 
   useEffect(() => {
     if (!isTauri) return
     let alive = true
-    const load = () => void loadMessages(thread.id).then((m) => alive && setLoaded(m))
+    const load = () => void loadMessages(thread.id, lang).then((m) => alive && setLoaded(m))
     load()
     const off = listen('history:changed', load)
     return () => {
       alive = false
       void off.then((f) => f())
     }
-  }, [thread.id])
+  }, [thread.id, lang])
 
   useEffect(() => {
     timelineRef.current?.scrollTo({ top: timelineRef.current.scrollHeight })
@@ -185,7 +199,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
     }
     real()
       .then(() => done && showToast(done))
-      .catch((e) => showToast(`Không thực hiện được: ${String(e)}`))
+      .catch((e) => showToast(`${t('Không thực hiện được', '実行できません')}: ${String(e)}`))
   }
 
   const rename = (title: string) => {
@@ -197,43 +211,60 @@ function ThreadDetail({ thread }: { thread: Thread }) {
     act(
       () => setPinned(thread.id, !thread.pinned),
       () => updateThread(thread.id, { pinned: !thread.pinned, archived: false }),
-      thread.pinned ? 'Đã bỏ ghim' : 'Đã ghim: tin mới trong cuộc hội thoại này sẽ vào thread này',
+      thread.pinned
+        ? t('Đã bỏ ghim', 'ピン留めを解除しました')
+        : t('Đã ghim: tin mới trong cuộc hội thoại này sẽ vào thread này', 'ピン留めしました。この会話の新しいメッセージはこのスレッドに入ります'),
     )
 
   const toggleArchive = () =>
     act(
       () => setArchived(thread.id, !thread.archived),
       () => updateThread(thread.id, { archived: !thread.archived, pinned: thread.archived ? thread.pinned : false }),
-      thread.archived ? 'Đã đưa thread trở lại' : 'Đã lưu trữ thread',
+      thread.archived ? t('Đã đưa thread trở lại', 'スレッドを戻しました') : t('Đã lưu trữ thread', 'スレッドをアーカイブしました'),
     )
 
   const merge = (into: Thread) =>
-    act(() => mergeThreads(thread.id, into.id), () => mergeThread(thread.id, into.id), `Đã gộp vào "${into.title}"`)
+    act(
+      () => mergeThreads(thread.id, into.id),
+      () => mergeThread(thread.id, into.id),
+      t(`Đã gộp vào "${into.title}"`, `「${into.title}」に統合しました`),
+    )
 
-  const remove = () => act(() => removeThread(thread.id), () => deleteThread(thread.id), `Đã xóa thread "${thread.title}"`)
+  const remove = () =>
+    act(
+      () => removeThread(thread.id),
+      () => deleteThread(thread.id),
+      t(`Đã xóa thread "${thread.title}"`, `スレッド「${thread.title}」を削除しました`),
+    )
 
   const exportMarkdown = () => {
     setMenu('closed')
     if (!isTauri) {
-      showToast('Prototype: app thật sẽ hỏi nơi lưu file .md')
+      showToast(t('Prototype: app thật sẽ hỏi nơi lưu file .md', 'プロトタイプ: 実際のアプリでは .md ファイルの保存先を選びます'))
       return
     }
     exportThread(thread.id)
-      .then((path) => path && showToast(`Đã lưu ${path}`))
-      .catch((e) => showToast(`Không xuất được: ${String(e)}`))
+      .then((path) => path && showToast(t(`Đã lưu ${path}`, `${path} に保存しました`)))
+      .catch((e) => showToast(`${t('Không xuất được', '書き出せません')}: ${String(e)}`))
   }
 
   const summarize = () => {
     setSummarizing(true)
     if (!isTauri) {
       window.setTimeout(() => {
-        updateThread(thread.id, { summary: 'Tóm tắt mô phỏng: khách và team đang trao đổi về chủ đề này, chưa có việc còn mở.', summaryStale: false })
+        updateThread(thread.id, {
+          summary: t(
+            'Tóm tắt mô phỏng: khách và team đang trao đổi về chủ đề này, chưa có việc còn mở.',
+            '要約のシミュレーション: この話題について双方でやり取りしており、未解決の作業はありません。',
+          ),
+          summaryStale: false,
+        })
         setSummarizing(false)
       }, 900)
       return
     }
-    summarizeThread(thread.id)
-      .catch((e) => showToast(`Không tóm tắt được: ${String(e)}`))
+    summarizeThread(thread.id, lang)
+      .catch((e) => showToast(`${t('Không tóm tắt được', '要約できません')}: ${String(e)}`))
       .finally(() => setSummarizing(false))
   }
 
@@ -244,7 +275,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
           {editingTitle ? (
             <input
               autoFocus
-              aria-label="Tên thread"
+              aria-label={t('Tên thread', 'スレッド名')}
               defaultValue={thread.title}
               onBlur={(e) => {
                 rename(e.target.value.trim())
@@ -259,64 +290,84 @@ function ThreadDetail({ thread }: { thread: Thread }) {
           ) : (
             <h2 className="flex items-center gap-2 truncate text-[15px] font-semibold text-ink">
               <span className="truncate">{thread.title}</span>
-              {thread.archived && <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-medium text-ink-2">Đã lưu trữ</span>}
+              {thread.archived && (
+                <span className="shrink-0 rounded-full bg-subtle px-2 py-0.5 text-[11px] font-medium text-ink-2">{t('Đã lưu trữ', 'アーカイブ済み')}</span>
+              )}
             </h2>
           )}
           <div className="flex items-center gap-1.5 text-[12px] text-ink-3">
             {conversation && <AppBadge app={conversation.app} className="size-3.5 text-[8px]" />}
-            {conversation ? [appName(conversation), conversation.workspace, conversation.name].filter(Boolean).join(' / ') : 'Khác'}
+            {conversation ? [appName(conversation, t), conversation.workspace, conversation.name].filter(Boolean).join(' / ') : t('Khác', 'その他')}
           </div>
         </div>
-        <IconButton label="Đổi tên" onClick={() => setEditingTitle(true)}>
+        <IconButton label={t('Đổi tên', '名前を変更')} onClick={() => setEditingTitle(true)}>
           <Pencil size={14} />
         </IconButton>
         <IconButton
-          label={thread.pinned ? 'Bỏ ghim thread' : 'Ghim thread (mọi tin mới trong cuộc hội thoại sẽ vào thread này)'}
+          label={
+            thread.pinned
+              ? t('Bỏ ghim thread', 'スレッドのピン留めを解除')
+              : t('Ghim thread (mọi tin mới trong cuộc hội thoại sẽ vào thread này)', 'スレッドをピン留め（この会話の新しいメッセージはすべてここに入ります）')
+          }
           active={thread.pinned}
           onClick={togglePin}
         >
           <Pin size={14} />
         </IconButton>
         <div ref={menuRef} className="relative">
-          <IconButton label="Thêm" active={menu !== 'closed'} onClick={() => setMenu((m) => (m === 'closed' ? 'main' : 'closed'))}>
+          <IconButton label={t('Thêm', 'その他')} active={menu !== 'closed'} onClick={() => setMenu((m) => (m === 'closed' ? 'main' : 'closed'))}>
             <MoreHorizontal size={16} />
           </IconButton>
           {menu === 'main' && (
             <div role="menu" className="absolute top-10 right-0 z-10 w-56 rounded-lg border border-line bg-surface py-1 shadow-popup">
-              <MenuItem icon={<Merge size={14} />} label="Gộp vào thread khác" disabled={mergeTargets.length === 0} onClick={() => setMenu('merge')} />
-              <MenuItem icon={<Download size={14} />} label="Xuất Markdown" onClick={exportMarkdown} />
+              <MenuItem
+                icon={<Merge size={14} />}
+                label={t('Gộp vào thread khác', '別のスレッドに統合')}
+                disabled={mergeTargets.length === 0}
+                onClick={() => setMenu('merge')}
+              />
+              <MenuItem icon={<Download size={14} />} label={t('Xuất Markdown', 'Markdown で書き出す')} onClick={exportMarkdown} />
               <MenuItem
                 icon={thread.archived ? <ArchiveRestore size={14} /> : <Archive size={14} />}
-                label={thread.archived ? 'Bỏ lưu trữ' : 'Lưu trữ'}
+                label={thread.archived ? t('Bỏ lưu trữ', 'アーカイブを解除') : t('Lưu trữ', 'アーカイブ')}
                 onClick={toggleArchive}
               />
               <div className="my-1 h-px bg-line" />
-              <MenuItem icon={<Trash2 size={14} />} label="Xóa thread" danger onClick={() => setMenu('delete')} />
+              <MenuItem icon={<Trash2 size={14} />} label={t('Xóa thread', 'スレッドを削除')} danger onClick={() => setMenu('delete')} />
             </div>
           )}
           {menu === 'delete' && (
-            <div role="alertdialog" aria-label="Xóa thread" className="absolute top-10 right-0 z-10 w-80 rounded-lg border border-line bg-surface p-3.5 shadow-popup">
-              <p className="text-[13.5px] font-semibold text-ink">Xóa thread này?</p>
+            <div
+              role="alertdialog"
+              aria-label={t('Xóa thread', 'スレッドを削除')}
+              className="absolute top-10 right-0 z-10 w-80 rounded-lg border border-line bg-surface p-3.5 shadow-popup"
+            >
+              <p className="text-[13.5px] font-semibold text-ink">{t('Xóa thread này?', 'このスレッドを削除しますか？')}</p>
               <p className="mt-1 text-[12.5px] leading-relaxed text-pretty text-ink-2">
-                {messages.length > 0 ? `${messages.length.toLocaleString('vi-VN')} tin đã dịch` : 'Thread'} trong "{thread.title}" sẽ bị xóa vĩnh viễn, không thể hoàn
-                tác. Muốn ẩn đi mà vẫn giữ lại thì dùng Lưu trữ.
+                {lang === 'ja'
+                  ? `「${thread.title}」${messages.length > 0 ? `の翻訳済みメッセージ ${messages.length.toLocaleString(locale(lang))} 件` : ''}は完全に削除され、元に戻せません。残したまま隠したい場合はアーカイブを使ってください。`
+                  : `${messages.length > 0 ? `${messages.length.toLocaleString(locale(lang))} tin đã dịch` : 'Thread'} trong "${thread.title}" sẽ bị xóa vĩnh viễn, không thể hoàn tác. Muốn ẩn đi mà vẫn giữ lại thì dùng Lưu trữ.`}
               </p>
               <div className="mt-3 flex justify-end gap-2">
                 <Button size="sm" autoFocus onClick={() => setMenu('closed')}>
-                  Hủy
+                  {t('Hủy', 'キャンセル')}
                 </Button>
                 <Button size="sm" variant="danger" onClick={remove}>
-                  Xóa thread
+                  {t('Xóa thread', 'スレッドを削除')}
                 </Button>
               </div>
             </div>
           )}
           {menu === 'merge' && (
-            <div role="menu" aria-label="Gộp vào" className="absolute top-10 right-0 z-10 w-72 rounded-lg border border-line bg-surface py-1 shadow-popup">
-              <div className="px-3 pt-1.5 pb-1 text-[11.5px] font-semibold text-ink-3">Gộp toàn bộ tin vào</div>
+            <div
+              role="menu"
+              aria-label={t('Gộp vào', '統合先')}
+              className="absolute top-10 right-0 z-10 w-72 rounded-lg border border-line bg-surface py-1 shadow-popup"
+            >
+              <div className="px-3 pt-1.5 pb-1 text-[11.5px] font-semibold text-ink-3">{t('Gộp toàn bộ tin vào', 'すべてのメッセージの統合先')}</div>
               <div className="scroll-thin max-h-64 overflow-y-auto">
-                {mergeTargets.map((t) => (
-                  <MenuItem key={t.id} label={t.title} hint={t.lastActive} onClick={() => merge(t)} />
+                {mergeTargets.map((th) => (
+                  <MenuItem key={th.id} label={th.title} hint={th.lastActive} onClick={() => merge(th)} />
                 ))}
               </div>
             </div>
@@ -346,7 +397,9 @@ function ThreadDetail({ thread }: { thread: Thread }) {
               </div>
             </div>
           ))}
-          {messages.length === 0 && <p className="py-8 text-center text-[13px] text-ink-3">Thread này chưa có tin nào</p>}
+          {messages.length === 0 && (
+            <p className="py-8 text-center text-[13px] text-ink-3">{t('Thread này chưa có tin nào', 'このスレッドにはまだメッセージがありません')}</p>
+          )}
         </div>
         </div>
       </div>
@@ -355,15 +408,18 @@ function ThreadDetail({ thread }: { thread: Thread }) {
 }
 
 function SummaryCard({ thread, busy, canSummarize, onSummarize }: { thread: Thread; busy: boolean; canSummarize: boolean; onSummarize: () => void }) {
+  const t = useT()
   if (!thread.summary) {
     if (!canSummarize) return null
     return (
       <div className="mb-5 flex items-center gap-3 rounded-lg border border-dashed border-line px-4 py-3">
         <Sparkles size={15} className="shrink-0 text-accent" />
-        <p className="flex-1 text-[13px] text-ink-2">Tóm tắt nội dung, việc đã chốt và việc còn mở của thread bằng tiếng Việt.</p>
+        <p className="flex-1 text-[13px] text-ink-2">
+          {t('Tóm tắt nội dung, việc đã chốt và việc còn mở của thread bằng tiếng Việt.', 'スレッドの内容、決まったこと、未解決のことを日本語で要約します。')}
+        </p>
         <Button onClick={onSummarize} disabled={busy}>
           {busy ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-          {busy ? 'Đang tóm tắt…' : 'Tóm tắt'}
+          {busy ? t('Đang tóm tắt…', '要約中…') : t('Tóm tắt', '要約')}
         </Button>
       </div>
     )
@@ -371,18 +427,20 @@ function SummaryCard({ thread, busy, canSummarize, onSummarize }: { thread: Thre
   return (
     <div className="mb-5 rounded-lg border border-line bg-subtle px-4 py-3">
       <div className="mb-1 flex items-center gap-1.5 text-[12px] font-semibold text-ink-3">
-        <Sparkles size={13} className="text-accent" /> Tóm tắt
-        {thread.summaryStale && !busy && <span className="rounded-full bg-warn-soft px-1.5 py-px text-[11px] font-medium text-warn">Có tin mới</span>}
+        <Sparkles size={13} className="text-accent" /> {t('Tóm tắt', '要約')}
+        {thread.summaryStale && !busy && (
+          <span className="rounded-full bg-warn-soft px-1.5 py-px text-[11px] font-medium text-warn">{t('Có tin mới', '新着あり')}</span>
+        )}
         <span className="flex-1" />
         <button
           type="button"
           onClick={onSummarize}
           disabled={busy}
-          title="Tóm tắt lại bằng AI"
+          title={t('Tóm tắt lại bằng AI', 'AIで要約し直す')}
           className="flex h-6 items-center gap-1 rounded px-1.5 font-medium text-ink-2 hover:bg-hover hover:text-ink disabled:opacity-60"
         >
           {busy ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
-          {busy ? 'Đang tóm tắt…' : 'Cập nhật'}
+          {busy ? t('Đang tóm tắt…', '要約中…') : t('Cập nhật', '更新')}
         </button>
       </div>
       <p className={cx('text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink', busy && 'opacity-60')}>{thread.summary}</p>

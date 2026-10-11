@@ -1,50 +1,54 @@
 //! A thread as Markdown, to hand a topic over to a teammate (F17): both languages for every message.
 
 use crate::history::{ConversationInfo, MessageInfo, ThreadInfo};
+use crate::lang::Lang;
 
+/// Headings in the user's language; each message shows its Japanese side, then its Vietnamese side.
 pub fn thread_markdown(
+    lang: Lang,
     conversation: Option<&ConversationInfo>,
     thread: &ThreadInfo,
     messages: &[MessageInfo],
 ) -> String {
+    let t = |vi, ja| lang.pick(vi, ja);
     let mut out = format!("# {}\n\n", thread.title.trim());
     if let Some(c) = conversation {
         let app = match c.app.as_str() {
             "slack" => "Slack",
             "teams" => "Microsoft Teams",
-            _ => "Ứng dụng khác",
+            _ => t("Ứng dụng khác", "その他のアプリ"),
         };
         let place: Vec<&str> = [app, c.workspace.as_str(), c.name.as_str()]
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect();
-        out.push_str(&format!("- Cuộc hội thoại: {}\n", place.join(" / ")));
+        out.push_str(&format!("- {}: {}\n", t("Cuộc hội thoại", "会話"), place.join(" / ")));
     }
-    out.push_str(&format!("- Số tin: {}\n", messages.len()));
+    out.push_str(&format!("- {}: {}\n", t("Số tin", "メッセージ数"), messages.len()));
     if let (Some(first), Some(last)) = (messages.first(), messages.last()) {
         out.push_str(&format!(
-            "- Thời gian: {} - {}\n",
+            "- {}: {} - {}\n",
+            t("Thời gian", "期間"),
             date(first.created_at),
             date(last.created_at)
         ));
     }
     if !thread.summary.is_empty() {
-        out.push_str(&format!("\n## Tóm tắt\n\n{}\n", thread.summary));
+        out.push_str(&format!("\n## {}\n\n{}\n", t("Tóm tắt", "要約"), thread.summary));
     }
-    out.push_str("\n## Tin nhắn\n");
+    out.push_str(&format!("\n## {}\n", t("Tin nhắn", "メッセージ")));
     for m in messages {
-        let (from_client, ja) = m.japanese();
-        let vi = match m.direction.as_str() {
-            "ja_vi" => &m.result,
-            "vi_ja" => &m.source,
-            _ => &m.back,
+        let (first, second) = (m.japanese(), m.vietnamese());
+        let who = match (m.mine, lang) {
+            (true, _) => t("Tôi", "自分"),
+            (false, Lang::Vi) => "Khách",
+            (false, Lang::Ja) => "相手",
         };
-        let who = if from_client { "Khách" } else { "Tôi" };
         out.push_str(&format!("\n### {who} - {}\n\n", date(m.created_at)));
-        out.push_str(&quote(ja));
-        if !vi.trim().is_empty() {
+        out.push_str(&quote(first));
+        if !second.trim().is_empty() {
             out.push_str("\n\n");
-            out.push_str(&quote(vi));
+            out.push_str(&quote(second));
         }
         out.push('\n');
     }
@@ -140,6 +144,7 @@ mod tests {
             result: result.into(),
             back: String::new(),
             created_at,
+            mine: direction != "ja_vi",
         }
     }
 
@@ -157,6 +162,7 @@ mod tests {
         // 2026-10-10 02:30 UTC is 09:30 in Vietnam.
         let at = 1_791_599_400_000;
         let md = thread_markdown(
+            Lang::Vi,
             Some(&conv),
             &thread(),
             &[
@@ -176,6 +182,21 @@ mod tests {
              \n### Khách - 2026-10-10 09:30\n\n> ログインできません。\n> 確認お願いします。\n\n> Không đăng nhập được.\n\
              \n### Tôi - 2026-10-10 09:31\n\n> 確認いたします。\n\n> Em sẽ kiểm tra.\n"
         );
+    }
+
+    #[test]
+    fn headings_in_japanese_for_a_japanese_user() {
+        let at = 1_791_599_400_000;
+        // For a Japanese user the Vietnamese messages are the other side's and the Japanese ones their own.
+        let mut theirs = message("vi_ja", "Em đã sửa xong.", "修正が完了しました。", at);
+        theirs.mine = false;
+        let mut own = message("ja_vi", "確認します。", "Tôi sẽ kiểm tra.", at);
+        own.mine = true;
+        let md = thread_markdown(Lang::Ja, None, &thread(), &[theirs, own]);
+        assert!(md.contains("- メッセージ数: 2\n"));
+        assert!(md.contains("## 要約\n"));
+        assert!(md.contains("### 相手 - 2026-10-10 09:30\n\n> 修正が完了しました。\n\n> Em đã sửa xong.\n"));
+        assert!(md.contains("### 自分 - 2026-10-10 09:30\n\n> 確認します。\n\n> Tôi sẽ kiểm tra.\n"));
     }
 
     #[test]

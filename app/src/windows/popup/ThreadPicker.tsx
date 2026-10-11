@@ -1,6 +1,7 @@
 import { Check, Plus, Search } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { cx } from '../../components/styles'
+import { useT } from '../../lib/i18n'
 import type { Thread } from '../../types'
 
 export function ThreadPicker({
@@ -16,6 +17,7 @@ export function ThreadPicker({
   onCreate: (title: string) => void
   onClose: () => void
 }) {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(0)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -29,7 +31,7 @@ export function ThreadPicker({
 
   const choose = (i: number) => {
     if (i < matches.length) onPick(matches[i].id)
-    else onCreate(query.trim() || 'Thread mới')
+    else onCreate(query.trim() || t('Thread mới', '新しいスレッド'))
   }
 
   return (
@@ -59,7 +61,7 @@ export function ThreadPicker({
             setQuery(e.target.value)
             setActive(0)
           }}
-          placeholder="Tìm hoặc đặt tên thread mới..."
+          placeholder={t('Tìm hoặc đặt tên thread mới...', 'スレッドを検索、または新しい名前を入力…')}
           className="h-9 flex-1 bg-transparent text-[13px] text-ink placeholder:text-ink-3 focus:outline-none"
         />
       </div>
@@ -89,7 +91,9 @@ export function ThreadPicker({
             )}
           >
             <Plus size={14} />
-            <span className="truncate">{q ? `Tạo thread "${query.trim()}"` : 'Tạo thread mới'}</span>
+            <span className="truncate">
+              {q ? t(`Tạo thread "${query.trim()}"`, `スレッド「${query.trim()}」を作成`) : t('Tạo thread mới', '新しいスレッドを作成')}
+            </span>
           </button>
         </li>
       </ul>

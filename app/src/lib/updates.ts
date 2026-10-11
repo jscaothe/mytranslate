@@ -51,7 +51,7 @@ export function useUpdates() {
         mockStatus = {
           ...mockStatus,
           checkedAt: Date.now(),
-          available: { version: '0.2.0', notes: 'Gợi ý trả lời, mẫu câu, glossary chung của team.', date: null },
+          available: { version: '0.2.0', notes: 'Giao diện tiếng Nhật cho người dùng Nhật.', date: null },
         }
         setStatus(mockStatus)
         return

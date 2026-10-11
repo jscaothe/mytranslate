@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { Lang } from './lib/i18n'
 import type { Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
@@ -7,15 +8,16 @@ export type ThemePref = 'system' | 'light' | 'dark'
 
 export type AiProvider = 'claude' | 'openai' | 'gemini'
 
+/** One key translates either way (the text's language decides), one checks Japanese, one opens the main window. */
 export interface HotkeyMap {
   auto: string
-  jaVi: string
-  viJa: string
   review: string
   main: string
 }
 
 export interface Settings {
+  /** The user's own language: the app's texts, and which way reading and writing translate. */
+  language: Lang
   theme: ThemePref
   defaultKeigo: Keigo
   /** Claude model (Claude Code). */

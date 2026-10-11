@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event'
 import { useEffect, useMemo, useState } from 'react'
 import type { AiProvider, Settings } from '../store'
 import { isTauri } from './claude'
+import type { T } from './i18n'
 
 /** An AI and one of its models. */
 export interface AiChoice {
@@ -42,14 +43,14 @@ export interface TestResult {
 }
 
 /** Why a test translation failed, in the user's words. */
-export function testFailure(errorKind: string | null): string {
+export function testFailure(errorKind: string | null, t: T): string {
   return errorKind === 'bad_key'
-    ? 'Key không đúng hoặc đã bị thu hồi'
+    ? t('Key không đúng hoặc đã bị thu hồi', 'キーが誤っているか無効です')
     : errorKind === 'rate_limited'
-      ? 'Hết hạn mức hoặc chưa nạp tiền'
+      ? t('Hết hạn mức hoặc chưa nạp tiền', '利用枠の上限、または残高がありません')
       : errorKind === 'network'
-        ? 'Không kết nối được'
-        : 'Không dịch được'
+        ? t('Không kết nối được', '接続できません')
+        : t('Không dịch được', '翻訳できませんでした')
 }
 
 /** The settings field holding a provider's default model. */

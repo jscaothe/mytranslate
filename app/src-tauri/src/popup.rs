@@ -13,6 +13,7 @@ use tauri::{
 use crate::capture;
 use crate::context::{self, ChatApp, Context};
 use crate::history::{self, History, ThreadInfo};
+use crate::lang::Lang;
 use crate::placement::{self, Anchor, Rect};
 use crate::settings::SettingsStore;
 use crate::threads::{self, Candidate, Confidence};
@@ -42,10 +43,9 @@ pub struct Span {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    JaVi,
-    ViJa,
+    /// Translate either way: the text's language decides (Ctrl+Alt+T, the toolbar's Translate button).
     Auto,
-    /// Check Japanese the user wrote, usually in the message box.
+    /// Check Japanese the user wrote, usually in the message box (Ctrl+Alt+C).
     Review,
 }
 
@@ -57,7 +57,7 @@ pub enum Direction {
     ReviewJa,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
     /// Text selected in the conversation: the result is read or copied.
@@ -101,6 +101,7 @@ fn detect_thread(
     history: &History,
     ctx: &Context,
     text: &str,
+    lang: Lang,
 ) -> (Option<i64>, Option<i64>, Confidence, Vec<ThreadInfo>) {
     let app = match ctx.app {
         ChatApp::Slack => "slack",
@@ -108,7 +109,7 @@ fn detect_thread(
         ChatApp::Other => "other",
     };
     let name = match ctx.conversation.trim() {
-        "" => "Khác",
+        "" => lang.pick("Khác", "その他"),
         n => n,
     };
     let conversation = match history.upsert_conversation(app, name, ctx.workspace.as_deref().unwrap_or("")) {
@@ -302,13 +303,17 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             log::info!("{} is blocked in the settings", ctx.exe);
             return;
         }
-        // Only a message box is safe to select-all; in the message list Ctrl+A would grab the whole page.
-        // A mouse selection is never extended.
-        let select_all = !from_toolbar && matches!(action, Action::ViJa | Action::Review);
-        // A hotkey: the popup goes next to the text, which may have been selected with the keyboard far from the
-        // pointer. Asked while the text is being copied, so it adds no wait.
-        let span_probe = span.is_none().then(|| SpanProbe::start(select_all));
-        let (text, error) = match capture::copy_selection(select_all) {
+        // Where the keyboard focus is decides two things: only a message box is safe to select-all (in the
+        // conversation Ctrl+A would grab the whole page), and only a result for the message box replaces text.
+        // Asked on its own thread while the user lets go of the hotkey. The same probe then finds where the text
+        // is, so a hotkey popup sits next to text selected with the keyboard far from the pointer.
+        let probe = FocusProbe::start(from_toolbar, span.is_none());
+        let mut in_message_box = None;
+        let (text, error) = match capture::copy_selection(|| {
+            in_message_box = probe.editable();
+            // A mouse selection is never extended.
+            !from_toolbar && in_message_box == Some(true)
+        }) {
             Ok(Some(t)) => (t, None),
             Ok(None) => (String::new(), Some("no_selection".to_string())),
             Err(e) => {
@@ -317,28 +322,13 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             }
         };
         log::info!("captured {} chars, error: {error:?}", text.chars().count());
-        let span = span.or_else(|| span_probe.and_then(SpanProbe::wait));
-        let direction = match action {
-            Action::JaVi => Direction::JaVi,
-            // Ctrl+Alt+K on Japanese text: the user wants to read it, not to replace it.
-            Action::ViJa if is_japanese_only(&text) => Direction::JaVi,
-            Action::ViJa => Direction::ViJa,
-            Action::Auto if has_japanese(&text) => Direction::JaVi,
-            Action::Auto => Direction::ViJa,
-            // Nothing Japanese to check: translate the Vietnamese instead of reviewing it.
-            Action::Review if !has_japanese(&text) => Direction::ViJa,
-            Action::Review => Direction::ReviewJa,
-        };
-        // Results the user writes (translation into Japanese, corrected Japanese) replace the message box text.
-        let origin = if direction == Direction::JaVi {
-            Origin::Chat
-        } else {
-            Origin::Composer
-        };
+        let span = span.or_else(|| probe.span());
+        let lang = app.state::<SettingsStore>().language();
+        let (direction, origin) = route(action, &text, lang, in_message_box);
 
         let history = app.state::<History>();
         let (conversation_id, thread_id, confidence, threads) = if error.is_none() {
-            detect_thread(&history, &ctx, &text)
+            detect_thread(&history, &ctx, &text, lang)
         } else {
             (None, None, Confidence::High, Vec::new())
         };
@@ -380,30 +370,47 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
 /// pointer.
 const SPAN_TIMEOUT: Duration = Duration::from_millis(250);
 
-/// Asks UI Automation, on its own thread, where the text in the focused control is, so a slow or hung app cannot
-/// hold the popup.
-struct SpanProbe {
+/// Asks UI Automation, on its own thread, whether the keyboard focus is in a message box and then where the text
+/// in the focused control is, so a slow or hung app cannot hold the popup for long.
+struct FocusProbe {
     started: Instant,
-    result: std::sync::mpsc::Receiver<Option<Span>>,
+    editable: std::sync::mpsc::Receiver<Option<bool>>,
+    span: std::sync::mpsc::Receiver<Option<Span>>,
 }
 
-impl SpanProbe {
-    /// `whole_control`: the text is about to be selected with select-all, so the control itself is the place.
-    fn start(whole_control: bool) -> Self {
-        let (tx, result) = std::sync::mpsc::channel();
+impl FocusProbe {
+    /// `from_toolbar`: the text was selected with the mouse and is never extended. `want_span`: the popup's place
+    /// is not known yet (a hotkey, not the toolbar).
+    fn start(from_toolbar: bool, want_span: bool) -> Self {
+        let (editable_tx, editable) = std::sync::mpsc::channel();
+        let (span_tx, span) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
-            let span = crate::ui_selection::SelectionProbe::new().and_then(|p| p.focused_text_span(whole_control));
-            let _ = tx.send(span);
+            let started = Instant::now();
+            let probe = crate::ui_selection::SelectionProbe::new();
+            let is_editable = probe.as_ref().and_then(|p| p.focus_is_editable());
+            log::info!("focus editable: {is_editable:?} ({} ms)", started.elapsed().as_millis());
+            let _ = editable_tx.send(is_editable);
+            if want_span {
+                // About to be selected with select-all: the control itself is the place.
+                let whole_control = !from_toolbar && is_editable == Some(true);
+                let _ = span_tx.send(probe.and_then(|p| p.focused_text_span(whole_control)));
+            }
         });
         Self {
             started: Instant::now(),
-            result,
+            editable,
+            span,
         }
     }
 
-    fn wait(self) -> Option<Span> {
+    /// Waits for the answer: copying the text depends on it.
+    fn editable(&self) -> Option<bool> {
+        self.editable.recv().ok().flatten()
+    }
+
+    fn span(&self) -> Option<Span> {
         let left = SPAN_TIMEOUT.saturating_sub(self.started.elapsed());
-        let span = self.result.recv_timeout(left).ok().flatten();
+        let span = self.span.recv_timeout(left).ok().flatten();
         log::info!("text span {span:?} after {} ms", self.started.elapsed().as_millis());
         span
     }
@@ -503,15 +510,40 @@ fn own_exe_name() -> String {
         .unwrap_or_default()
 }
 
-/// Japanese with at most a few Latin words (API, UAT, file names...). Vietnamese always brings Latin letters,
-/// usually with diacritics, so a handful of plain Latin words alone do not make a text Vietnamese.
-pub fn is_japanese_only(text: &str) -> bool {
-    let has_vietnamese_marks = text.chars().any(is_vietnamese_letter);
+/// Which way to translate, and where the result goes. The text's language decides the way. A result in the other
+/// side's language for text from the message box replaces it (the user is writing); anything else is only shown
+/// (the user is reading). `in_message_box` is `None` when UI Automation could not tell: then the language alone
+/// decides, as text in the user's own language is usually what they are writing.
+pub fn route(action: Action, text: &str, lang: Lang, in_message_box: Option<bool>) -> (Direction, Origin) {
+    let direction = match action {
+        Action::Auto if is_mostly_japanese(text) => Direction::JaVi,
+        Action::Auto => Direction::ViJa,
+        // Nothing Japanese to check: translate the Vietnamese instead of reviewing it.
+        Action::Review if !has_japanese(text) => Direction::ViJa,
+        Action::Review => Direction::ReviewJa,
+    };
+    let write = match lang {
+        Lang::Vi => Direction::ViJa,
+        Lang::Ja => Direction::JaVi,
+    };
+    let writing = direction == write || direction == Direction::ReviewJa;
+    let origin = if writing && in_message_box != Some(false) {
+        Origin::Composer
+    } else {
+        Origin::Chat
+    };
+    (direction, origin)
+}
+
+/// More Japanese than Latin: Japanese characters against Latin words. A Vietnamese message naming a Japanese
+/// term (仕訳) stays Vietnamese; Japanese with a few English words (API, UAT, file names) stays Japanese.
+pub fn is_mostly_japanese(text: &str) -> bool {
+    let japanese = text.chars().filter(|c| is_japanese_char(*c)).count();
     let latin_words = text
         .split(|c: char| !(c.is_ascii_alphabetic() || is_vietnamese_letter(c)))
         .filter(|w| !w.is_empty())
         .count();
-    has_japanese(text) && !has_vietnamese_marks && latin_words <= 3
+    japanese > 0 && japanese >= latin_words
 }
 
 /// Latin letters with Vietnamese diacritics (Latin-1 Supplement, Latin Extended-A/B and Extended Additional).
@@ -520,8 +552,12 @@ fn is_vietnamese_letter(c: char) -> bool {
 }
 
 pub fn has_japanese(text: &str) -> bool {
-    text.chars()
-        .any(|c| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}'))
+    text.chars().any(is_japanese_char)
+}
+
+/// Kana and kanji.
+fn is_japanese_char(c: char) -> bool {
+    matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}')
 }
 
 #[tauri::command]
@@ -609,11 +645,57 @@ mod tests {
     use super::*;
 
     #[test]
-    fn japanese_only_detection() {
-        assert!(is_japanese_only("仕訳の入力画面でエラーが出ています。"));
-        assert!(is_japanese_only("UATのAPIはデプロイ済みです。"));
-        assert!(!is_japanese_only("Em đã deploy rồi, nhờ anh kiểm tra màn hình 仕訳"));
-        assert!(!is_japanese_only("Please check the deploy result today"));
+    fn mostly_japanese_detection() {
+        assert!(is_mostly_japanese("仕訳の入力画面でエラーが出ています。"));
+        assert!(is_mostly_japanese(
+            "UATのAPIはデプロイ済みです。Nguyễnさんに確認します。"
+        ));
+        assert!(!is_mostly_japanese(
+            "Em đã deploy rồi, nhờ anh kiểm tra màn hình 仕訳 giúp em nhé"
+        ));
+        assert!(!is_mostly_japanese("Please check the deploy result today"));
+    }
+
+    #[test]
+    fn one_key_translates_either_way_and_replaces_only_what_the_user_writes() {
+        let ja = "確認お願いします。";
+        let vi = "Em đã sửa xong rồi ạ.";
+        let (message_box, chat, unknown) = (Some(true), Some(false), None);
+        // A Vietnamese user reads Japanese and writes Vietnamese.
+        assert_eq!(route(Action::Auto, ja, Lang::Vi, chat), (Direction::JaVi, Origin::Chat));
+        assert_eq!(
+            route(Action::Auto, vi, Lang::Vi, message_box),
+            (Direction::ViJa, Origin::Composer)
+        );
+        assert_eq!(
+            route(Action::Auto, vi, Lang::Vi, unknown),
+            (Direction::ViJa, Origin::Composer)
+        );
+        // A Vietnamese colleague's message is only shown in Japanese; Japanese in the box is read, not replaced.
+        assert_eq!(route(Action::Auto, vi, Lang::Vi, chat), (Direction::ViJa, Origin::Chat));
+        assert_eq!(
+            route(Action::Auto, ja, Lang::Vi, message_box),
+            (Direction::JaVi, Origin::Chat)
+        );
+        // A Japanese user reads Vietnamese and writes Japanese.
+        assert_eq!(route(Action::Auto, vi, Lang::Ja, chat), (Direction::ViJa, Origin::Chat));
+        assert_eq!(
+            route(Action::Auto, ja, Lang::Ja, message_box),
+            (Direction::JaVi, Origin::Composer)
+        );
+        // Checking Japanese works the same for both; Vietnamese text is translated instead.
+        assert_eq!(
+            route(Action::Review, ja, Lang::Ja, message_box),
+            (Direction::ReviewJa, Origin::Composer)
+        );
+        assert_eq!(
+            route(Action::Review, ja, Lang::Vi, chat),
+            (Direction::ReviewJa, Origin::Chat)
+        );
+        assert_eq!(
+            route(Action::Review, vi, Lang::Vi, message_box),
+            (Direction::ViJa, Origin::Composer)
+        );
     }
 
     #[test]

@@ -2,6 +2,7 @@ import { Check, ChevronDown, Settings2 } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { cx } from '../../components/styles'
 import { AI_NAMES, modelName, sameChoice, type AiChoice, type QuickChoice } from '../../lib/ai'
+import { useT } from '../../lib/i18n'
 import type { AiProvider } from '../../store'
 
 /** Distinct at 16 px: Claude and ChatGPT share an initial. */
@@ -48,6 +49,7 @@ export function AiSwitcher({
   onPick: (c: AiChoice) => void
   onManage: () => void
 }) {
+  const t = useT()
   const menuRef = useRef<HTMLDivElement>(null)
   const rootRef = useRef<HTMLDivElement>(null)
 
@@ -90,8 +92,18 @@ export function AiSwitcher({
         type="button"
         aria-haspopup="menu"
         aria-expanded={open}
-        aria-label={`AI dịch: ${AI_NAMES[shown.provider]} ${modelName(shown.provider, shown.model)}. Đổi AI (Ctrl+M)`}
-        title={fellBack ? `${AI_NAMES[current.provider]} không dịch được, đã dùng ${AI_NAMES[shown.provider]}` : 'Đổi AI dịch (Ctrl+M)'}
+        aria-label={t(
+          `AI dịch: ${AI_NAMES[shown.provider]} ${modelName(shown.provider, shown.model)}. Đổi AI (Ctrl+M)`,
+          `翻訳AI: ${AI_NAMES[shown.provider]} ${modelName(shown.provider, shown.model)}。AIを変更 (Ctrl+M)`,
+        )}
+        title={
+          fellBack
+            ? t(
+                `${AI_NAMES[current.provider]} không dịch được, đã dùng ${AI_NAMES[shown.provider]}`,
+                `${AI_NAMES[current.provider]} で翻訳できなかったため ${AI_NAMES[shown.provider]} を使用しました`,
+              )
+            : t('Đổi AI dịch (Ctrl+M)', '翻訳AIを変更 (Ctrl+M)')
+        }
         onClick={() => onOpenChange(!open)}
         className={cx(
           'flex h-7 max-w-[150px] items-center gap-1.5 rounded-md pr-1 pl-1.5 text-[12px] font-medium whitespace-nowrap',
@@ -107,7 +119,7 @@ export function AiSwitcher({
         <div
           ref={menuRef}
           role="menu"
-          aria-label="Chọn AI dịch"
+          aria-label={t('Chọn AI dịch', '翻訳AIを選択')}
           onKeyDown={onMenuKey}
           className="absolute top-full right-0 z-30 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-popup"
         >
@@ -116,7 +128,7 @@ export function AiSwitcher({
               <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-[11.5px] font-semibold text-ink-3">
                 <AiMark provider={g.provider} className="size-3.5 text-[8.5px]" />
                 {AI_NAMES[g.provider]}
-                {!g.items[0].available && <span className="font-normal">· chưa có API key</span>}
+                {!g.items[0].available && <span className="font-normal">· {t('chưa có API key', 'APIキー未設定')}</span>}
               </div>
               {g.items.map((c) => {
                 const ticked = sameChoice(c, current)
@@ -146,7 +158,7 @@ export function AiSwitcher({
             onClick={onManage}
             className="flex h-8 w-full items-center gap-2 px-3 text-left text-[13px] text-ink-2 outline-none hover:bg-hover hover:text-ink focus-visible:bg-hover"
           >
-            <Settings2 size={14} /> Thêm AI hoặc model…
+            <Settings2 size={14} /> {t('Thêm AI hoặc model…', 'AI・モデルを追加…')}
           </button>
         </div>
       )}

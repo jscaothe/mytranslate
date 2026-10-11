@@ -1,5 +1,6 @@
 import { Minus, Square, X } from 'lucide-react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
+import { useT } from '../lib/i18n'
 import { cx } from './styles'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -147,6 +148,7 @@ export function WindowFrame({
   className?: string
   onClose?: () => void
 }) {
+  const t = useT()
   return (
     <div className={cx('flex flex-col overflow-hidden rounded-lg border border-line bg-window shadow-window', className)}>
       <div className="flex h-9 shrink-0 items-center gap-2 border-b border-line pl-3 select-none">
@@ -161,7 +163,7 @@ export function WindowFrame({
           </span>
           <button
             type="button"
-            aria-label="Đóng cửa sổ"
+            aria-label={t('Đóng cửa sổ', 'ウィンドウを閉じる')}
             onClick={onClose}
             className="flex w-11 items-center justify-center text-ink-2 hover:bg-bad hover:text-white"
           >

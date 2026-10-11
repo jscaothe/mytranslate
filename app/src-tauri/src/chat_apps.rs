@@ -3,6 +3,8 @@
 
 use serde::Serialize;
 
+use crate::lang::Lang;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatApp {
@@ -35,11 +37,16 @@ pub fn installed() -> Vec<ChatApp> {
         .collect()
 }
 
-pub fn open(app: ChatApp) -> Result<(), String> {
+pub fn open(app: ChatApp, lang: Lang) -> Result<(), String> {
     if !protocol_registered(app.protocol()) {
-        return Err("Chưa cài ứng dụng này trên máy".into());
+        return Err(lang
+            .pick(
+                "Chưa cài ứng dụng này trên máy",
+                "このアプリはインストールされていません",
+            )
+            .into());
     }
-    shell_open(app.uri())
+    shell_open(app.uri(), lang)
 }
 
 /// Web pages the app sends the user to while setting up an AI. A fixed list, so the page cannot open any URL.
@@ -62,8 +69,8 @@ impl HelpPage {
 }
 
 /// Opens the page in the default browser.
-pub fn open_help(page: HelpPage) -> Result<(), String> {
-    shell_open(page.url())
+pub fn open_help(page: HelpPage, lang: Lang) -> Result<(), String> {
+    shell_open(page.url(), lang)
 }
 
 fn wide(s: &str) -> Vec<u16> {
@@ -93,7 +100,7 @@ fn protocol_registered(_protocol: &str) -> bool {
 }
 
 #[cfg(windows)]
-fn shell_open(uri: &str) -> Result<(), String> {
+fn shell_open(uri: &str, lang: Lang) -> Result<(), String> {
     use windows::Win32::UI::Shell::ShellExecuteW;
     use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     use windows::core::{PCWSTR, w};
@@ -114,13 +121,17 @@ fn shell_open(uri: &str) -> Result<(), String> {
     if result.0 as isize > 32 {
         Ok(())
     } else {
-        Err(format!("Không mở được (mã {})", result.0 as isize))
+        Err(format!(
+            "{} ({})",
+            lang.pick("Không mở được", "開けません"),
+            result.0 as isize
+        ))
     }
 }
 
 #[cfg(not(windows))]
-fn shell_open(_uri: &str) -> Result<(), String> {
-    Err("Chỉ hỗ trợ Windows".into())
+fn shell_open(_uri: &str, _lang: Lang) -> Result<(), String> {
+    Err("Windows only".into())
 }
 
 #[cfg(test)]

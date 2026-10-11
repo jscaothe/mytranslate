@@ -4,16 +4,17 @@ import { AppMark, WindowFrame } from '../../components/ui'
 import { UpdateBanner } from '../../components/UpdatePanel'
 import { useUpdates } from '../../lib/updates'
 import { cx } from '../../components/styles'
+import { useT, type T } from '../../lib/i18n'
 import { useStore, type MainTab } from '../../store'
 import { ContactsView } from './ContactsView'
 import { GlossaryView } from './GlossaryView'
 import { SettingsView } from './SettingsView'
 import { ThreadsView } from './ThreadsView'
 
-const nav: { tab: MainTab; label: string; icon: ReactNode }[] = [
-  { tab: 'threads', label: 'Threads', icon: <MessagesSquare size={19} /> },
-  { tab: 'glossary', label: 'Glossary', icon: <BookOpen size={19} /> },
-  { tab: 'contacts', label: 'Người liên hệ', icon: <Users size={19} /> },
+const nav = (t: T): { tab: MainTab; label: string; icon: ReactNode }[] => [
+  { tab: 'threads', label: t('Threads', 'スレッド'), icon: <MessagesSquare size={19} /> },
+  { tab: 'glossary', label: t('Glossary', '用語集'), icon: <BookOpen size={19} /> },
+  { tab: 'contacts', label: t('Người liên hệ', '連絡先'), icon: <Users size={19} /> },
 ]
 
 /** In the prototype the window is drawn on a fake desktop; in Tauri (`chromeless`) the OS draws the frame. */
@@ -42,20 +43,21 @@ export function MainWindow({ chromeless = false }: { chromeless?: boolean }) {
 
 function MainContent() {
   const { mainTab, setMainTab } = useStore()
+  const t = useT()
   // One update state for the banner and Settings, so progress shows in both.
   const updates = useUpdates()
   return (
     <div className="flex min-h-0 flex-1 flex-col">
     {mainTab !== 'settings' && <UpdateBanner status={updates.status} install={updates.install} onInstall={() => void updates.installNow()} />}
     <div className="flex min-h-0 flex-1">
-      <nav className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line py-2" aria-label="Điều hướng">
-        {nav.map((n) => (
+      <nav className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line py-2" aria-label={t('Điều hướng', 'ナビゲーション')}>
+        {nav(t).map((n) => (
           <NavButton key={n.tab} active={mainTab === n.tab} label={n.label} onClick={() => setMainTab(n.tab)}>
             {n.icon}
           </NavButton>
         ))}
         <div className="flex-1" />
-        <NavButton active={mainTab === 'settings'} label="Cài đặt" onClick={() => setMainTab('settings')}>
+        <NavButton active={mainTab === 'settings'} label={t('Cài đặt', '設定')} onClick={() => setMainTab('settings')}>
           <Settings size={19} />
         </NavButton>
       </nav>

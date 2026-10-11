@@ -6,6 +6,7 @@ import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { AI_NAMES, choiceLabel, defaultChoice, KEY_HELP, modelName, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
 import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
+import { useT } from '../../lib/i18n'
 import { useStore, type AiProvider } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 
@@ -23,6 +24,7 @@ type Keys = { openai: boolean; gemini: boolean }
  */
 export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row: RowComponent }) {
   const { settings, updateSettings } = useStore()
+  const t = useT()
   const [keys, setKeys] = useState<Keys>({ openai: !isTauri, gemini: false })
   const current = defaultChoice(settings)
   const [expanded, setExpanded] = useState<AiProvider | null>(current.provider)
@@ -42,11 +44,19 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
   const available = (p: AiProvider) => p === 'claude' || keys[p]
 
   return (
-    <Group title="Kết nối AI" hint="Đổi nhanh AI và model ngay trên popup (bấm tên AI ở đầu popup hoặc Ctrl+M) hay ở menu khay > AI dịch.">
+    <Group
+      title={t('Kết nối AI', 'AI接続')}
+      hint={t(
+        'Đổi nhanh AI và model ngay trên popup (bấm tên AI ở đầu popup hoặc Ctrl+M) hay ở menu khay > AI dịch.',
+        'AIとモデルはポップアップ（上部のAI名をクリック、または Ctrl+M）やトレイメニュー > 翻訳AI からすぐに切り替えられます。',
+      )}
+    >
       <div className="flex items-center gap-3 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] text-ink">Đang dịch bằng</div>
-          <div className="mt-0.5 text-[12px] text-ink-3">AI và model dùng cho mọi lần dịch, trừ khi bạn đổi trên popup.</div>
+          <div className="text-[13.5px] text-ink">{t('Đang dịch bằng', '使用中のAI')}</div>
+          <div className="mt-0.5 text-[12px] text-ink-3">
+            {t('AI và model dùng cho mọi lần dịch, trừ khi bạn đổi trên popup.', 'ポップアップで変更しない限り、すべての翻訳でこのAIとモデルを使います。')}
+          </div>
         </div>
         <span className="flex items-center gap-2 rounded-md border border-line bg-subtle px-2.5 py-1.5 text-[13px] font-medium text-ink">
           <AiMark provider={current.provider} />
@@ -74,18 +84,27 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
 
       <div className="flex items-center gap-4 px-4 py-3">
         <div className="min-w-0 flex-1">
-          <div className="text-[13.5px] text-ink">Tự chuyển sang AI khác khi lỗi</div>
+          <div className="text-[13.5px] text-ink">{t('Tự chuyển sang AI khác khi lỗi', 'エラー時に別のAIに切り替える')}</div>
           <div className="mt-0.5 text-[12px] text-ink-3">
-            Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini).
+            {t(
+              'Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini).',
+              '使用中のAIが利用枠の上限、キーの誤り、ネットワーク切断で応答できないとき、設定済みの別のAI（Claude、ChatGPT、Gemini の順）で翻訳します。',
+            )}
           </div>
         </div>
-        <Switch label="Tự chuyển sang AI khác khi lỗi" checked={settings.aiFallback} onChange={(v) => updateSettings({ aiFallback: v })} />
+        <Switch
+          label={t('Tự chuyển sang AI khác khi lỗi', 'エラー時に別のAIに切り替える')}
+          checked={settings.aiFallback}
+          onChange={(v) => updateSettings({ aiFallback: v })}
+        />
       </div>
       <div className="flex gap-2.5 px-4 py-3 text-[12px] leading-relaxed text-ink-2">
         <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
         <span>
-          Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của OpenAI và Google
-          mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.
+          {t(
+            'Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của OpenAI và Google mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.',
+            'メッセージの内容は選択したAIの提供元に送信されます。会社が許可する種類のアカウントを使ってください。OpenAI と Google の有料APIは既定でデータを学習に使いませんが、Gemini の無料枠は使う場合があるため、業務のメッセージには使わないでください。',
+          )}
         </span>
       </div>
     </Group>
@@ -112,7 +131,13 @@ function ProviderCard({
   onMakeDefault: () => void
   children: ReactNode
 }) {
-  const status = provider === 'claude' ? 'Claude Code trên máy này' : ready ? 'Đã có API key' : 'Chưa có API key'
+  const t = useT()
+  const status =
+    provider === 'claude'
+      ? t('Claude Code trên máy này', 'このPCの Claude Code')
+      : ready
+        ? t('Đã có API key', 'APIキー設定済み')
+        : t('Chưa có API key', 'APIキー未設定')
   return (
     <section aria-label={AI_NAMES[provider]}>
       <div className="flex items-center gap-3 px-4 py-2.5">
@@ -131,11 +156,11 @@ function ProviderCard({
         </button>
         {isDefault ? (
           <span className="flex items-center gap-1 rounded-full bg-accent-soft px-2.5 py-1 text-[12px] font-medium text-accent">
-            <Check size={13} /> Đang dùng
+            <Check size={13} /> {t('Đang dùng', '使用中')}
           </span>
         ) : (
-          <Button size="sm" disabled={!ready} onClick={onMakeDefault} title={ready ? undefined : 'Thêm API key trước'}>
-            Dùng {AI_NAMES[provider]}
+          <Button size="sm" disabled={!ready} onClick={onMakeDefault} title={ready ? undefined : t('Thêm API key trước', '先にAPIキーを追加してください')}>
+            {t(`Dùng ${AI_NAMES[provider]}`, `${AI_NAMES[provider]} を使う`)}
           </Button>
         )}
       </div>
@@ -158,6 +183,7 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
 
 function ClaudeBody() {
   const { settings, updateSettings } = useStore()
+  const t = useT()
   const [status, setStatus] = useState<ClaudeStatus | null>(null)
   useEffect(() => {
     let alive = true
@@ -170,9 +196,9 @@ function ClaudeBody() {
   }, [])
   return (
     <>
-      <Field label="Model" hint="Sonnet dịch tốt hơn, Haiku nhanh và tiết kiệm hạn mức hơn.">
+      <Field label={t('Model', 'モデル')} hint={t('Sonnet dịch tốt hơn, Haiku nhanh và tiết kiệm hạn mức hơn.', 'Sonnet は高品質、Haiku は高速で利用枠を節約できます。')}>
         <Segmented
-          label="Model Claude"
+          label={t('Model Claude', 'Claude のモデル')}
           value={settings.model}
           onChange={(m) => updateSettings({ model: m })}
           options={[
@@ -184,7 +210,7 @@ function ClaudeBody() {
       <Field label="Claude Code">
         {!status ? (
           <span className="flex items-center gap-1.5 pt-1 text-[13px] text-ink-2">
-            <Loader2 size={15} className="animate-spin" /> Đang kiểm tra…
+            <Loader2 size={15} className="animate-spin" /> {t('Đang kiểm tra…', '確認中…')}
           </span>
         ) : status.version ? (
           <span className="flex items-center gap-1.5 pt-1 text-[13px] text-good" title={status.path}>
@@ -193,10 +219,10 @@ function ClaudeBody() {
         ) : (
           <span className="flex items-center gap-2">
             <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-bad" title={status.error ?? ''}>
-              <AlertCircle size={15} className="shrink-0" /> Không chạy được claude
+              <AlertCircle size={15} className="shrink-0" /> {t('Không chạy được claude', 'claude を実行できません')}
             </span>
             <Button size="sm" onClick={() => void invoke('open_claude_login')}>
-              Mở Claude Code
+              {t('Mở Claude Code', 'Claude Code を開く')}
             </Button>
           </span>
         )}
@@ -207,6 +233,7 @@ function ClaudeBody() {
 
 function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemini'; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
   const { settings, updateSettings, showToast } = useStore()
+  const t = useT()
   const [draft, setDraft] = useState('')
   const [fetched, setFetched] = useState<string[] | null>(null)
   const [filter, setFilter] = useState('')
@@ -232,7 +259,7 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
     if (!isTauri) {
       onKeySaved(Boolean(key))
       setDraft('')
-      showToast(key ? 'Mô phỏng: đã lưu API key' : 'Mô phỏng: đã xóa API key')
+      showToast(key ? t('Mô phỏng: đã lưu API key', 'シミュレーション: APIキーを保存しました') : t('Mô phỏng: đã xóa API key', 'シミュレーション: APIキーを削除しました'))
       return
     }
     invoke('ai_key_set', { provider, key })
@@ -240,16 +267,24 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
         onKeySaved(Boolean(key.trim()))
         setDraft('')
         setTest({ state: 'idle' })
-        showToast(key.trim() ? `Đã lưu API key ${name} vào Windows Credential Manager` : `Đã xóa API key ${name}`)
+        showToast(
+          key.trim()
+            ? t(`Đã lưu API key ${name} vào Windows Credential Manager`, `${name} の APIキーを Windows 資格情報マネージャーに保存しました`)
+            : t(`Đã xóa API key ${name}`, `${name} の APIキーを削除しました`),
+        )
       })
-      .catch((e) => showToast(`Không lưu được key: ${String(e)}`))
+      .catch((e) => showToast(`${t('Không lưu được key', 'キーを保存できません')}: ${String(e)}`))
   }
 
   const runTest = () => {
     setTest({ state: 'running' })
     if (!isTauri) {
       window.setTimeout(
-        () => setTest({ state: 'done', result: { ok: true, model, firstTokenMs: 640, totalMs: 1180, translation: 'Đã xác nhận. Cảm ơn anh.', error: null, errorKind: null } }),
+        () =>
+          setTest({
+            state: 'done',
+            result: { ok: true, model, firstTokenMs: 640, totalMs: 1180, translation: t('Đã xác nhận. Cảm ơn anh.', '確認しました。ありがとうございます。'), error: null, errorKind: null },
+          }),
         700,
       )
       return
@@ -272,7 +307,14 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
 
   return (
     <>
-      <Field label="API key" hint={hasKey ? 'Lưu trong Windows Credential Manager.' : <>Tạo key tại {KEY_HELP[provider].url}</>}>
+      <Field
+        label={t('API key', 'APIキー')}
+        hint={
+          hasKey
+            ? t('Lưu trong Windows Credential Manager.', 'Windows 資格情報マネージャーに保存されています。')
+            : `${t('Tạo key tại', 'キーの作成:')} ${KEY_HELP[provider].url}`
+        }
+      >
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -285,21 +327,21 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
             <input
               type="password"
               autoComplete="off"
-              aria-label={`API key ${name}`}
+              aria-label={t(`API key ${name}`, `${name} の APIキー`)}
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder={hasKey ? '•••••••• (đã lưu, nhập để thay)' : KEY_HELP[provider].placeholder}
+              placeholder={hasKey ? t('•••••••• (đã lưu, nhập để thay)', '••••••••（保存済み、入力すると置き換え）') : KEY_HELP[provider].placeholder}
               className={cx(inputClass, 'w-full pl-8')}
             />
           </label>
           {draft.trim() ? (
             <Button type="submit" variant="primary">
-              Lưu
+              {t('Lưu', '保存')}
             </Button>
           ) : (
             hasKey && (
               <Button className="text-bad" onClick={() => saveKey('')}>
-                Xóa
+                {t('Xóa', '削除')}
               </Button>
             )
           )}
@@ -307,26 +349,29 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
       </Field>
       {hasKey && (
         <Field
-          label="Model"
-          hint="Chọn model mặc định. Đánh dấu ☆ để model hiện trong menu chọn nhanh trên popup và khay."
+          label={t('Model', 'モデル')}
+          hint={t(
+            'Chọn model mặc định. Đánh dấu ☆ để model hiện trong menu chọn nhanh trên popup và khay.',
+            '既定のモデルを選びます。☆ を付けたモデルはポップアップとトレイのクイック切り替えに表示されます。',
+          )}
         >
           <div className="overflow-hidden rounded-md border border-line bg-surface">
             {all.length > 8 && (
               <label className="flex h-8 items-center gap-2 border-b border-line px-2.5">
                 <Search size={13} className="text-ink-3" />
                 <input
-                  aria-label={`Tìm model ${name}`}
+                  aria-label={t(`Tìm model ${name}`, `${name} のモデルを検索`)}
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Tìm model"
+                  placeholder={t('Tìm model', 'モデルを検索')}
                   className="flex-1 bg-transparent text-[12.5px] text-ink placeholder:text-ink-3 focus:outline-none"
                 />
               </label>
             )}
-            <ul role="radiogroup" aria-label={`Model ${name}`} className="scroll-thin max-h-48 overflow-y-auto py-1">
+            <ul role="radiogroup" aria-label={t(`Model ${name}`, `${name} のモデル`)} className="scroll-thin max-h-48 overflow-y-auto py-1">
               {isTauri && models === null && (
                 <li className="flex items-center gap-2 px-3 py-1.5 text-[12.5px] text-ink-3">
-                  <Loader2 size={13} className="animate-spin" /> Đang lấy danh sách model…
+                  <Loader2 size={13} className="animate-spin" /> {t('Đang lấy danh sách model…', 'モデル一覧を取得中…')}
                 </li>
               )}
               {listed.map((m) => {
@@ -349,14 +394,24 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
                       </span>
                       <span className="truncate">{modelName(provider, m)}</span>
                       <span className="truncate font-mono text-[11px] text-ink-3">{m}</span>
-                      {m === RECOMMENDED_MODELS[provider] && <span className="shrink-0 text-[11px] text-accent">khuyên dùng</span>}
+                      {m === RECOMMENDED_MODELS[provider] && <span className="shrink-0 text-[11px] text-accent">{t('khuyên dùng', 'おすすめ')}</span>}
                     </button>
                     <button
                       type="button"
                       aria-pressed={fav}
                       disabled={isDefault}
-                      title={isDefault ? 'Model mặc định luôn có trong menu chọn nhanh' : fav ? 'Bỏ khỏi menu chọn nhanh' : 'Thêm vào menu chọn nhanh'}
-                      aria-label={`${fav ? 'Bỏ' : 'Thêm'} ${m} ${fav ? 'khỏi' : 'vào'} menu chọn nhanh`}
+                      title={
+                        isDefault
+                          ? t('Model mặc định luôn có trong menu chọn nhanh', '既定のモデルは常にクイック切り替えに表示されます')
+                          : fav
+                            ? t('Bỏ khỏi menu chọn nhanh', 'クイック切り替えから外す')
+                            : t('Thêm vào menu chọn nhanh', 'クイック切り替えに追加')
+                      }
+                      aria-label={
+                        fav
+                          ? t(`Bỏ ${m} khỏi menu chọn nhanh`, `${m} をクイック切り替えから外す`)
+                          : t(`Thêm ${m} vào menu chọn nhanh`, `${m} をクイック切り替えに追加`)
+                      }
                       onClick={() => toggleFavourite(m)}
                       className={cx('flex size-7 shrink-0 items-center justify-center rounded text-[15px]', fav ? 'text-warn' : 'text-ink-3 hover:bg-hover hover:text-ink', isDefault && 'opacity-60')}
                     >
@@ -365,16 +420,18 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
                   </li>
                 )
               })}
-              {models !== null && listed.length === 0 && <li className="px-3 py-1.5 text-[12.5px] text-ink-3">Không có model nào khớp</li>}
+              {models !== null && listed.length === 0 && (
+                <li className="px-3 py-1.5 text-[12.5px] text-ink-3">{t('Không có model nào khớp', '一致するモデルはありません')}</li>
+              )}
             </ul>
           </div>
         </Field>
       )}
-      <Field label="Kiểm tra" hint="Dịch thử một câu ngắn bằng key và model mặc định.">
+      <Field label={t('Kiểm tra', 'テスト')} hint={t('Dịch thử một câu ngắn bằng key và model mặc định.', 'キーと既定のモデルで短い文を試しに翻訳します。')}>
         <span className="flex items-center gap-3">
           <Button disabled={!hasKey || test.state === 'running'} onClick={runTest}>
             {test.state === 'running' && <Loader2 size={14} className="animate-spin" />}
-            {test.state === 'running' ? 'Đang dịch thử…' : 'Dịch thử'}
+            {test.state === 'running' ? t('Đang dịch thử…', 'テスト翻訳中…') : t('Dịch thử', 'テスト翻訳')}
           </Button>
           {test.state === 'done' && <TestLine result={test.result} />}
         </span>
@@ -384,8 +441,9 @@ function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemin
 }
 
 function TestLine({ result }: { result: TestResult }) {
+  const t = useT()
   if (!result.ok) {
-    const why = testFailure(result.errorKind)
+    const why = testFailure(result.errorKind, t)
     return (
       <span className="flex min-w-0 items-center gap-1.5 text-[13px] text-bad" title={result.error ?? ''}>
         <AlertCircle size={15} className="shrink-0" /> <span className="truncate">{why}</span>
@@ -394,7 +452,11 @@ function TestLine({ result }: { result: TestResult }) {
   }
   return (
     <span className="flex items-center gap-1.5 text-[13px] text-good" title={result.translation}>
-      <CheckCircle2 size={15} /> Chữ đầu tiên sau {((result.firstTokenMs ?? result.totalMs) / 1000).toFixed(1)} s
+      <CheckCircle2 size={15} />{' '}
+      {t(
+        `Chữ đầu tiên sau ${((result.firstTokenMs ?? result.totalMs) / 1000).toFixed(1)} s`,
+        `最初の文字まで ${((result.firstTokenMs ?? result.totalMs) / 1000).toFixed(1)} 秒`,
+      )}
     </span>
   )
 }
