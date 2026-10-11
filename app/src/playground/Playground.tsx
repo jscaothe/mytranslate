@@ -1,0 +1,412 @@
+import { ChevronDown, ChevronUp, MousePointerClick } from 'lucide-react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { QuickActionBar } from '../components/QuickActionBar'
+import { Hotkey, Segmented } from '../components/ui'
+import { cx } from '../components/styles'
+import { chatChannels } from '../data/mock'
+import { comboFromEvent } from '../lib/hotkeys'
+import { isJapanese, translate } from '../lib/mockEngine'
+import { useStore, type QuickActionId } from '../store'
+import type { ChatApp as ChatAppKind, ChatChannel, Direction } from '../types'
+import { Popup } from '../windows/popup/Popup'
+import type { PopupRequest } from '../windows/popup/types'
+import { ChatApp } from './ChatApp'
+
+type Action = 'auto' | 'jaVi' | 'viJa' | 'review'
+
+const samples = [
+  { label: 'Câu tiếng Việt', text: 'Em đã deploy bản sửa rồi, nhờ anh kiểm tra lại giúp em' },
+  { label: 'Trả lời lịch release', text: 'Thứ Tư tuần sau được ạ, em sẽ gửi lịch chi tiết sau' },
+  { label: 'Tiếng Nhật cần sửa', text: '明日までに確認してください。' },
+]
+
+export function Playground() {
+  const { settings, showToast, scenario } = useStore()
+  const [app, setApp] = useState<ChatAppKind>('slack')
+  const [channels, setChannels] = useState<Record<ChatAppKind, ChatChannel[]>>(chatChannels)
+  const [activeId, setActiveId] = useState<Record<ChatAppKind, string>>({ slack: 'devqa', teams: 'tanaka' })
+  const [composer, setComposer] = useState('')
+  const [request, setRequest] = useState<PopupRequest | null>(null)
+  const [size, setSize] = useState({ width: 0, height: 0 })
+  const [guideOpen, setGuideOpen] = useState(true)
+  const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
+  /** Where the current mouse selection started, to keep the toolbar off the selected lines. */
+  const downY = useRef(0)
+
+  const rootRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLTextAreaElement>(null)
+  const mouse = useRef<{ x: number; y: number } | null>(null)
+  /** Composer range the popup result will replace. */
+  const replaceRange = useRef<[number, number] | null>(null)
+  const requestSeq = useRef(0)
+
+  const channel = channels[app].find((c) => c.id === activeId[app]) ?? channels[app][0]
+
+  useLayoutEffect(() => {
+    const el = rootRef.current
+    if (!el) return
+    const ro = new ResizeObserver(() => setSize({ width: el.clientWidth, height: el.clientHeight }))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+
+  /** Reads what the user selected: highlighted message text first, then the composer (all of it if nothing is selected). */
+  const capture = useCallback(() => {
+    const root = rootRef.current
+    if (!root) return null
+    const box = root.getBoundingClientRect()
+    const composerEl = composerRef.current
+    const sel = window.getSelection()
+    const messages = root.querySelector('[data-chat-messages]')
+    const messageSelection =
+      sel && sel.rangeCount > 0 && !sel.isCollapsed && messages?.contains(sel.anchorNode) ? sel.toString().trim() : ''
+
+    if (messageSelection && sel) {
+      const r = sel.getRangeAt(0).getBoundingClientRect()
+      return {
+        text: messageSelection,
+        origin: 'chat' as const,
+        anchor: mouse.current ?? { x: r.left - box.left, y: r.bottom - box.top },
+        placement: 'below' as const,
+        range: null,
+      }
+    }
+    if (composerEl && document.activeElement === composerEl) {
+      const { selectionStart: s, selectionEnd: e, value } = composerEl
+      const range: [number, number] = s !== e ? [s, e] : [0, value.length]
+      const r = composerEl.getBoundingClientRect()
+      return {
+        text: value.slice(range[0], range[1]).trim(),
+        origin: 'composer' as const,
+        anchor: { x: r.left - box.left + 12, y: r.top - box.top - 8 },
+        placement: 'above' as const,
+        range,
+      }
+    }
+    return null
+  }, [])
+
+  const trigger = useCallback(
+    (action: Action) => {
+      if (settings.hotkeysPaused) {
+        showToast('Phím tắt đang tạm dừng, bật lại trong menu khay hệ thống')
+        return
+      }
+      const got = capture()
+      if (!got?.text) {
+        showToast('Chưa chọn đoạn văn bản nào')
+        return
+      }
+      if (got.range) replaceRange.current = got.range
+
+      const direction: Direction =
+        action === 'jaVi'
+          ? 'ja_vi'
+          : action === 'viJa'
+            ? 'vi_ja'
+            : action === 'review'
+              ? 'review_ja'
+              : isJapanese(got.text)
+                ? 'ja_vi'
+                : 'vi_ja'
+
+      setQuick(null)
+      requestSeq.current += 1
+      setRequest({
+        id: requestSeq.current,
+        direction,
+        source: got.text,
+        origin: got.origin,
+        conversationId: channel.conversationId,
+        app,
+        anchor: got.anchor,
+        placement: got.placement,
+      })
+    },
+    [app, capture, channel.conversationId, settings.hotkeysPaused, showToast],
+  )
+
+  // Mouse users get a small toolbar after selecting text, so they never have to reach for the keyboard.
+  const onMouseUp = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement
+    if (target.closest('[data-popup], [data-guide], [data-quick-bar]')) return
+    const qa = settings.quickActions
+    if (!qa.enabled || settings.hotkeysPaused || e.button !== 0) return
+    // The real app checks the process of the window under the cursor; here it is the simulated chat app.
+    const exe = app === 'slack' ? 'slack.exe' : 'ms-teams.exe'
+    const listed = (list: { exe: string }[]) => list.some((a) => a.exe.toLowerCase() === exe)
+    if (qa.appScope === 'selected' && !listed(qa.apps)) return
+    if (settings.blockedApps.some((b) => b.toLowerCase() === exe)) return
+    // Let the browser finish updating the selection first.
+    window.setTimeout(() => {
+      const got = capture()
+      const composerSelected =
+        got?.origin === 'composer' && composerRef.current && composerRef.current.selectionStart !== composerRef.current.selectionEnd
+      if (!got?.text || (got.origin === 'composer' && !composerSelected) || !mouse.current) {
+        setQuick(null)
+        return
+      }
+      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current, japanese: isJapanese(got.text) })
+    }, 0)
+  }
+
+  const runQuick = (action: QuickActionId) => {
+    if (action === 'translate') return trigger('auto')
+    if (action === 'review') return trigger('review')
+    const got = capture()
+    setQuick(null)
+    if (!got?.text) return
+    if (scenario === 'not_logged_in' || scenario === 'quota' || scenario === 'network') {
+      showToast('Không dịch được: Claude đang báo lỗi, thử lại bằng popup để xem chi tiết')
+      return
+    }
+    const result = translate(got.text, isJapanese(got.text) ? 'ja_vi' : 'vi_ja', settings.defaultKeigo)
+    void navigator.clipboard.writeText(result.translation).catch(() => undefined)
+    showToast(`Đã dịch và sao chép: ${result.translation.slice(0, 36)}${result.translation.length > 36 ? '...' : ''}`)
+  }
+
+  // Global shortcuts (in the real app these are OS-wide).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const combo = comboFromEvent(e)
+      if (!combo) return
+      const { hotkeys } = settings
+      const map: Record<string, Action> = {
+        [hotkeys.auto]: 'auto',
+        [hotkeys.jaVi]: 'jaVi',
+        [hotkeys.viJa]: 'viJa',
+        [hotkeys.review]: 'review',
+      }
+      const action = map[combo]
+      if (!action) return
+      e.preventDefault()
+      trigger(action)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [settings, trigger])
+
+  // Like the real app: the toolbar stays until the user clicks somewhere else.
+  useEffect(() => {
+    if (!quick) return
+    const onDown = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest('[data-quick-bar]')) setQuick(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [quick])
+
+  // Clicking outside the popup closes it unless it is pinned (the popup handles pin by ignoring this).
+  const popupPinnedRef = useRef(false)
+  const setPinned = useCallback((p: boolean) => {
+    popupPinnedRef.current = p
+  }, [])
+  useEffect(() => {
+    if (!request) return
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (target.closest('[data-popup]') || target.closest('[data-guide]')) return
+      if (popupPinnedRef.current) return
+      setRequest(null)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [request])
+
+  const closePopup = () => {
+    setRequest(null)
+    // Return focus to where the user was, like the real app does.
+    if (request?.origin === 'composer') composerRef.current?.focus()
+  }
+
+  const apply = (text: string) => {
+    const range = replaceRange.current ?? [0, composer.length]
+    const next = composer.slice(0, range[0]) + text + composer.slice(range[1])
+    setComposer(next)
+    requestAnimationFrame(() => {
+      const el = composerRef.current
+      if (!el) return
+      el.focus()
+      const caret = range[0] + text.length
+      el.setSelectionRange(caret, caret)
+    })
+  }
+
+  const send = () => {
+    const text = composer.trim()
+    if (!text) return
+    const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+    setChannels((all) => ({
+      ...all,
+      [app]: all[app].map((c) =>
+        c.id === channel.id ? { ...c, messages: [...c.messages, { id: `me-${Date.now()}`, author: 'Nguyễn Văn A', me: true, time, text }] } : c,
+      ),
+    }))
+    setComposer('')
+  }
+
+  const fillSample = (text: string) => {
+    setComposer(text)
+    requestAnimationFrame(() => {
+      const el = composerRef.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(text.length, text.length)
+    })
+  }
+
+  return (
+    <div
+      ref={rootRef}
+      className="absolute inset-0"
+      onMouseUp={onMouseUp}
+      onMouseDown={(e) => {
+        const box = rootRef.current?.getBoundingClientRect()
+        if (box) downY.current = e.clientY - box.top
+      }}
+      onMouseMove={(e) => {
+        const box = rootRef.current?.getBoundingClientRect()
+        if (box) mouse.current = { x: e.clientX - box.left, y: e.clientY - box.top }
+      }}
+    >
+      <div className="absolute top-5 bottom-5 left-5 right-[356px]">
+        <ChatApp
+          ref={composerRef}
+          app={app}
+          channels={channels[app]}
+          activeId={channel.id}
+          onSelectChannel={(id) => {
+            setActiveId((a) => ({ ...a, [app]: id }))
+            setRequest(null)
+            setQuick(null)
+          }}
+          composer={composer}
+          onComposer={setComposer}
+          onSend={send}
+        />
+      </div>
+
+      <aside data-guide className="absolute top-5 right-5 w-[316px] overflow-hidden rounded-lg border border-line bg-window shadow-window">
+        <button
+          type="button"
+          onClick={() => setGuideOpen((o) => !o)}
+          className="flex h-11 w-full items-center gap-2 border-b border-line px-4 text-left"
+        >
+          <MousePointerClick size={16} className="text-accent" />
+          <span className="flex-1 text-[13.5px] font-semibold">Thử nghiệm</span>
+          {guideOpen ? <ChevronUp size={16} className="text-ink-3" /> : <ChevronDown size={16} className="text-ink-3" />}
+        </button>
+        {guideOpen && (
+          <div className="flex flex-col gap-4 p-4 text-[13px] leading-snug">
+            <div className="flex items-center justify-between">
+              <span className="text-ink-2">App chat</span>
+              <Segmented
+                label="App chat"
+                value={app}
+                onChange={(v) => {
+                  setApp(v)
+                  setRequest(null)
+                }}
+                options={[
+                  { value: 'slack', label: 'Slack' },
+                  { value: 'teams', label: 'Teams' },
+                ]}
+              />
+            </div>
+
+            <Step n={1} title="Đọc tin của khách">
+              Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.jaVi} />
+              {settings.quickActions.enabled ? ', hoặc bấm "Dịch sang Việt" trên thanh thao tác hiện ra.' : '.'}
+            </Step>
+            <Step n={2} title="Trả lời bằng tiếng Việt">
+              Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.viJa} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
+              <Hotkey combo="Enter" /> để thay vào ô chat.
+            </Step>
+            <Step n={3} title="Kiểm tra câu tiếng Nhật">
+              Viết tiếng Nhật vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />.
+            </Step>
+            <Step n={4} title="Đổi thread">
+              Trong popup, bấm tên thread hoặc nhấn <Hotkey combo="Ctrl+T" />.
+            </Step>
+            <Step n={5} title="Di chuyển và đổi kích thước popup">
+              Kéo thanh tiêu đề để di chuyển; kéo mép trái, phải, dưới hoặc góc dưới để đổi kích thước. Popup sau sẽ mở đúng như vậy cho đến
+              khi tắt app.
+            </Step>
+
+            <div>
+              <div className="mb-1.5 text-[12px] font-semibold text-ink-3">Điền nhanh vào ô chat</div>
+              <div className="flex flex-wrap gap-1.5">
+                {samples.map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={() => fillSample(s.text)}
+                    className="rounded-full border border-line bg-surface px-2.5 py-1 text-[12px] text-ink-2 hover:border-accent hover:text-accent"
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <p className="border-t border-line pt-3 text-[12px] text-ink-3">
+              <Hotkey combo={settings.hotkeys.auto} /> tự nhận diện hướng dịch. <Hotkey combo={settings.hotkeys.main} /> hoặc icon khay
+              hệ thống để mở cửa sổ chính. Đổi "Trạng thái giả lập" trên thanh công cụ để xem các màn hình lỗi.
+            </p>
+          </div>
+        )}
+      </aside>
+
+      {quick && !request && (
+        <QuickActionBar
+          japanese={quick.japanese}
+          items={settings.quickActions.items}
+          display={settings.quickActions.display}
+          onAction={runQuick}
+          onDismiss={() => setQuick(null)}
+          className="absolute z-30"
+          style={{
+            left: Math.max(8, Math.min(quick.x - 16, size.width - (settings.quickActions.display === 'iconOnly' ? 170 : 400))),
+            // Like the real app: above a one-line selection, below one dragged down over several lines.
+            top: quickTop(quick, size.height),
+          }}
+        />
+      )}
+
+      {request && (
+        <Popup
+          key={request.id}
+          request={request}
+          container={size}
+          onClose={closePopup}
+          onApply={apply}
+          onPinnedChange={setPinned}
+        />
+      )}
+    </div>
+  )
+}
+
+function Step({ n, title, children }: { n: number; title: string; children: React.ReactNode }) {
+  return (
+    <div className="flex gap-2.5">
+      <span className={cx('flex size-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11.5px] font-bold text-accent')}>
+        {n}
+      </span>
+      <div>
+        <div className="font-semibold text-ink">{title}</div>
+        <div className="mt-0.5 text-ink-2 [&_kbd]:align-middle">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+/** Toolbar top (40 px tall, 16 px clear of the pointer's line), on the side away from the selected text. */
+function quickTop(q: { y: number; startY: number }, height: number): number {
+  const above = q.y - 16 - 40
+  const below = q.y + 16
+  const draggedDown = q.y - q.startY > 16
+  if (above >= 4 && !(draggedDown && below + 40 <= height - 4)) return above
+  return below
+}

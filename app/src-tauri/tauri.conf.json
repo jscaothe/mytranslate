@@ -1,0 +1,53 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "MyTranslate",
+  "version": "0.1.0",
+  "identifier": "com.mytranslate.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:5173",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MyTranslate",
+        "width": 1040,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "msi",
+      "nsis"
+    ],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDVDQkYxOTc2NzZFNThBMDMKUldRRGl1VjJkaG0vWEJkRVFPMXNTdGw4dlYveUhPaEhsTEZwcW5Lckh5UnBINzlyeDUzaGdCcEwK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

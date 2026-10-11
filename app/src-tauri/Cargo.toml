@@ -1,0 +1,55 @@
+[package]
+name = "mytranslate"
+version = "0.1.0"
+description = "Japanese-Vietnamese chat translator powered by Claude"
+authors = ["thecm"]
+license = ""
+repository = ""
+edition = "2024"
+rust-version = "1.90"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+name = "mytranslate_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.7.1", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2.12.1", features = ["tray-icon"] }
+tauri-plugin-log = "2"
+tokio = { version = "1", features = ["process", "io-util", "sync", "time", "macros"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+rusqlite = { version = "0.37", features = ["bundled", "backup", "functions"] }
+serde_yaml_ng = "0.10.0"
+tauri-plugin-dialog = "2"
+tauri-plugin-updater = "2"
+tauri-plugin-notification = "2"
+# ChatGPT and Gemini over HTTPS with streaming (already in the tree through the updater).
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json", "http2"] }
+futures-util = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Dwm",
+    "Win32_Security_Credentials",
+    "Win32_System_DataExchange",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Memory",
+    "Win32_System_Ole",
+    "Win32_System_Registry",
+    "Win32_System_Threading",
+    "Win32_System_Variant",
+    "Win32_UI_Accessibility",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
