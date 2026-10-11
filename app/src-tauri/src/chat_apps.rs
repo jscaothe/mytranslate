@@ -49,6 +49,30 @@ pub fn open(app: ChatApp, lang: Lang) -> Result<(), String> {
     shell_open(app.uri(), lang)
 }
 
+/// Web pages the app sends the user to while setting up an AI. A fixed list, so the page cannot open any URL.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HelpPage {
+    ClaudeCode,
+    OpenaiKeys,
+    GeminiKeys,
+}
+
+impl HelpPage {
+    fn url(self) -> &'static str {
+        match self {
+            HelpPage::ClaudeCode => "https://code.claude.com/docs/en/setup",
+            HelpPage::OpenaiKeys => "https://platform.openai.com/api-keys",
+            HelpPage::GeminiKeys => "https://aistudio.google.com/apikey",
+        }
+    }
+}
+
+/// Opens the page in the default browser.
+pub fn open_help(page: HelpPage, lang: Lang) -> Result<(), String> {
+    shell_open(page.url(), lang)
+}
+
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
@@ -99,7 +123,7 @@ fn shell_open(uri: &str, lang: Lang) -> Result<(), String> {
     } else {
         Err(format!(
             "{} ({})",
-            lang.pick("Không mở được ứng dụng", "アプリを開けません"),
+            lang.pick("Không mở được", "開けません"),
             result.0 as isize
         ))
     }
@@ -119,5 +143,15 @@ mod tests {
         assert_eq!(serde_json::to_value(ChatApp::Teams).unwrap(), "teams");
         let slack: ChatApp = serde_json::from_value("slack".into()).unwrap();
         assert_eq!(slack, ChatApp::Slack);
+    }
+
+    #[test]
+    fn help_pages_are_the_known_https_pages() {
+        let page: HelpPage = serde_json::from_value("gemini_keys".into()).unwrap();
+        assert_eq!(page, HelpPage::GeminiKeys);
+        assert!(serde_json::from_value::<HelpPage>("https://example.com".into()).is_err());
+        for p in [HelpPage::ClaudeCode, HelpPage::OpenaiKeys, HelpPage::GeminiKeys] {
+            assert!(p.url().starts_with("https://"));
+        }
     }
 }

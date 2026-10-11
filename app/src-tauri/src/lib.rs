@@ -732,6 +732,12 @@ fn open_chat_app(store: State<'_, SettingsStore>, app: chat_apps::ChatApp) -> Re
     chat_apps::open(app, store.language())
 }
 
+/// Opens a setup page (installing Claude Code, creating an API key) in the browser.
+#[tauri::command]
+fn open_help_page(store: State<'_, SettingsStore>, page: chat_apps::HelpPage) -> Result<(), String> {
+    chat_apps::open_help(page, store.language())
+}
+
 /// Opens a console running `claude`, where the user signs in with their Claude account.
 #[tauri::command]
 fn open_claude_login(cli: State<'_, Arc<ClaudeCli>>) -> Result<(), String> {
@@ -929,6 +935,7 @@ pub fn run() {
             open_claude_login,
             chat_apps_installed,
             open_chat_app,
+            open_help_page,
             settings_get,
             settings_set,
             show_main_window,

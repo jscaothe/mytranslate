@@ -24,6 +24,7 @@ const screens = (t: T): { value: Screen; label: string }[] => [
 const scenarios = (t: T): { value: Scenario; label: string }[] => [
   { value: 'normal', label: t('Bình thường', '通常') },
   { value: 'uncertain_thread', label: t('Không chắc thread', 'スレッドが不確か') },
+  { value: 'no_claude', label: t('Chưa cài Claude Code', 'Claude Code 未インストール') },
   { value: 'not_logged_in', label: t('Claude chưa đăng nhập', 'Claude 未ログイン') },
   { value: 'quota', label: t('Hết hạn mức', '利用枠の上限') },
   { value: 'network', label: t('Lỗi mạng', 'ネットワークエラー') },
@@ -251,11 +252,13 @@ function Taskbar() {
   const claudeOk = scenario === 'normal' || scenario === 'uncertain_thread'
   const claudeLabel = claudeOk
     ? t('Đã kết nối', '接続済み')
-    : scenario === 'not_logged_in'
-      ? t('Chưa đăng nhập', '未ログイン')
-      : scenario === 'quota'
-        ? t('Hết hạn mức', '利用枠の上限')
-        : t('Mất kết nối', '接続できません')
+    : scenario === 'no_claude'
+      ? t('Chưa cài', '未インストール')
+      : scenario === 'not_logged_in'
+        ? t('Chưa đăng nhập', '未ログイン')
+        : scenario === 'quota'
+          ? t('Hết hạn mức', '利用枠の上限')
+          : t('Mất kết nối', '接続できません')
 
   const item = (label: string, onClick: () => void, right?: React.ReactNode) => (
     <button

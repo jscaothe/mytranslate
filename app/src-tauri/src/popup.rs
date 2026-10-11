@@ -30,9 +30,10 @@ const INITIAL_HEIGHT: f64 = 300.0;
 /// Move/resize events that arrive this soon after the app itself moved the window are not the user's doing.
 const PROGRAMMATIC_GRACE: Duration = Duration::from_millis(500);
 
-/// Text the user selected with the mouse, in physical pixels: where the pointer was released, and the
-/// middle of the first and last selected line. The popup is placed around it instead of around the pointer
-/// (which is on the quick toolbar by then).
+/// Where the selected text is, in physical pixels: x is where the pointer was released (a mouse selection) or the
+/// left edge of the text (a selection UI Automation reports); top and bottom bound its first and last line.
+/// The popup is placed around it instead of around the pointer, which is on the quick toolbar by then or, after a
+/// keyboard selection, anywhere.
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub x: f64,
@@ -304,16 +305,12 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
         }
         // Where the keyboard focus is decides two things: only a message box is safe to select-all (in the
         // conversation Ctrl+A would grab the whole page), and only a result for the message box replaces text.
-        // Asked on its own thread while the user lets go of the hotkey.
-        let focus = std::thread::spawn(|| {
-            let started = std::time::Instant::now();
-            let editable = crate::ui_selection::SelectionProbe::new().and_then(|p| p.focus_is_editable());
-            log::info!("focus editable: {editable:?} ({} ms)", started.elapsed().as_millis());
-            editable
-        });
+        // Asked on its own thread while the user lets go of the hotkey. The same probe then finds where the text
+        // is, so a hotkey popup sits next to text selected with the keyboard far from the pointer.
+        let probe = FocusProbe::start(from_toolbar, span.is_none());
         let mut in_message_box = None;
         let (text, error) = match capture::copy_selection(|| {
-            in_message_box = focus.join().ok().flatten();
+            in_message_box = probe.editable();
             // A mouse selection is never extended.
             !from_toolbar && in_message_box == Some(true)
         }) {
@@ -325,6 +322,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             }
         };
         log::info!("captured {} chars, error: {error:?}", text.chars().count());
+        let span = span.or_else(|| probe.span());
         let lang = app.state::<SettingsStore>().language();
         let (direction, origin) = route(action, &text, lang, in_message_box);
 
@@ -366,6 +364,56 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             log::warn!("could not show the popup: {e}");
         }
     });
+}
+
+/// Longest wait, from the hotkey, for the chat app to say where the text is; past it the popup opens at the
+/// pointer.
+const SPAN_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Asks UI Automation, on its own thread, whether the keyboard focus is in a message box and then where the text
+/// in the focused control is, so a slow or hung app cannot hold the popup for long.
+struct FocusProbe {
+    started: Instant,
+    editable: std::sync::mpsc::Receiver<Option<bool>>,
+    span: std::sync::mpsc::Receiver<Option<Span>>,
+}
+
+impl FocusProbe {
+    /// `from_toolbar`: the text was selected with the mouse and is never extended. `want_span`: the popup's place
+    /// is not known yet (a hotkey, not the toolbar).
+    fn start(from_toolbar: bool, want_span: bool) -> Self {
+        let (editable_tx, editable) = std::sync::mpsc::channel();
+        let (span_tx, span) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let started = Instant::now();
+            let probe = crate::ui_selection::SelectionProbe::new();
+            let is_editable = probe.as_ref().and_then(|p| p.focus_is_editable());
+            log::info!("focus editable: {is_editable:?} ({} ms)", started.elapsed().as_millis());
+            let _ = editable_tx.send(is_editable);
+            if want_span {
+                // About to be selected with select-all: the control itself is the place.
+                let whole_control = !from_toolbar && is_editable == Some(true);
+                let _ = span_tx.send(probe.and_then(|p| p.focused_text_span(whole_control)));
+            }
+        });
+        Self {
+            started: Instant::now(),
+            editable,
+            span,
+        }
+    }
+
+    /// Waits for the answer: copying the text depends on it.
+    fn editable(&self) -> Option<bool> {
+        self.editable.recv().ok().flatten()
+    }
+
+    fn span(&self) -> Option<Span> {
+        let left = SPAN_TIMEOUT.saturating_sub(self.started.elapsed());
+        let span = self.span.recv_timeout(left).ok().flatten();
+        log::info!("text span {span:?} after {} ms", self.started.elapsed().as_millis());
+        span
+    }
 }
 
 fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Result<()> {
