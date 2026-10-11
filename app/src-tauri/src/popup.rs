@@ -29,9 +29,10 @@ const INITIAL_HEIGHT: f64 = 300.0;
 /// Move/resize events that arrive this soon after the app itself moved the window are not the user's doing.
 const PROGRAMMATIC_GRACE: Duration = Duration::from_millis(500);
 
-/// Text the user selected with the mouse, in physical pixels: where the pointer was released, and the
-/// middle of the first and last selected line. The popup is placed around it instead of around the pointer
-/// (which is on the quick toolbar by then).
+/// Where the selected text is, in physical pixels: x is where the pointer was released (a mouse selection) or the
+/// left edge of the text (a selection UI Automation reports); top and bottom bound its first and last line.
+/// The popup is placed around it instead of around the pointer, which is on the quick toolbar by then or, after a
+/// keyboard selection, anywhere.
 #[derive(Debug, Clone, Copy)]
 pub struct Span {
     pub x: f64,
@@ -304,6 +305,9 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
         // Only a message box is safe to select-all; in the message list Ctrl+A would grab the whole page.
         // A mouse selection is never extended.
         let select_all = !from_toolbar && matches!(action, Action::ViJa | Action::Review);
+        // A hotkey: the popup goes next to the text, which may have been selected with the keyboard far from the
+        // pointer. Asked while the text is being copied, so it adds no wait.
+        let span_probe = span.is_none().then(|| SpanProbe::start(select_all));
         let (text, error) = match capture::copy_selection(select_all) {
             Ok(Some(t)) => (t, None),
             Ok(None) => (String::new(), Some("no_selection".to_string())),
@@ -313,6 +317,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             }
         };
         log::info!("captured {} chars, error: {error:?}", text.chars().count());
+        let span = span.or_else(|| span_probe.and_then(SpanProbe::wait));
         let direction = match action {
             Action::JaVi => Direction::JaVi,
             // Ctrl+Alt+K on Japanese text: the user wants to read it, not to replace it.
@@ -369,6 +374,39 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             log::warn!("could not show the popup: {e}");
         }
     });
+}
+
+/// Longest wait, from the hotkey, for the chat app to say where the text is; past it the popup opens at the
+/// pointer.
+const SPAN_TIMEOUT: Duration = Duration::from_millis(250);
+
+/// Asks UI Automation, on its own thread, where the text in the focused control is, so a slow or hung app cannot
+/// hold the popup.
+struct SpanProbe {
+    started: Instant,
+    result: std::sync::mpsc::Receiver<Option<Span>>,
+}
+
+impl SpanProbe {
+    /// `whole_control`: the text is about to be selected with select-all, so the control itself is the place.
+    fn start(whole_control: bool) -> Self {
+        let (tx, result) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let span = crate::ui_selection::SelectionProbe::new().and_then(|p| p.focused_text_span(whole_control));
+            let _ = tx.send(span);
+        });
+        Self {
+            started: Instant::now(),
+            result,
+        }
+    }
+
+    fn wait(self) -> Option<Span> {
+        let left = SPAN_TIMEOUT.saturating_sub(self.started.elapsed());
+        let span = self.result.recv_timeout(left).ok().flatten();
+        log::info!("text span {span:?} after {} ms", self.started.elapsed().as_millis());
+        span
+    }
 }
 
 fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Result<()> {
