@@ -7,6 +7,8 @@ use std::sync::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::Serialize;
 
+use crate::lang::Lang;
+
 /// Bump with a new entry in `MIGRATIONS` whenever the schema changes.
 const MIGRATIONS: &[&str] = &[
     r#"
@@ -73,6 +75,12 @@ const MIGRATIONS: &[&str] = &[
     -- The user marked the translation as poor ("Dịch chưa tốt"): material for prompt improvements.
     ALTER TABLE messages ADD COLUMN feedback INTEGER NOT NULL DEFAULT 0;
 "#,
+    r#"
+    -- Who wrote the message: the user (1) or the other side (0). Until now every user was Vietnamese, so a
+    -- Japanese source was a client's message; a Japanese user reverses that.
+    ALTER TABLE messages ADD COLUMN mine INTEGER NOT NULL DEFAULT 1;
+    UPDATE messages SET mine = 0 WHERE direction = 'ja_vi';
+"#,
 ];
 
 /// Every table holding user data, children first (for wiping).
@@ -121,16 +129,26 @@ pub struct MessageInfo {
     pub result: String,
     pub back: String,
     pub created_at: i64,
+    /// Written by the user, not by the other side.
+    pub mine: bool,
 }
 
 impl MessageInfo {
-    /// The Japanese side of the exchange and who wrote it, for the prompt's thread context.
-    pub fn japanese(&self) -> (bool, &str) {
+    /// The Japanese side of the exchange.
+    pub fn japanese(&self) -> &str {
         match self.direction.as_str() {
-            // A client message translated for the user.
-            "ja_vi" => (true, &self.source),
-            // The user's own message, sent in Japanese.
-            _ => (false, &self.result),
+            "ja_vi" => &self.source,
+            _ => &self.result,
+        }
+    }
+
+    /// The Vietnamese side of the exchange.
+    pub fn vietnamese(&self) -> &str {
+        match self.direction.as_str() {
+            "ja_vi" => &self.result,
+            "vi_ja" => &self.source,
+            // A review: the meaning of the corrected Japanese.
+            _ => &self.back,
         }
     }
 }
@@ -151,6 +169,8 @@ pub struct ConversationInfo {
 
 pub struct NewMessage<'a> {
     pub direction: &'a str,
+    /// Written by the user (translated to send, or checked), not received.
+    pub mine: bool,
     pub source: &'a str,
     pub result: &'a str,
     pub back: &'a str,
@@ -204,12 +224,19 @@ impl History {
 
     /// Replaces the whole history with a backup made by `backup_to` (or an older version of the app).
     /// The file is checked first; on any problem the current history is left untouched.
-    pub fn restore_from(&self, path: &Path) -> Result<(), String> {
+    pub fn restore_from(&self, path: &Path, lang: Lang) -> Result<(), String> {
+        let not_backup = || {
+            lang.pick(
+                "File không phải bản sao lưu của MyTranslate",
+                "MyTranslate のバックアップファイルではありません",
+            )
+            .to_string()
+        };
         let source = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
-            .map_err(|e| format!("Không mở được file: {e}"))?;
+            .map_err(|e| format!("{}: {e}", lang.pick("Không mở được file", "ファイルを開けません")))?;
         let version: usize = source
             .pragma_query_value(None, "user_version", |r| r.get(0))
-            .map_err(|_| "File không phải bản sao lưu của MyTranslate".to_string())?;
+            .map_err(|_| not_backup())?;
         let has_tables: i64 = source
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('conversations', 'threads', 'messages')",
@@ -218,15 +245,20 @@ impl History {
             )
             .unwrap_or(0);
         if version == 0 || has_tables != 3 {
-            return Err("File không phải bản sao lưu của MyTranslate".into());
+            return Err(not_backup());
         }
         if version > MIGRATIONS.len() {
-            return Err("Bản sao lưu được tạo bằng phiên bản app mới hơn; hãy cập nhật app trước".into());
+            return Err(lang
+                .pick(
+                    "Bản sao lưu được tạo bằng phiên bản app mới hơn; hãy cập nhật app trước",
+                    "このバックアップは新しいバージョンのアプリで作成されています。先にアプリを更新してください",
+                )
+                .into());
         }
         drop(source);
         let mut conn = self.conn.lock().unwrap();
         conn.restore(rusqlite::MAIN_DB, path, None::<fn(rusqlite::backup::Progress)>)
-            .map_err(|e| format!("Không khôi phục được: {e}"))?;
+            .map_err(|e| format!("{}: {e}", lang.pick("Không khôi phục được", "復元できません")))?;
         // A backup from an older app version gets the newer columns.
         migrate(&mut conn).map_err(|e| e.to_string())
     }
@@ -449,7 +481,7 @@ impl History {
     pub fn recent_messages(&self, thread_id: i64, limit: usize) -> rusqlite::Result<Vec<MessageInfo>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, thread_id, direction, source, result, back, created_at FROM
+            "SELECT id, thread_id, direction, source, result, back, created_at, mine FROM
                (SELECT * FROM messages WHERE thread_id = ?1 ORDER BY created_at DESC, id DESC LIMIT ?2)
              ORDER BY created_at, id",
         )?;
@@ -477,8 +509,8 @@ impl History {
         let now = now_ms();
         conn.execute(
             "INSERT INTO messages (thread_id, direction, source, result, back, model, prompt_version,
-                                   first_token_ms, total_ms, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                                   first_token_ms, total_ms, created_at, mine)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
             params![
                 thread_id,
                 m.direction,
@@ -489,7 +521,8 @@ impl History {
                 m.prompt_version,
                 m.first_token_ms.map(|v| v as i64),
                 m.total_ms as i64,
-                now
+                now,
+                m.mine
             ],
         )?;
         let id = conn.last_insert_rowid();
@@ -654,6 +687,7 @@ fn message_row(r: &rusqlite::Row) -> rusqlite::Result<MessageInfo> {
         result: r.get(4)?,
         back: r.get(5)?,
         created_at: r.get(6)?,
+        mine: r.get(7)?,
     })
 }
 
@@ -664,6 +698,7 @@ mod tests {
     fn msg<'a>(direction: &'a str, source: &'a str, result: &'a str) -> NewMessage<'a> {
         NewMessage {
             direction,
+            mine: direction != "ja_vi",
             source,
             result,
             back: "",
@@ -709,9 +744,49 @@ mod tests {
         h.add_message(t, &msg("ja_vi", "確認しました", "Đã xác nhận")).unwrap();
         h.add_message(t, &msg("vi_ja", "Cảm ơn", "ありがとうございます"))
             .unwrap();
+        // A Japanese user: their own Japanese sent as Vietnamese.
+        h.add_message(
+            t,
+            &NewMessage {
+                mine: true,
+                ..msg("ja_vi", "了解です", "Đã rõ")
+            },
+        )
+        .unwrap();
         let m = h.recent_messages(t, 6).unwrap();
-        assert_eq!(m[0].japanese(), (true, "確認しました"));
-        assert_eq!(m[1].japanese(), (false, "ありがとうございます"));
+        assert_eq!(
+            (m[0].mine, m[0].japanese(), m[0].vietnamese()),
+            (false, "確認しました", "Đã xác nhận")
+        );
+        assert_eq!(
+            (m[1].mine, m[1].japanese(), m[1].vietnamese()),
+            (true, "ありがとうございます", "Cảm ơn")
+        );
+        assert_eq!(
+            (m[2].mine, m[2].japanese(), m[2].vietnamese()),
+            (true, "了解です", "Đã rõ")
+        );
+    }
+
+    #[test]
+    fn existing_messages_get_their_author_from_the_direction() {
+        let conn = Connection::open_in_memory().unwrap();
+        // The schema before `mine`, with one message each way.
+        for sql in &MIGRATIONS[..4] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 4).unwrap();
+        conn.execute_batch(
+            "INSERT INTO conversations (id, app, name, last_active) VALUES (1, 'slack', 'dm', 0);
+             INSERT INTO threads (id, conversation_id, title, created_at, last_active) VALUES (1, 1, 't', 0, 0);
+             INSERT INTO messages (thread_id, direction, source, result, created_at) VALUES
+               (1, 'ja_vi', '確認しました', 'Đã xác nhận', 1),
+               (1, 'vi_ja', 'Cảm ơn', 'ありがとうございます', 2);",
+        )
+        .unwrap();
+        let h = History::init(conn).unwrap();
+        let m = h.recent_messages(1, 6).unwrap();
+        assert_eq!(m.iter().map(|m| m.mine).collect::<Vec<_>>(), [false, true]);
     }
 
     #[test]
@@ -903,19 +978,22 @@ mod tests {
         assert!(h.all_threads().unwrap().is_empty());
         assert!(h.glossary().unwrap().is_empty());
 
-        h.restore_from(&backup).unwrap();
+        h.restore_from(&backup, Lang::Vi).unwrap();
         assert_eq!(h.all_threads().unwrap().len(), 1);
         assert_eq!(h.glossary().unwrap().len(), 1);
 
         let junk = dir.join("junk.db");
         std::fs::write(&junk, b"not a database at all, just text").unwrap();
-        assert!(h.restore_from(&junk).is_err());
+        assert!(h.restore_from(&junk, Lang::Vi).is_err());
         let empty = dir.join("empty.db");
         Connection::open(&empty)
             .unwrap()
             .execute_batch("CREATE TABLE x (a)")
             .unwrap();
-        assert!(h.restore_from(&empty).is_err());
+        assert_eq!(
+            h.restore_from(&empty, Lang::Ja).unwrap_err(),
+            "MyTranslate のバックアップファイルではありません"
+        );
         assert_eq!(h.all_threads().unwrap().len(), 1);
         let _ = std::fs::remove_dir_all(dir);
     }

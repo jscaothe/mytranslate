@@ -6,6 +6,7 @@
 
 use std::sync::{Arc, Mutex};
 
+use mytranslate_lib::lang::Lang;
 use mytranslate_lib::prompt::{Direction, Keigo, PROMPT_VERSION, TranslateRequest};
 use mytranslate_lib::provider::claude_cli::{ClaudeCli, TranslateEvent};
 use mytranslate_lib::provider::http_api::Api;
@@ -24,6 +25,12 @@ struct Case {
     #[serde(default = "formal")]
     keigo: Keigo,
     text: String,
+    /// The user's language: `ja` for a Japanese user chatting with Vietnamese colleagues.
+    #[serde(default)]
+    user: Lang,
+    /// Ask for a thread title too, as for the first message of a new thread.
+    #[serde(default)]
+    new_thread: bool,
 }
 
 fn formal() -> Keigo {
@@ -67,7 +74,9 @@ fn main() {
         let router = Router::new(cli);
         let mut rows = Vec::new();
         for case in &cases.cases {
-            let req = TranslateRequest::task(case.direction, &case.text, case.keigo);
+            let mut req = TranslateRequest::task(case.direction, &case.text, case.keigo);
+            req.user_lang = case.user;
+            req.ask_title = case.new_thread;
             let done: Arc<Mutex<Option<TranslateEvent>>> = Arc::default();
             let out = done.clone();
             router
@@ -100,10 +109,15 @@ fn main() {
     );
     for (case, event) in rows {
         let direction = match case.direction {
-            Direction::JaVi => "JA→VI".to_string(),
+            Direction::JaVi => format!("JA→VI ({:?})", case.keigo).to_lowercase(),
             Direction::ViJa => format!("VI→JA ({:?})", case.keigo).to_lowercase(),
             Direction::ReviewJa => format!("Kiểm tra ({:?})", case.keigo).to_lowercase(),
-            _ => "?".into(),
+            Direction::Reply => format!("Gợi ý trả lời ({:?})", case.keigo).to_lowercase(),
+            Direction::Summarize => "?".into(),
+        };
+        let direction = match case.user {
+            Lang::Vi => direction,
+            Lang::Ja => format!("{direction}, người dùng Nhật"),
         };
         let (result, back, first) = match event {
             Some(TranslateEvent::Done {
@@ -112,9 +126,15 @@ fn main() {
                 Direction::ReviewJa => (
                     format!("[{}] {}", s.verdict, s.suggestion),
                     format!("{} {}", s.suggestion_vi, s.issues.replace('\n', "; ")),
-                    timing.first_token_ms,
+                    first(&timing),
                 ),
-                _ => (s.translation, s.back_translation, timing.first_token_ms),
+                Direction::Reply => (s.replies, String::new(), first(&timing)),
+                _ if s.thread_title.is_empty() => (s.translation, s.back_translation, first(&timing)),
+                _ => (
+                    s.translation,
+                    format!("{}<br>Thread: {}", s.back_translation, s.thread_title),
+                    first(&timing),
+                ),
             },
             Some(TranslateEvent::Error { message, .. }) => (format!("LỖI: {message}"), String::new(), None),
             _ => ("LỖI: không có kết quả".into(), String::new(), None),
@@ -125,11 +145,20 @@ fn main() {
             cell(&case.text),
             cell(&result),
             cell(&back),
-            first.map_or("-".into(), |v| v.to_string())
+            first.map_or("-".into(), |(ms, thought)| if thought {
+                format!("{ms} (thinking)")
+            } else {
+                ms.to_string()
+            })
         ));
     }
     std::fs::write(output, md).expect("write results");
     eprintln!("wrote {output}");
+}
+
+/// Time to the first character, and whether the model thought before answering.
+fn first(t: &mytranslate_lib::provider::claude_cli::Timing) -> Option<(u64, bool)> {
+    t.first_token_ms.map(|ms| (ms, t.thought))
 }
 
 fn cell(s: &str) -> String {

@@ -1,5 +1,6 @@
 // The translation history kept by the Rust side (history.rs), mapped to the shapes the screens use.
 import { invoke } from '@tauri-apps/api/core'
+import { locale, pick, type Lang } from './i18n'
 import type { Conversation, Keigo, Thread, ThreadMessage } from '../types'
 
 interface ConversationRow {
@@ -32,9 +33,11 @@ interface MessageRow {
   result: string
   back: string
   createdAt: number
+  /** Written by the user, not by the other side. */
+  mine: boolean
 }
 
-export async function loadHistory(): Promise<{ conversations: Conversation[]; threads: Thread[] }> {
+export async function loadHistory(lang: Lang): Promise<{ conversations: Conversation[]; threads: Thread[] }> {
   const snap = await invoke<{ conversations: ConversationRow[]; threads: ThreadRow[] }>('history_snapshot')
   return {
     conversations: snap.conversations.map((c) => ({
@@ -45,39 +48,36 @@ export async function loadHistory(): Promise<{ conversations: Conversation[]; th
       keigo: c.keigo === 'casual' || c.keigo === 'polite' || c.keigo === 'formal' ? c.keigo : '',
       note: c.note,
     })),
-    threads: snap.threads.map(toThread),
+    threads: snap.threads.map((t) => toThread(t, lang)),
   }
 }
 
-function toThread(t: ThreadRow): Thread {
+function toThread(t: ThreadRow, lang: Lang): Thread {
   return {
     id: String(t.id),
     conversationId: String(t.conversationId),
     title: t.title,
     summary: t.summary,
     summaryStale: t.summaryStale,
-    lastActive: relativeTime(t.lastActive),
+    lastActive: relativeTime(t.lastActive, lang),
     pinned: t.pinned,
     archived: t.archived,
     messages: [],
   }
 }
 
-/** Messages of one thread, as chat bubbles: the client's side on the left, the user's on the right. */
-export async function loadMessages(threadId: string): Promise<ThreadMessage[]> {
+/** Messages of one thread, as chat bubbles: the other side on the left, the user's on the right. */
+export async function loadMessages(threadId: string, lang: Lang): Promise<ThreadMessage[]> {
   const rows = await invoke<MessageRow[]>('history_messages', { threadId: Number(threadId) })
-  return rows.map((m) => {
-    const fromClient = m.direction === 'ja_vi'
-    return {
-      id: String(m.id),
-      author: fromClient ? 'other' : 'me',
-      name: fromClient ? 'Khách' : 'Tôi',
-      time: new Date(m.createdAt).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
-      // Japanese on top, Vietnamese below, whichever side was typed.
-      ja: fromClient ? m.source : m.result,
-      vi: fromClient ? m.result : m.direction === 'vi_ja' ? m.source : m.back,
-    }
-  })
+  return rows.map((m) => ({
+    id: String(m.id),
+    author: m.mine ? 'me' : 'other',
+    name: m.mine ? pick(lang, 'Tôi', '自分') : pick(lang, 'Khách', '相手'),
+    time: new Date(m.createdAt).toLocaleString(locale(lang), { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }),
+    // Both sides, whichever was typed.
+    ja: m.direction === 'ja_vi' ? m.source : m.result,
+    vi: m.direction === 'ja_vi' ? m.result : m.direction === 'vi_ja' ? m.source : m.back,
+  }))
 }
 
 export async function renameThread(threadId: string, title: string): Promise<void> {
@@ -121,9 +121,9 @@ export async function exportThread(threadId: string): Promise<string | null> {
   return invoke<string | null>('history_export', { threadId: Number(threadId) })
 }
 
-/** Claude summarizes the thread in Vietnamese; the summary is stored with it. */
-export async function summarizeThread(threadId: string): Promise<Thread> {
-  return toThread(await invoke<ThreadRow>('thread_summarize', { threadId: Number(threadId) }))
+/** The AI summarizes the thread in the user's language; the summary is stored with it. */
+export async function summarizeThread(threadId: string, lang: Lang): Promise<Thread> {
+  return toThread(await invoke<ThreadRow>('thread_summarize', { threadId: Number(threadId) }), lang)
 }
 
 /** Without `note`, the stored note is kept. */
@@ -131,22 +131,24 @@ export async function updateConversation(conversationId: string, keigo: Keigo | 
   await invoke('conversation_update', { conversationId: Number(conversationId), keigo, note })
 }
 
+/** A reply in the other side's language, with its meaning in the user's. */
 export interface Reply {
-  ja: string
-  vi: string
+  text: string
+  meaning: string
 }
 
 export async function suggestReplies(args: { text: string; keigo: Keigo; conversationId: number | null; threadId: number | null }): Promise<Reply[]> {
   return invoke<Reply[]>('suggest_replies', args)
 }
 
-/** "vừa xong", "5 phút", "hôm qua"... */
-export function relativeTime(ms: number): string {
+/** "vừa xong", "5 phút", "hôm qua"... or "たった今", "5分前", "昨日"... */
+export function relativeTime(ms: number, lang: Lang): string {
   const minutes = Math.round((Date.now() - ms) / 60000)
-  if (minutes < 1) return 'vừa xong'
-  if (minutes < 60) return `${minutes} phút`
+  if (minutes < 1) return pick(lang, 'vừa xong', 'たった今')
+  if (minutes < 60) return pick(lang, `${minutes} phút`, `${minutes}分前`)
   const hours = Math.round(minutes / 60)
-  if (hours < 24) return `${hours} giờ`
+  if (hours < 24) return pick(lang, `${hours} giờ`, `${hours}時間前`)
   const days = Math.round(hours / 24)
-  return days === 1 ? 'hôm qua' : `${days} ngày`
+  if (days === 1) return pick(lang, 'hôm qua', '昨日')
+  return pick(lang, `${days} ngày`, `${days}日前`)
 }

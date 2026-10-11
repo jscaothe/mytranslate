@@ -9,6 +9,8 @@ use std::sync::Mutex;
 use serde::Deserialize;
 use serde_json::Value;
 
+use crate::lang::Lang;
+
 /// Tells every window the settings changed. `from` is the window (or "tray") that changed them, so that window
 /// can ignore its own change.
 pub fn broadcast(app: &tauri::AppHandle, value: &Value, from: &str) {
@@ -79,6 +81,39 @@ impl SettingsStore {
         self.field("hotkeys").unwrap_or_default()
     }
 
+    /// The user's own language. Until it is chosen: Vietnamese for anyone who already used the app (every user
+    /// before the language setting was Vietnamese, often with a Japanese keyboard that puts Japanese first in
+    /// the Windows language list), the language of Windows for a new user (who can change it on the first screen).
+    pub fn language(&self) -> Lang {
+        self.field::<String>("language")
+            .and_then(|c| Lang::parse(&c))
+            .unwrap_or_else(|| {
+                if self.flag("onboarded") {
+                    Lang::Vi
+                } else {
+                    Lang::system()
+                }
+            })
+    }
+
+    /// The settings for the page, with the language filled in when it was never chosen, so every window and
+    /// the Rust side agree on it from the first start.
+    pub fn get_for_page(&self) -> Value {
+        let mut value = self.get();
+        if !value.is_object() {
+            value = Value::Object(Default::default());
+        }
+        if value
+            .get("language")
+            .and_then(Value::as_str)
+            .and_then(Lang::parse)
+            .is_none()
+        {
+            value["language"] = Value::String(self.language().code().into());
+        }
+        value
+    }
+
     pub fn hotkeys_paused(&self) -> bool {
         self.field("hotkeysPaused").unwrap_or(false)
     }
@@ -131,6 +166,25 @@ mod tests {
         assert_eq!(s.hotkeys(), Hotkeys::default());
         assert!(!s.hotkeys_paused());
         assert_eq!(s.model(), None);
+        assert_eq!(s.language(), Lang::system());
+        assert_eq!(s.get_for_page()["language"], Lang::system().code());
+    }
+
+    #[test]
+    fn chosen_language_wins_over_windows() {
+        let path = temp_path("language");
+        let s = SettingsStore::load(path.clone());
+        s.set(serde_json::json!({ "language": "ja", "model": "sonnet" }))
+            .unwrap();
+        assert_eq!(s.language(), Lang::Ja);
+        assert_eq!(s.get_for_page()["model"], "sonnet");
+        s.set(serde_json::json!({ "language": "xx" })).unwrap();
+        assert_eq!(s.language(), Lang::system());
+        // Someone who used the app before there was a language setting is Vietnamese.
+        s.set(serde_json::json!({ "onboarded": true })).unwrap();
+        assert_eq!(s.language(), Lang::Vi);
+        assert_eq!(s.get_for_page()["language"], "vi");
+        let _ = std::fs::remove_file(path);
     }
 
     #[test]

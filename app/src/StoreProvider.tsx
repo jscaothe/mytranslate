@@ -2,13 +2,16 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { conversations as mockConversations, initialGlossary, initialThreads } from './data/mock'
+import { mockData } from './data/mock'
 import { loadHistory } from './lib/history'
 import { isTauri } from './lib/claude'
+import { pick, systemLang } from './lib/i18n'
 import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
 import type { Conversation, Scenario, Thread, ThreadMessage } from './types'
 
 const defaultSettings: Settings = {
+  // The real app gets the saved language, or the language of Windows, from the Rust side.
+  language: systemLang(),
   theme: 'system',
   defaultKeigo: 'formal',
   model: 'sonnet',
@@ -37,18 +40,24 @@ const defaultSettings: Settings = {
   popupTipShown: false,
 }
 
+/** The prototype's sample conversations, as a user of the starting language would have them. */
+const mock = mockData(defaultSettings.language)
+
 export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'threads' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [mainTab, setMainTab] = useState<MainTab>(initialMainTab)
   const [scenario, setScenario] = useState<Scenario>('normal')
-  const [threads, setThreads] = useState<Thread[]>(isTauri ? [] : initialThreads)
-  const [conversations, setConversations] = useState(isTauri ? [] : mockConversations)
-  const [selectedThreadId, selectThread] = useState(initialThreads[0].id)
-  const [glossary, setGlossary] = useState(isTauri ? [] : initialGlossary)
+  const [threads, setThreads] = useState<Thread[]>(isTauri ? [] : mock.threads)
+  const [conversations, setConversations] = useState(isTauri ? [] : mock.conversations)
+  const [selectedThreadId, selectThread] = useState(mock.threads[0].id)
+  const [glossary, setGlossary] = useState(isTauri ? [] : mock.glossary)
   const [settings, setSettings] = useState(defaultSettings)
   const [toast, setToast] = useState<Toast | null>(null)
   const [popupGeometry, setPopupGeometry] = useState<PopupGeometry>({ width: DEFAULT_POPUP_WIDTH, height: null, position: null })
   const toastTimer = useRef<number | undefined>(undefined)
+  const settingsRef = useRef(defaultSettings)
+  /** Prototype only: when a thread was last active, in the user's language. */
+  const justNow = useCallback(() => pick(settingsRef.current.language, 'vừa xong', 'たった今'), [])
 
   const showToast = useCallback((text: string) => {
     window.clearTimeout(toastTimer.current)
@@ -65,20 +74,20 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     setThreads((ts) => {
       const target = ts.find((t) => t.id === threadId)
       if (!target) return ts
-      const updated = { ...target, lastActive: 'vừa xong', messages: [...target.messages, { ...msg, id: newId('m') }] }
+      const updated = { ...target, lastActive: justNow(), messages: [...target.messages, { ...msg, id: newId('m') }] }
       // Most recent thread first, like the real list.
       return [updated, ...ts.filter((t) => t.id !== threadId)]
     })
-  }, [])
+  }, [justNow])
 
   const createThread = useCallback((conversationId: string, title: string) => {
     const id = newId('t')
     setThreads((ts) => [
-      { id, conversationId, title, summary: 'Thread mới, chưa có tóm tắt.', lastActive: 'vừa xong', pinned: false, messages: [] },
+      { id, conversationId, title, summary: '', lastActive: justNow(), pinned: false, messages: [] },
       ...ts,
     ])
     return id
-  }, [])
+  }, [justNow])
 
   const updateThread = useCallback((id: string, patch: Partial<Thread>) => {
     setThreads((ts) =>
@@ -117,7 +126,6 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
 
   // In the real app the Rust side owns the settings: every window loads them, saves through it, and follows
   // changes made in other windows (the popup uses the keigo and model chosen in the main window).
-  const settingsRef = useRef(defaultSettings)
   const [settingsReady, setSettingsReady] = useState(!isTauri)
   const applySettings = useCallback((next: Settings) => {
     settingsRef.current = next
@@ -126,17 +134,40 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
 
   const updateSettings = useCallback(
     (patch: Partial<Settings>) => {
-      const next = { ...settingsRef.current, ...patch }
+      const before = settingsRef.current
+      const next = { ...before, ...patch }
       applySettings(next)
-      if (!isTauri) return
+      if (!isTauri) {
+        // The prototype: a user of the other language has other conversations.
+        if (next.language !== before.language) {
+          const data = mockData(next.language)
+          setConversations(data.conversations)
+          setThreads(data.threads)
+          setGlossary(data.glossary)
+          selectThread(data.threads[0].id)
+        }
+        return
+      }
       invoke<{ failedHotkeys: string[] }>('settings_set', { value: next })
         .then(({ failedHotkeys }) => {
-          if (failedHotkeys.length > 0) showToast(`Không đăng ký được ${failedHotkeys.join(', ')}: ứng dụng khác đang dùng tổ hợp này`)
+          if (failedHotkeys.length > 0)
+            showToast(
+              pick(
+                next.language,
+                `Không đăng ký được ${failedHotkeys.join(', ')}: ứng dụng khác đang dùng tổ hợp này`,
+                `${failedHotkeys.join('、')} を登録できません。別のアプリがこの組み合わせを使っています`,
+              ),
+            )
         })
-        .catch((e) => showToast(`Không lưu được cài đặt: ${String(e)}`))
+        .catch((e) => showToast(`${pick(next.language, 'Không lưu được cài đặt', '設定を保存できません')}: ${String(e)}`))
     },
     [applySettings, showToast],
   )
+
+  // The page's language follows the user's: screen readers, and Japanese line breaking.
+  useEffect(() => {
+    document.documentElement.lang = settings.language
+  }, [settings.language])
 
   // Real app: the tray menu and the popup can ask the main window to open a tab (for example Settings).
   useEffect(() => {
@@ -145,12 +176,14 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     return () => void off.then((f) => f())
   }, [])
 
-  // Real app: the Threads screen shows the history on this PC and refreshes after every filed translation.
+  // Real app: the Threads screen shows the history on this PC and refreshes after every filed translation
+  // (and in the new language, for the "5 minutes ago" texts).
+  const language = settings.language
   useEffect(() => {
     if (!isTauri) return
     let alive = true
     const refresh = () =>
-      void loadHistory().then((h) => {
+      void loadHistory(language).then((h) => {
         if (!alive) return
         setConversations(h.conversations)
         setThreads(h.threads)
@@ -161,7 +194,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       alive = false
       void off.then((f) => f())
     }
-  }, [])
+  }, [language])
 
   useEffect(() => {
     if (!isTauri) return

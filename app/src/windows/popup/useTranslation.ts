@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { emptySections, isTauri, startTranslation, type ErrorKind, type RateLimit, type Sections } from '../../lib/claude'
+import { useLang } from '../../lib/i18n'
 import type { Keigo, Scenario } from '../../types'
 
 export type TranslationPhase = 'waiting' | 'thinking' | 'streaming' | 'done' | 'error'
@@ -57,8 +58,9 @@ export function useTranslation({
   /** Translate with this AI and model; `null` uses the default. Changing it translates again. */
   ai?: { provider: string; model: string } | null
 }) {
+  const lang = useLang()
   const aiKey = ai ? `${ai.provider}:${ai.model}` : ''
-  const key = enabled ? `${runKey}|${direction}|${keigo}|${aiKey}|${text}` : null
+  const key = enabled ? `${runKey}|${direction}|${keigo}|${aiKey}|${lang}|${text}` : null
   const [state, setState] = useState<{ key: string | null; value: TranslationState }>({ key: null, value: initial })
 
   useEffect(() => {
@@ -71,7 +73,7 @@ export function useTranslation({
 
     const fake = !isTauri ? simulatedError[scenario] : undefined
     if (fake) {
-      const t = window.setTimeout(() => update({ phase: 'error', error: { kind: fake, message: 'Lỗi giả lập (prototype)', provider: 'claude' } }), 600)
+      const t = window.setTimeout(() => update({ phase: 'error', error: { kind: fake, message: 'Simulated error (prototype)', provider: 'claude' } }), 600)
       return () => window.clearTimeout(t)
     }
 
@@ -88,7 +90,7 @@ export function useTranslation({
       if (e.type === 'saved') update({ saved: { messageId: e.messageId, threadId: e.threadId, threadTitle: e.threadTitle } })
       if (e.type === 'error' && e.kind !== 'cancelled')
         update({ phase: 'error', error: { kind: e.kind, message: e.message, provider: e.provider ?? 'claude' } })
-    }).then((c) => {
+    }, lang).then((c) => {
       if (alive) cancel = c
       else c()
     })

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { quickActionMeta } from '../../components/quickActions'
 import { cx } from '../../components/styles'
 import { IconButton, Switch } from '../../components/ui'
+import { useLang, useT } from '../../lib/i18n'
 import type { QuickActionItem } from '../../store'
 
 /**
@@ -18,6 +19,8 @@ export function QuickActionOrderEditor({
   onChange: (items: QuickActionItem[]) => void
   onBlocked: (message: string) => void
 }) {
+  const t = useT()
+  const metas = quickActionMeta(useLang())
   const [dragIndex, setDragIndex] = useState<number | null>(null)
   /** Gap the dragged row would land in: 0 = before the first row, items.length = after the last. */
   const [dropGap, setDropGap] = useState<number | null>(null)
@@ -38,7 +41,7 @@ export function QuickActionOrderEditor({
 
   const toggle = (index: number, enabled: boolean) => {
     if (!enabled && items.filter((i) => i.enabled).length === 1) {
-      onBlocked('Cần giữ ít nhất một nút trên thanh thao tác')
+      onBlocked(t('Cần giữ ít nhất một nút trên thanh thao tác', 'ツールバーには少なくとも1つのボタンが必要です'))
       return
     }
     onChange(items.map((it, i) => (i === index ? { ...it, enabled } : it)))
@@ -50,9 +53,9 @@ export function QuickActionOrderEditor({
   }
 
   return (
-    <ol className="flex flex-col" aria-label="Thứ tự các nút trên thanh thao tác">
+    <ol className="flex flex-col" aria-label={t('Thứ tự các nút trên thanh thao tác', 'ツールバーのボタンの順番')}>
       {items.map((item, index) => {
-        const meta = quickActionMeta[item.id]
+        const meta = metas[item.id]
         const Icon = meta.icon
         return (
           <li
@@ -86,7 +89,7 @@ export function QuickActionOrderEditor({
                 if (row) e.dataTransfer.setDragImage(row, 24, 20)
               }}
               onDragEnd={endDrag}
-              title="Kéo để đổi thứ tự"
+              title={t('Kéo để đổi thứ tự', 'ドラッグして並べ替え')}
               className="flex h-8 w-5 shrink-0 cursor-grab items-center justify-center text-ink-3 hover:text-ink active:cursor-grabbing"
             >
               <GripVertical size={15} />
@@ -105,11 +108,16 @@ export function QuickActionOrderEditor({
               <div className="text-[12px] leading-snug text-ink-3">{meta.description}</div>
             </div>
             <div className="flex shrink-0 items-center">
-              <IconButton label={`Đưa "${meta.name}" lên`} disabled={index === 0} onClick={() => move(index, index - 1)} className="disabled:opacity-30">
+              <IconButton
+                label={t(`Đưa "${meta.name}" lên`, `「${meta.name}」を上へ`)}
+                disabled={index === 0}
+                onClick={() => move(index, index - 1)}
+                className="disabled:opacity-30"
+              >
                 <ArrowUp size={14} />
               </IconButton>
               <IconButton
-                label={`Đưa "${meta.name}" xuống`}
+                label={t(`Đưa "${meta.name}" xuống`, `「${meta.name}」を下へ`)}
                 disabled={index === items.length - 1}
                 onClick={() => move(index, index + 1)}
                 className="disabled:opacity-30"
@@ -117,7 +125,7 @@ export function QuickActionOrderEditor({
                 <ArrowDown size={14} />
               </IconButton>
             </div>
-            <Switch label={`Hiện nút ${meta.name}`} checked={item.enabled} onChange={(v) => toggle(index, v)} />
+            <Switch label={t(`Hiện nút ${meta.name}`, `「${meta.name}」ボタンを表示`)} checked={item.enabled} onChange={(v) => toggle(index, v)} />
           </li>
         )
       })}

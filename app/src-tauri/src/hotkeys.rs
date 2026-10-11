@@ -52,8 +52,8 @@ fn wanted(keys: &Hotkeys, paused: bool) -> Vec<(String, HotkeyAction)> {
     // Pausing stops the translation hotkeys only; the main window must stay reachable.
     if !paused {
         out.extend([
-            (keys.ja_vi.clone(), HotkeyAction::Popup(popup::Action::JaVi)),
-            (keys.vi_ja.clone(), HotkeyAction::Popup(popup::Action::ViJa)),
+            (keys.ja_vi.clone(), HotkeyAction::Popup(popup::Action::Read)),
+            (keys.vi_ja.clone(), HotkeyAction::Popup(popup::Action::Write)),
             (keys.auto.clone(), HotkeyAction::Popup(popup::Action::Auto)),
             (keys.review.clone(), HotkeyAction::Popup(popup::Action::Review)),
         ]);

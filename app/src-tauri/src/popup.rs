@@ -13,6 +13,7 @@ use tauri::{
 use crate::capture;
 use crate::context::{self, ChatApp, Context};
 use crate::history::{self, History, ThreadInfo};
+use crate::lang::Lang;
 use crate::placement::{self, Anchor, Rect};
 use crate::settings::SettingsStore;
 use crate::threads::{self, Candidate, Confidence};
@@ -41,8 +42,10 @@ pub struct Span {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
-    JaVi,
-    ViJa,
+    /// Read a message from the other side, in the user's language (Ctrl+Alt+J).
+    Read,
+    /// Write in the user's language and send it in the other side's (Ctrl+Alt+K), usually from the message box.
+    Write,
     Auto,
     /// Check Japanese the user wrote, usually in the message box.
     Review,
@@ -56,7 +59,7 @@ pub enum Direction {
     ReviewJa,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Origin {
     /// Text selected in the conversation: the result is read or copied.
@@ -100,6 +103,7 @@ fn detect_thread(
     history: &History,
     ctx: &Context,
     text: &str,
+    lang: Lang,
 ) -> (Option<i64>, Option<i64>, Confidence, Vec<ThreadInfo>) {
     let app = match ctx.app {
         ChatApp::Slack => "slack",
@@ -107,7 +111,7 @@ fn detect_thread(
         ChatApp::Other => "other",
     };
     let name = match ctx.conversation.trim() {
-        "" => "Khác",
+        "" => lang.pick("Khác", "その他"),
         n => n,
     };
     let conversation = match history.upsert_conversation(app, name, ctx.workspace.as_deref().unwrap_or("")) {
@@ -303,7 +307,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
         }
         // Only a message box is safe to select-all; in the message list Ctrl+A would grab the whole page.
         // A mouse selection is never extended.
-        let select_all = !from_toolbar && matches!(action, Action::ViJa | Action::Review);
+        let select_all = !from_toolbar && matches!(action, Action::Write | Action::Review);
         let (text, error) = match capture::copy_selection(select_all) {
             Ok(Some(t)) => (t, None),
             Ok(None) => (String::new(), Some("no_selection".to_string())),
@@ -313,27 +317,12 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             }
         };
         log::info!("captured {} chars, error: {error:?}", text.chars().count());
-        let direction = match action {
-            Action::JaVi => Direction::JaVi,
-            // Ctrl+Alt+K on Japanese text: the user wants to read it, not to replace it.
-            Action::ViJa if is_japanese_only(&text) => Direction::JaVi,
-            Action::ViJa => Direction::ViJa,
-            Action::Auto if has_japanese(&text) => Direction::JaVi,
-            Action::Auto => Direction::ViJa,
-            // Nothing Japanese to check: translate the Vietnamese instead of reviewing it.
-            Action::Review if !has_japanese(&text) => Direction::ViJa,
-            Action::Review => Direction::ReviewJa,
-        };
-        // Results the user writes (translation into Japanese, corrected Japanese) replace the message box text.
-        let origin = if direction == Direction::JaVi {
-            Origin::Chat
-        } else {
-            Origin::Composer
-        };
+        let lang = app.state::<SettingsStore>().language();
+        let (direction, origin) = route(action, &text, lang);
 
         let history = app.state::<History>();
         let (conversation_id, thread_id, confidence, threads) = if error.is_none() {
-            detect_thread(&history, &ctx, &text)
+            detect_thread(&history, &ctx, &text, lang)
         } else {
             (None, None, Confidence::High, Vec::new())
         };
@@ -465,6 +454,36 @@ fn own_exe_name() -> String {
         .unwrap_or_default()
 }
 
+/// Which way to translate, and where the result goes: what the user writes (a translation into the other
+/// side's language, corrected Japanese) replaces the message box text; what they read is only shown.
+pub fn route(action: Action, text: &str, lang: Lang) -> (Direction, Origin) {
+    // The text's own language decides when it is clear; the user's language decides "read" and "write".
+    let japanese = is_japanese_only(text);
+    let vietnamese = !has_japanese(text);
+    let (read, write) = match lang {
+        Lang::Vi => (Direction::JaVi, Direction::ViJa),
+        Lang::Ja => (Direction::ViJa, Direction::JaVi),
+    };
+    let direction = match (action, lang) {
+        (Action::Read, _) => read,
+        // Ctrl+Alt+K on text already in the other side's language: the user wants to read it, not replace it.
+        (Action::Write, Lang::Vi) if japanese => read,
+        (Action::Write, Lang::Ja) if vietnamese => read,
+        (Action::Write, _) => write,
+        (Action::Auto, _) if has_japanese(text) => Direction::JaVi,
+        (Action::Auto, _) => Direction::ViJa,
+        // Nothing Japanese to check: translate the Vietnamese instead of reviewing it.
+        (Action::Review, _) if vietnamese => Direction::ViJa,
+        (Action::Review, _) => Direction::ReviewJa,
+    };
+    let origin = if direction == read {
+        Origin::Chat
+    } else {
+        Origin::Composer
+    };
+    (direction, origin)
+}
+
 /// Japanese with at most a few Latin words (API, UAT, file names...). Vietnamese always brings Latin letters,
 /// usually with diacritics, so a handful of plain Latin words alone do not make a text Vietnamese.
 pub fn is_japanese_only(text: &str) -> bool {
@@ -576,6 +595,29 @@ mod tests {
         assert!(is_japanese_only("UATのAPIはデプロイ済みです。"));
         assert!(!is_japanese_only("Em đã deploy rồi, nhờ anh kiểm tra màn hình 仕訳"));
         assert!(!is_japanese_only("Please check the deploy result today"));
+    }
+
+    #[test]
+    fn routes_follow_the_users_language() {
+        let ja = "確認お願いします。";
+        let vi = "Em đã sửa xong rồi ạ.";
+        // A Vietnamese user reads Japanese and writes Vietnamese.
+        assert_eq!(route(Action::Read, ja, Lang::Vi), (Direction::JaVi, Origin::Chat));
+        assert_eq!(route(Action::Write, vi, Lang::Vi), (Direction::ViJa, Origin::Composer));
+        assert_eq!(route(Action::Write, ja, Lang::Vi), (Direction::JaVi, Origin::Chat));
+        assert_eq!(route(Action::Auto, vi, Lang::Vi), (Direction::ViJa, Origin::Composer));
+        // A Japanese user reads Vietnamese and writes Japanese.
+        assert_eq!(route(Action::Read, vi, Lang::Ja), (Direction::ViJa, Origin::Chat));
+        assert_eq!(route(Action::Write, ja, Lang::Ja), (Direction::JaVi, Origin::Composer));
+        assert_eq!(route(Action::Write, vi, Lang::Ja), (Direction::ViJa, Origin::Chat));
+        assert_eq!(route(Action::Auto, ja, Lang::Ja), (Direction::JaVi, Origin::Composer));
+        assert_eq!(route(Action::Auto, vi, Lang::Ja), (Direction::ViJa, Origin::Chat));
+        // Checking Japanese works the same for both; Vietnamese text is translated instead.
+        assert_eq!(
+            route(Action::Review, ja, Lang::Ja),
+            (Direction::ReviewJa, Origin::Composer)
+        );
+        assert_eq!(route(Action::Review, vi, Lang::Vi), (Direction::ViJa, Origin::Composer));
     }
 
     #[test]

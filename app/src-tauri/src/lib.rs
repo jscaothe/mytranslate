@@ -6,6 +6,7 @@ mod credentials;
 mod export;
 mod history;
 mod hotkeys;
+pub mod lang;
 mod placement;
 mod popup;
 pub mod prompt;
@@ -31,6 +32,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use history::{History, NewMessage};
 use hotkeys::{HotkeyAction, HotkeyState};
+use lang::Lang;
 use prompt::{Direction, Keigo, ThreadMessage, TranslateRequest};
 use provider::Router;
 use provider::claude_cli::{ClaudeCli, Timing, TranslateEvent};
@@ -79,12 +81,9 @@ fn thread_context(history: &History, thread_id: i64, limit: usize) -> Option<(St
         .recent_messages(thread.id, limit)
         .unwrap_or_default()
         .iter()
-        .map(|m| {
-            let (from_client, text) = m.japanese();
-            ThreadMessage {
-                from_client,
-                text: text.to_string(),
-            }
+        .map(|m| ThreadMessage {
+            from_client: !m.mine,
+            text: m.japanese().to_string(),
         })
         .collect();
     Some((thread.title, messages))
@@ -142,7 +141,16 @@ async fn complete(app: &AppHandle, router: &Arc<Router>, request: TranslateReque
         })
         .await;
     let r = result.lock().unwrap().take();
-    r.unwrap_or_else(|| Err("AI không trả lời".into()))
+    r.unwrap_or_else(|| Err(language(app).pick("AI không trả lời", "AIから応答がありません").into()))
+}
+
+fn language(app: &AppHandle) -> Lang {
+    app.state::<SettingsStore>().language()
+}
+
+/// Title of a thread the user did not name.
+fn new_thread_title(lang: Lang) -> String {
+    lang.pick("Thread mới", "新しいスレッド").to_string()
 }
 
 /// Translates with the thread's recent messages as context, then files the result in the history.
@@ -178,6 +186,7 @@ async fn translate(
     // Only the terms that occur in this text: a short prompt keeps the first character fast.
     request.glossary = glossary_for(&app, &request.text);
     request.conversation_note = conversation_note(&app, request.conversation_id);
+    request.user_lang = language(&app);
 
     let router = router.inner().clone();
     let filed = request.clone();
@@ -209,6 +218,11 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
         Direction::Summarize | Direction::Reply => return None,
     };
+    // The user's own message goes from their language into the other side's; a review is always theirs.
+    let mine = !matches!(
+        (req.direction, req.user_lang),
+        (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja)
+    );
     if result.trim().is_empty() {
         return None;
     }
@@ -233,6 +247,7 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
     };
     let message = NewMessage {
         direction,
+        mine,
         source: &req.text,
         result,
         back,
@@ -254,19 +269,25 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
     }
 }
 
-/// The start of the Vietnamese side, when Claude gave no title.
+/// The start of the side in the user's language, when Claude gave no title.
 fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
-    let vietnamese = match req.direction {
-        Direction::JaVi => s.translation.as_str(),
-        Direction::ViJa => req.text.as_str(),
-        Direction::ReviewJa => s.suggestion_vi.as_str(),
-        Direction::Summarize | Direction::Reply => "",
+    let own = match (req.direction, req.user_lang) {
+        (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja) => s.translation.as_str(),
+        (Direction::ViJa, Lang::Vi) | (Direction::JaVi, Lang::Ja) => req.text.as_str(),
+        (Direction::ReviewJa, Lang::Vi) => s.suggestion_vi.as_str(),
+        (Direction::ReviewJa, Lang::Ja) => s.suggestion.as_str(),
+        (Direction::Summarize | Direction::Reply, _) => "",
     };
-    let words: Vec<&str> = vietnamese.split_whitespace().take(8).collect();
-    if words.is_empty() {
-        "Thread mới".to_string()
+    // Japanese has no spaces between words: keep the first characters instead.
+    let title = if req.user_lang == Lang::Ja {
+        own.trim().lines().next().unwrap_or("").chars().take(20).collect()
     } else {
-        words.join(" ")
+        own.split_whitespace().take(8).collect::<Vec<_>>().join(" ")
+    };
+    if title.is_empty() {
+        new_thread_title(req.user_lang)
+    } else {
+        title
     }
 }
 
@@ -320,7 +341,7 @@ fn history_move(
         (None, title) => {
             let title = title
                 .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| "Thread mới".into());
+                .unwrap_or_else(|| new_thread_title(language(&app)));
             (
                 history
                     .create_thread(conversation_id, &title)
@@ -356,9 +377,9 @@ async fn data_backup(app: AppHandle) -> Result<Option<String>, String> {
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Sao lưu dữ liệu MyTranslate")
+        .set_title(language(&app).pick("Sao lưu dữ liệu MyTranslate", "MyTranslate のデータをバックアップ"))
         .set_file_name(name)
-        .add_filter("Bản sao lưu MyTranslate", &["db"]);
+        .add_filter(backup_filter(language(&app)), &["db"]);
     if let Some(main) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&main);
     }
@@ -378,8 +399,8 @@ async fn data_restore(app: AppHandle) -> Result<bool, String> {
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Khôi phục dữ liệu MyTranslate")
-        .add_filter("Bản sao lưu MyTranslate", &["db"]);
+        .set_title(language(&app).pick("Khôi phục dữ liệu MyTranslate", "MyTranslate のデータを復元"))
+        .add_filter(backup_filter(language(&app)), &["db"]);
     if let Some(main) = app.get_webview_window("main") {
         dialog = dialog.set_parent(&main);
     }
@@ -389,9 +410,13 @@ async fn data_restore(app: AppHandle) -> Result<bool, String> {
     let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
         return Ok(false);
     };
-    app.state::<History>().restore_from(&path)?;
+    app.state::<History>().restore_from(&path, language(&app))?;
     let _ = app.emit("history:changed", ());
     Ok(true)
+}
+
+fn backup_filter(lang: Lang) -> &'static str {
+    lang.pick("Bản sao lưu MyTranslate", "MyTranslate バックアップ")
 }
 
 /// Deletes all history and personal glossary terms; the settings stay.
@@ -459,12 +484,13 @@ async fn history_export(app: AppHandle, thread_id: i64) -> Result<Option<String>
         .conversation(thread.conversation_id)
         .map_err(|e| e.to_string())?;
     let messages = history.messages(thread_id).map_err(|e| e.to_string())?;
-    let markdown = export::thread_markdown(conversation.as_ref(), &thread, &messages);
+    let lang = language(&app);
+    let markdown = export::thread_markdown(lang, conversation.as_ref(), &thread, &messages);
 
     let mut dialog = app
         .dialog()
         .file()
-        .set_title("Xuất thread ra Markdown")
+        .set_title(lang.pick("Xuất thread ra Markdown", "スレッドを Markdown で書き出す"))
         .set_file_name(export::file_name(&thread.title))
         .add_filter("Markdown", &["md"]);
     if let Some(main) = app.get_webview_window("main") {
@@ -480,7 +506,7 @@ async fn history_export(app: AppHandle, thread_id: i64) -> Result<Option<String>
     Ok(Some(path.display().to_string()))
 }
 
-/// Summarizes a thread in Vietnamese with Claude and stores the summary.
+/// Summarizes a thread in the user's language and stores the summary.
 #[tauri::command]
 async fn thread_summarize(
     app: AppHandle,
@@ -489,15 +515,21 @@ async fn thread_summarize(
 ) -> Result<history::ThreadInfo, String> {
     let history = app.state::<History>();
     let (title, messages) = thread_context(&history, thread_id, SUMMARY_MESSAGES).ok_or("thread not found")?;
+    let lang = language(&app);
     if messages.is_empty() {
-        return Err("Thread chưa có tin nào".into());
+        return Err(lang
+            .pick("Thread chưa có tin nào", "このスレッドにはまだメッセージがありません")
+            .into());
     }
     let mut request = TranslateRequest::task(Direction::Summarize, "", Keigo::Polite);
     request.thread_title = Some(title);
     request.thread_messages = messages;
+    request.user_lang = lang;
     let sections = complete(&app, router.inner(), request).await?;
     if sections.summary.trim().is_empty() {
-        return Err("Claude không trả về tóm tắt".into());
+        return Err(lang
+            .pick("AI không trả về tóm tắt", "AIから要約が返りませんでした")
+            .into());
     }
     history
         .set_summary(thread_id, &sections.summary)
@@ -509,13 +541,14 @@ async fn thread_summarize(
         .ok_or_else(|| "thread not found".into())
 }
 
-#[derive(Serialize)]
+/// A reply in the other side's language, with its meaning in the user's.
+#[derive(Debug, PartialEq, Serialize)]
 struct Reply {
-    ja: String,
-    vi: String,
+    text: String,
+    meaning: String,
 }
 
-/// Three short replies the user could send to the client's message, with their meaning.
+/// Three short replies the user could send to the other side's message, with their meaning.
 #[tauri::command]
 async fn suggest_replies(
     app: AppHandle,
@@ -534,15 +567,22 @@ async fn suggest_replies(
     }
     request.glossary = glossary_for(&app, &text);
     request.conversation_note = conversation_note(&app, conversation_id);
+    request.user_lang = language(&app);
     let sections = complete(&app, router.inner(), request).await?;
     let replies = parse_replies(&sections.replies);
     if replies.is_empty() {
-        return Err("Claude không trả về gợi ý".into());
+        return Err(no_replies_error(&app));
     }
     Ok(replies)
 }
 
-/// "Japanese || Vietnamese" per line; a line without the separator is a reply without its meaning.
+fn no_replies_error(app: &AppHandle) -> String {
+    language(app)
+        .pick("AI không trả về gợi ý", "AIから返信案が返りませんでした")
+        .into()
+}
+
+/// "reply || meaning" per line; a line without the separator is a reply without its meaning.
 fn parse_replies(text: &str) -> Vec<Reply> {
     text.lines()
         .map(|l| {
@@ -552,16 +592,16 @@ fn parse_replies(text: &str) -> Vec<Reply> {
         })
         .filter(|l| !l.is_empty())
         .map(|l| match l.split_once("||") {
-            Some((ja, vi)) => Reply {
-                ja: ja.trim().to_string(),
-                vi: vi.trim().to_string(),
+            Some((text, meaning)) => Reply {
+                text: text.trim().to_string(),
+                meaning: meaning.trim().to_string(),
             },
             None => Reply {
-                ja: l.to_string(),
-                vi: String::new(),
+                text: l.to_string(),
+                meaning: String::new(),
             },
         })
-        .filter(|r| !r.ja.is_empty())
+        .filter(|r| !r.text.is_empty())
         .take(3)
         .collect()
 }
@@ -611,9 +651,18 @@ fn glossary_list(history: State<'_, History>) -> Result<Vec<history::GlossaryTer
 }
 
 #[tauri::command]
-fn glossary_add(history: State<'_, History>, ja: String, vi: String, note: String) -> Result<i64, String> {
+fn glossary_add(
+    history: State<'_, History>,
+    store: State<'_, SettingsStore>,
+    ja: String,
+    vi: String,
+    note: String,
+) -> Result<i64, String> {
     if ja.trim().is_empty() || vi.trim().is_empty() {
-        return Err("cần cả tiếng Nhật và tiếng Việt".into());
+        return Err(store
+            .language()
+            .pick("Cần cả tiếng Nhật và tiếng Việt", "日本語とベトナム語の両方が必要です")
+            .into());
     }
     history.add_glossary_term(&ja, &vi, &note).map_err(|e| e.to_string())
 }
@@ -679,8 +728,8 @@ fn chat_apps_installed() -> Vec<chat_apps::ChatApp> {
 }
 
 #[tauri::command]
-fn open_chat_app(app: chat_apps::ChatApp) -> Result<(), String> {
-    chat_apps::open(app)
+fn open_chat_app(store: State<'_, SettingsStore>, app: chat_apps::ChatApp) -> Result<(), String> {
+    chat_apps::open(app, store.language())
 }
 
 /// Opens a console running `claude`, where the user signs in with their Claude account.
@@ -702,7 +751,7 @@ fn clipboard_write(text: String) -> Result<(), String> {
 
 #[tauri::command]
 fn settings_get(store: State<'_, SettingsStore>) -> Value {
-    store.get()
+    store.get_for_page()
 }
 
 #[derive(Serialize)]
@@ -724,6 +773,9 @@ async fn settings_set(app: AppHandle, window: tauri::WebviewWindow, value: Value
     if changed("hotkeys") || changed("hotkeysPaused") {
         failed_hotkeys = hotkeys::apply(&app);
         tray::sync(&app);
+    }
+    if changed("language") {
+        tray::relabel(&app);
     }
     if changed("aiProvider")
         || changed("model")
@@ -930,13 +982,16 @@ mod tests {
             "1. 承知しました。 || Em đã hiểu.\n\n- 確認いたします。||Em sẽ kiểm tra.\nご連絡ありがとうございます。\n4つ目 || thừa",
         );
         assert_eq!(r.len(), 3);
-        assert_eq!((r[0].ja.as_str(), r[0].vi.as_str()), ("承知しました。", "Em đã hiểu."));
         assert_eq!(
-            (r[1].ja.as_str(), r[1].vi.as_str()),
+            (r[0].text.as_str(), r[0].meaning.as_str()),
+            ("承知しました。", "Em đã hiểu.")
+        );
+        assert_eq!(
+            (r[1].text.as_str(), r[1].meaning.as_str()),
             ("確認いたします。", "Em sẽ kiểm tra.")
         );
         assert_eq!(
-            (r[2].ja.as_str(), r[2].vi.as_str()),
+            (r[2].text.as_str(), r[2].meaning.as_str()),
             ("ご連絡ありがとうございます。", "")
         );
     }

@@ -1,6 +1,8 @@
 import { Hash, MessageSquare, Phone, Search, SendHorizontal, Users, Video } from 'lucide-react'
 import { forwardRef, useEffect, useRef } from 'react'
 import { cx } from '../components/styles'
+import { mockData } from '../data/mock'
+import { hasJapanese, useLang, useT } from '../lib/i18n'
 import type { ChatApp as ChatAppKind, ChatChannel } from '../types'
 
 const avatarColors = ['#c2410c', '#0f766e', '#7c3aed', '#be185d', '#1d4ed8']
@@ -36,6 +38,8 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
   { app, channels, activeId, onSelectChannel, composer, onComposer, onSend },
   composerRef,
 ) {
+  const t = useT()
+  const lang = useLang()
   const channel = channels.find((c) => c.id === activeId) ?? channels[0]
   const listRef = useRef<HTMLDivElement>(null)
   const lastCount = useRef(channel.messages.length)
@@ -60,12 +64,12 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
         <span className={cx('flex size-4 items-center justify-center rounded-[4px] text-[9.5px] font-bold text-white', slack ? 'bg-[#e01e5a]' : 'bg-[#5059c9]')}>
           {slack ? 'S' : 'T'}
         </span>
-        <span className="flex-1 truncate" title="Tiêu đề cửa sổ (app đọc để nhận diện cuộc hội thoại)">
+        <span className="flex-1 truncate" title={t('Tiêu đề cửa sổ (app đọc để nhận diện cuộc hội thoại)', 'ウィンドウのタイトル（アプリが会話の識別に使います）')}>
           {title}
         </span>
         <div className={cx('flex h-7 w-72 items-center gap-1.5 rounded-md px-2', slack ? 'bg-white/15' : 'bg-white dark:bg-white/10')}>
           <Search size={13} />
-          <span className="opacity-70">Tìm kiếm</span>
+          <span className="opacity-70">{t('Tìm kiếm', '検索')}</span>
         </div>
         <div className="flex-1" />
       </div>
@@ -77,7 +81,7 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
             {slack ? 'CustomerX' : 'Chat'}
           </div>
           <div className="px-2 text-[13px]">
-            <div className="px-2 pt-2 pb-1 text-[12px] font-semibold opacity-70">{slack ? 'Kênh' : 'Gần đây'}</div>
+            <div className="px-2 pt-2 pb-1 text-[12px] font-semibold opacity-70">{slack ? t('Kênh', 'チャンネル') : t('Gần đây', '最近')}</div>
             {channels.map((c) => (
               <button
                 key={c.id}
@@ -100,8 +104,8 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
             ))}
             {slack && (
               <>
-                <div className="px-2 pt-4 pb-1 text-[12px] font-semibold opacity-70">Tin nhắn trực tiếp</div>
-                {['Tanaka', 'Suzuki'].map((n) => (
+                <div className="px-2 pt-4 pb-1 text-[12px] font-semibold opacity-70">{t('Tin nhắn trực tiếp', 'ダイレクトメッセージ')}</div>
+                {mockData(lang).directMessages.map((n) => (
                   <div key={n} className="flex h-8 items-center gap-2 rounded-md px-2 opacity-60">
                     <span className="size-2 rounded-full bg-[#2bac76]" />
                     {n}
@@ -127,7 +131,7 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
           <div ref={listRef} data-chat-messages className="scroll-thin min-h-0 flex-1 overflow-y-auto px-4 py-3">
             <div className="mb-3 flex items-center gap-3 text-[12px] text-ink-3">
               <span className="h-px flex-1 bg-line" />
-              Hôm nay
+              {t('Hôm nay', '今日')}
               <span className="h-px flex-1 bg-line" />
             </div>
             {channel.messages.map((m) => (
@@ -138,7 +142,7 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
                     <span className="text-[14px] font-bold text-ink">{m.author}</span>
                     <span className="text-[12px] text-ink-3">{m.time}</span>
                   </div>
-                  <p lang="ja" className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-ink selection:bg-[#b4d5fe] dark:selection:bg-[#3b5a8c]">
+                  <p lang={hasJapanese(m.text) ? 'ja' : 'vi'} className="text-[14.5px] leading-relaxed whitespace-pre-wrap text-ink selection:bg-[#b4d5fe] dark:selection:bg-[#3b5a8c]">
                     {m.text}
                   </p>
                 </div>
@@ -160,14 +164,17 @@ export const ChatApp = forwardRef<HTMLTextAreaElement, Props>(function ChatApp(
                     onSend()
                   }
                 }}
-                placeholder={`Nhắn ${channel.kind === 'channel' ? '#' : ''}${channel.label}`}
+                placeholder={t(
+                  `Nhắn ${channel.kind === 'channel' ? '#' : ''}${channel.label}`,
+                  `${channel.kind === 'channel' ? '#' : ''}${channel.label} へのメッセージ`,
+                )}
                 className="block w-full resize-none bg-transparent px-3 pt-2.5 text-[14.5px] leading-relaxed text-ink placeholder:text-ink-3 focus:outline-none"
               />
               <div className="flex items-center justify-between px-2 pb-1.5">
-                <span className="px-1 text-[11.5px] text-ink-3">Enter để gửi, Shift+Enter xuống dòng</span>
+                <span className="px-1 text-[11.5px] text-ink-3">{t('Enter để gửi, Shift+Enter xuống dòng', 'Enter で送信、Shift+Enter で改行')}</span>
                 <button
                   type="button"
-                  aria-label="Gửi"
+                  aria-label={t('Gửi', '送信')}
                   disabled={!composer.trim()}
                   onClick={onSend}
                   className={cx(

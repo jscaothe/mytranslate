@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { cx, inputClass } from '../../components/styles'
 import { Button, IconButton } from '../../components/ui'
 import { runningApps } from '../../data/mock'
+import { useT } from '../../lib/i18n'
 import type { AppRef } from '../../store'
 
 const iconColors = ['#0f766e', '#c2410c', '#1d4ed8', '#be185d', '#15803d', '#7c3aed']
@@ -47,6 +48,7 @@ export function AppScopeEditor({
   onChange: (apps: AppRef[]) => void
   onError: (message: string) => void
 }) {
+  const t = useT()
   const [menuOpen, setMenuOpen] = useState(false)
   const [exe, setExe] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
@@ -65,11 +67,11 @@ export function AppScopeEditor({
   const addTyped = () => {
     const value = exe.trim()
     if (!/^[\w .+-]+\.exe$/i.test(value)) {
-      onError('Nhập tên file chương trình, ví dụ: Zalo.exe')
+      onError(t('Nhập tên file chương trình, ví dụ: Zalo.exe', 'プログラムのファイル名を入力してください（例: Zalo.exe）'))
       return
     }
     if (apps.some((a) => sameExe(a.exe, value))) {
-      onError(`${value} đã có trong danh sách`)
+      onError(t(`${value} đã có trong danh sách`, `${value} はすでにリストにあります`))
       return
     }
     const known = runningApps.find((r) => sameExe(r.exe, value))
@@ -80,7 +82,7 @@ export function AppScopeEditor({
   return (
     <div className="flex flex-col gap-2.5">
       {apps.length > 0 ? (
-        <ul className="divide-y divide-line rounded-md border border-line" aria-label="Ứng dụng hiện thanh thao tác">
+        <ul className="divide-y divide-line rounded-md border border-line" aria-label={t('Ứng dụng hiện thanh thao tác', 'ツールバーを表示するアプリ')}>
           {apps.map((app) => (
             <li key={app.exe} className="flex items-center gap-3 px-3 py-2">
               <AppIcon app={app} />
@@ -88,7 +90,7 @@ export function AppScopeEditor({
                 <div className="truncate text-[13.5px] text-ink">{app.name}</div>
                 <div className="truncate font-mono text-[11.5px] text-ink-3">{app.exe}</div>
               </div>
-              <IconButton label={`Bỏ ${app.name}`} onClick={() => onChange(apps.filter((a) => a.exe !== app.exe))}>
+              <IconButton label={t(`Bỏ ${app.name}`, `${app.name} を外す`)} onClick={() => onChange(apps.filter((a) => a.exe !== app.exe))}>
                 <X size={14} />
               </IconButton>
             </li>
@@ -97,14 +99,14 @@ export function AppScopeEditor({
       ) : (
         <div className="flex items-center gap-2 rounded-md bg-warn-soft px-3 py-2.5 text-[12.5px] text-ink">
           <AlertTriangle size={15} className="shrink-0 text-warn" />
-          Chưa chọn ứng dụng nào, thanh thao tác sẽ không hiện ở đâu cả.
+          {t('Chưa chọn ứng dụng nào, thanh thao tác sẽ không hiện ở đâu cả.', 'アプリが選ばれていないため、ツールバーはどこにも表示されません。')}
         </div>
       )}
 
       <div className="flex items-center gap-2">
         <div ref={menuRef} className="relative">
           <Button size="sm" disabled={candidates.length === 0} onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen}>
-            <Plus size={14} /> Thêm ứng dụng đang chạy <ChevronDown size={13} className="text-ink-3" />
+            <Plus size={14} /> {t('Thêm ứng dụng đang chạy', '実行中のアプリを追加')} <ChevronDown size={13} className="text-ink-3" />
           </Button>
           {menuOpen && (
             <ul
@@ -133,7 +135,7 @@ export function AppScopeEditor({
             </ul>
           )}
         </div>
-        <span className="text-[12px] text-ink-3">hoặc</span>
+        <span className="text-[12px] text-ink-3">{t('hoặc', 'または')}</span>
         <form
           className="flex flex-1 gap-2"
           onSubmit={(e) => {
@@ -144,12 +146,12 @@ export function AppScopeEditor({
           <input
             value={exe}
             onChange={(e) => setExe(e.target.value)}
-            placeholder="Tên file, vd: Zalo.exe"
-            aria-label="Tên file chương trình"
+            placeholder={t('Tên file, vd: Zalo.exe', 'ファイル名（例: Zalo.exe）')}
+            aria-label={t('Tên file chương trình', 'プログラムのファイル名')}
             className={cx(inputClass, 'h-7 min-w-0 flex-1 font-mono text-[12.5px] placeholder:font-sans')}
           />
           <Button size="sm" type="submit" disabled={!exe.trim()}>
-            Thêm
+            {t('Thêm', '追加')}
           </Button>
         </form>
       </div>

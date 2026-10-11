@@ -245,9 +245,18 @@ pub fn ai_key_set(app: AppHandle, provider: String, key: String) -> Result<(), S
 
 /// Text models the saved key can use, for the model picker.
 #[tauri::command]
-pub async fn ai_models(router: State<'_, Arc<Router>>, provider: String) -> Result<Vec<String>, String> {
+pub async fn ai_models(
+    router: State<'_, Arc<Router>>,
+    store: State<'_, SettingsStore>,
+    provider: String,
+) -> Result<Vec<String>, String> {
     let api = api(&provider).ok_or("unknown provider")?;
-    let key = credentials::get(&credential_name(api)).ok_or("Chưa nhập API key")?;
+    let key = credentials::get(&credential_name(api)).ok_or_else(|| {
+        store
+            .language()
+            .pick("Chưa nhập API key", "APIキーが未入力です")
+            .to_string()
+    })?;
     router.models(api, &key).await.map_err(|(_, m)| m)
 }
 

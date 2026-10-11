@@ -3,15 +3,30 @@ import { useEffect, useState } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { cx } from '../../components/styles'
+import { otherLang, useLang, type Lang } from '../../lib/i18n'
 import { useStore } from '../../store'
 
-const message = '明日の打ち合わせは15時からでよろしいでしょうか。'
-const translation = 'Cuộc họp ngày mai bắt đầu từ 15 giờ có được không ạ?'
+/** The other side's message and its translation, as each user sees them. */
+const sample: Record<Lang, { author: string; message: string; translation: string; direction: string; captions: string[] }> = {
+  vi: {
+    author: 'Tanaka',
+    message: '明日の打ち合わせは15時からでよろしいでしょうか。',
+    translation: 'Cuộc họp ngày mai bắt đầu từ 15 giờ có được không ạ?',
+    direction: 'Nhật → Việt',
+    captions: ['Bôi đen tin nhắn', 'Bấm Dịch', 'Đọc bản dịch'],
+  },
+  ja: {
+    author: 'Nguyễn',
+    message: 'Cuộc họp ngày mai bắt đầu từ 15 giờ được không anh?',
+    translation: '明日の打ち合わせは15時からでよろしいでしょうか。',
+    direction: 'ベトナム語 → 日本語',
+    captions: ['メッセージを選択', '「翻訳」をクリック', '訳を読む'],
+  },
+}
 
 /** idle, selecting, toolbar shown, popup shown. */
 type Phase = 0 | 1 | 2 | 3
 const durations: Record<Phase, number> = { 0: 900, 1: 1200, 2: 1400, 3: 3200 }
-const captions = ['Bôi đen tin nhắn', 'Bấm Dịch', 'Đọc bản dịch']
 
 const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -21,6 +36,8 @@ const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)'
  */
 export function HowItWorksDemo() {
   const { settings } = useStore()
+  const lang = useLang()
+  const { author, message, translation, direction, captions } = sample[lang]
   const [still] = useState(reducedMotion)
   const [phase, setPhase] = useState<Phase>(still ? 3 : 0)
 
@@ -41,12 +58,14 @@ export function HowItWorksDemo() {
           <AppBadge app="slack" className="size-3.5 text-[8px]" /> # customerx-dev
         </div>
         <div className="flex gap-2.5 px-3 pt-3">
-          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-[12px] font-semibold text-accent">T</span>
+          <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-accent-soft text-[12px] font-semibold text-accent">
+            {author.slice(0, 1)}
+          </span>
           <div className="min-w-0">
             <div className="text-[12px] font-semibold text-ink">
-              Tanaka <span className="font-normal text-ink-3">10:24</span>
+              {author} <span className="font-normal text-ink-3">10:24</span>
             </div>
-            <p lang="ja" className="text-[13.5px] leading-relaxed text-ink">
+            <p lang={otherLang(lang)} className="text-[13.5px] leading-relaxed text-ink">
               <span
                 className={cx(
                   'bg-[linear-gradient(#b4d5fe,#b4d5fe)] bg-no-repeat dark:bg-[linear-gradient(#3b5a8c,#3b5a8c)]',
@@ -62,7 +81,7 @@ export function HowItWorksDemo() {
 
         {phase === 2 && (
           <QuickActionBar
-            japanese
+            japanese={lang === 'vi'}
             items={settings.quickActions.items}
             display={settings.quickActions.display}
             onAction={() => undefined}
@@ -72,8 +91,10 @@ export function HowItWorksDemo() {
 
         {phase === 3 && (
           <div className="anim-popup absolute top-[96px] left-[48px] w-[360px] rounded-lg border border-line bg-window shadow-popup">
-            <div className="border-b border-line px-3 py-1.5 text-[11.5px] font-medium text-ink-3">Nhật → Việt</div>
-            <p className="px-3 py-2.5 text-[13.5px] leading-relaxed text-ink">{translation}</p>
+            <div className="border-b border-line px-3 py-1.5 text-[11.5px] font-medium text-ink-3">{direction}</div>
+            <p lang={lang} className="px-3 py-2.5 text-[13.5px] leading-relaxed text-ink">
+              {translation}
+            </p>
           </div>
         )}
 

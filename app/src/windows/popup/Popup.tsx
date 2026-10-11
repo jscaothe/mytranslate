@@ -20,8 +20,9 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNod
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
-import { conversations, keigoLabels } from '../../data/mock'
+import { keigoLabel } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
+import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role, type T } from '../../lib/i18n'
 import { relativeTime, setFeedback, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
 import { detectThread } from '../../lib/mockEngine'
 import { useStore } from '../../store'
@@ -59,6 +60,8 @@ export interface PopupProps {
 export function Popup({ request, container, onClose, onApply, onPinnedChange, windowed }: PopupProps) {
   const store = useStore()
   const { scenario, settings, threads, showToast } = store
+  const lang = useLang()
+  const t = useT()
   // A first-time tip about the keys, shown in the first real popup only (the guide's practice popup does not count).
   const [tipOpen, setTipOpen] = useState(() => !settings.popupTipShown && request.origin !== 'onboarding')
 
@@ -100,7 +103,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     rootRef,
   })
 
-  const conversation = conversations.find((c) => c.id === request.conversationId)
+  const conversation = store.conversations.find((c) => c.id === request.conversationId)
   const conversationThreads = threads.filter((t) => t.conversationId === request.conversationId)
 
   const [threadPick, setThreadPick] = useState<{ id: string | null; confidence: Confidence }>(() => {
@@ -110,6 +113,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const thread = threads.find((t) => t.id === threadPick.id) ?? null
 
   const isReview = direction === 'review_ja'
+  // Reading the other side, writing to them, or checking Japanese: the popup's actions follow from it.
+  const role = roleOf(direction, lang)
   // Translations and reviews stream from Claude (canned answers in the browser prototype).
   const live = useTranslation({
     direction,
@@ -171,7 +176,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     (realChoice.id !== null && realChoice.id === filedIn?.threadId ? filedIn.title : null) ??
     realThreads.find((t) => t.id === realChoice.id)?.title ??
     (realChoice.id === null || realChoice.id === saved?.threadId ? saved?.threadTitle : undefined) ??
-    'Thread mới'
+    t('Thread mới', '新しいスレッド')
   const pickerThreads = useMemo<Thread[]>(
     () =>
       realThreads.map((t) => ({
@@ -179,15 +184,15 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         conversationId: String(conversationId),
         title: t.title,
         summary: '',
-        lastActive: relativeTime(t.lastActive),
+        lastActive: relativeTime(t.lastActive, lang),
         pinned: false,
         messages: [],
       })),
-    [realThreads, conversationId],
+    [realThreads, conversationId, lang],
   )
   const reviewResult = useMemo(
-    () => (isReview && live.phase === 'done' ? toReview(source, live.sections) : null),
-    [isReview, live.phase, live.sections, source],
+    () => (isReview && live.phase === 'done' ? toReview(source, live.sections, t) : null),
+    [isReview, live.phase, live.sections, source, t],
   )
 
   const resultReady = live.phase === 'done'
@@ -245,19 +250,24 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const finalText = draft ?? resultText
 
-  const save = (finalJa?: string) => {
+  /** Prototype only: records the exchange in its thread (the real app files it on the Rust side). */
+  const save = (finalResult?: string) => {
     if (!resultReady) return
     let threadId = threadPick.id
-    if (!threadId) threadId = store.createThread(request.conversationId, 'Thread mới')
-    const time = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
-    if (direction === 'ja_vi') {
-      store.addMessage(threadId, { author: 'other', name: 'Khách', time, ja: source, vi: finalText })
-    } else if (direction === 'vi_ja') {
-      store.addMessage(threadId, { author: 'me', name: 'Tôi', time, ja: finalJa ?? finalText, vi: source })
-    } else if (reviewResult && finalJa !== undefined) {
+    if (!threadId) threadId = store.createThread(request.conversationId, t('Thread mới', '新しいスレッド'))
+    const time = new Date().toLocaleTimeString(locale(lang), { hour: '2-digit', minute: '2-digit' })
+    const me = t('Tôi', '自分')
+    if (isReview) {
       // A review is only recorded when the suggestion is used; keeping the original adds nothing to the thread.
-      store.addMessage(threadId, { author: 'me', name: 'Tôi', time, ja: finalJa, vi: reviewResult.suggestionVi })
+      if (reviewResult && finalResult !== undefined) {
+        store.addMessage(threadId, { author: 'me', name: me, time, ja: finalResult, vi: reviewResult.suggestionVi })
+      }
+      return
     }
+    const result = finalResult ?? finalText
+    const [ja, vi] = direction === 'ja_vi' ? [source, result] : [result, source]
+    const author = role === 'read' ? 'other' : 'me'
+    store.addMessage(threadId, { author, name: author === 'me' ? me : t('Khách', '相手'), time, ja, vi })
   }
 
   const close = () => {
@@ -280,14 +290,14 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const primary = () => {
     if (!resultReady) return
-    if (direction === 'ja_vi') return
+    if (role === 'read') return
     const text = finalText
     if (origin === 'composer' && onApply) {
       save(text)
       onApply(text)
       onClose()
     } else {
-      void copy(text, 'Đã sao chép, dán vào ô chat bằng Ctrl+V')
+      void copy(text, t('Đã sao chép, dán vào ô chat bằng Ctrl+V', 'コピーしました。Ctrl+V で入力欄に貼り付けてください'))
       save(text)
       onClose()
     }
@@ -305,14 +315,14 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const cycleKeigo = () => changeKeigo(keigoOrder[(keigoOrder.indexOf(keigo) + 1) % keigoOrder.length])
 
-  // Reply suggestions for a client message: three short Japanese replies with their meaning.
+  // Reply suggestions for the other side's message: three short replies in their language, with the meaning.
   const [replies, setReplies] = useState<{ state: 'idle' | 'loading' | 'error'; items: SuggestedReply[]; error?: string }>({ state: 'idle', items: [] })
   const askReplies = () => {
-    if (!resultReady || direction !== 'ja_vi' || replies.state === 'loading') return
+    if (!resultReady || role !== 'read' || replies.state === 'loading') return
     setReplies({ state: 'loading', items: [] })
     const done = (items: SuggestedReply[]) => setReplies({ state: 'idle', items })
     if (!windowed) {
-      window.setTimeout(() => done(MOCK_REPLIES), 700)
+      window.setTimeout(() => done(MOCK_REPLIES[lang]), 700)
       return
     }
     suggestReplies({ text: source, keigo, conversationId, threadId: saved?.threadId ?? realChoice.id })
@@ -328,7 +338,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     const text = replyText.trim()
     if (!text) return
     save()
-    setDirection('vi_ja')
+    setDirection(writeDirection(lang))
     setSource(text)
     setOrigin('popup')
     setReplyMode(false)
@@ -378,23 +388,23 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'c' && !inDraft && !window.getSelection()?.toString()) {
       e.preventDefault()
-      if (resultReady) void copy(finalText, 'Đã sao chép bản dịch')
+      if (resultReady) void copy(finalText, t('Đã sao chép bản dịch', '翻訳をコピーしました'))
       return
     }
-    if (e.key === 'Tab' && direction === 'vi_ja') {
+    if (e.key === 'Tab' && role === 'write') {
       e.preventDefault()
       cycleKeigo()
       return
     }
     if (e.key === 'Enter' && !e.shiftKey && (inDraft || !typing)) {
       e.preventDefault()
-      // On a client message Enter starts a reply. Not a letter key: a Vietnamese input method (UniKey) would
-      // count the letter as the start of the first word typed in the reply box and leave that word unconverted.
-      if (direction === 'ja_vi') startReply()
+      // On the other side's message Enter starts a reply. Not a letter key: an input method (UniKey, the
+      // Japanese IME) would count the letter as the start of the first word typed in the reply box.
+      if (role === 'read') startReply()
       else primary()
       return
     }
-    if (!typing && direction === 'ja_vi' && e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.altKey) {
+    if (!typing && role === 'read' && e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.altKey) {
       e.preventDefault()
       askReplies()
     }
@@ -432,27 +442,27 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         <>
           <div
             {...frame.resizeHandle('left')}
-            title="Kéo để đổi độ rộng, nhấp đúp để về mặc định"
+            title={t('Kéo để đổi độ rộng, nhấp đúp để về mặc định', 'ドラッグで幅を変更、ダブルクリックで元に戻す')}
             className="absolute top-3 bottom-3 -left-1 z-10 w-2 cursor-ew-resize rounded-full hover:bg-accent/40"
           />
           <div
             {...frame.resizeHandle('right')}
-            title="Kéo để đổi độ rộng, nhấp đúp để về mặc định"
+            title={t('Kéo để đổi độ rộng, nhấp đúp để về mặc định', 'ドラッグで幅を変更、ダブルクリックで元に戻す')}
             className="absolute top-3 bottom-3 -right-1 z-10 w-2 cursor-ew-resize rounded-full hover:bg-accent/40"
           />
           <div
             {...frame.resizeHandle('bottom')}
-            title="Kéo để đổi chiều cao, nhấp đúp để tự co theo nội dung"
+            title={t('Kéo để đổi chiều cao, nhấp đúp để tự co theo nội dung', 'ドラッグで高さを変更、ダブルクリックで内容に合わせる')}
             className="absolute inset-x-3 -bottom-1 z-10 h-2 cursor-ns-resize rounded-full hover:bg-accent/40"
           />
           <div
             {...frame.resizeHandle('bottom-left')}
-            title="Kéo để đổi kích thước"
+            title={t('Kéo để đổi kích thước', 'ドラッグでサイズを変更')}
             className="absolute -bottom-1 -left-1 z-10 size-3.5 cursor-nesw-resize"
           />
           <div
             {...frame.resizeHandle('bottom-right')}
-            title="Kéo để đổi kích thước"
+            title={t('Kéo để đổi kích thước', 'ドラッグでサイズを変更')}
             className="absolute -right-1 -bottom-1 z-10 size-3.5 cursor-nwse-resize"
           />
         </>
@@ -473,14 +483,16 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
           <button
             type="button"
             onClick={() => setPickerOpen((o) => !o)}
-            title={`Đổi thread (Ctrl+T)${request.window?.workspace ? ` · ${request.window.workspace}` : ''}`}
+            title={`${t('Đổi thread', 'スレッドを変更')} (Ctrl+T)${request.window?.workspace ? ` · ${request.window.workspace}` : ''}`}
             className={cx(
               'flex h-7 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-hover',
               realChoice.confidence === 'low' && 'border border-dashed border-warn',
             )}
           >
             <AppBadge app={request.app} />
-            <span className="max-w-[110px] shrink-0 truncate text-[12.5px] text-ink-2">{request.window?.conversation || 'Ứng dụng khác'}</span>
+            <span className="max-w-[110px] shrink-0 truncate text-[12.5px] text-ink-2">
+              {request.window?.conversation || t('Ứng dụng khác', 'その他のアプリ')}
+            </span>
             <span className="shrink-0 text-ink-3">›</span>
             <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{realTitle}</span>
             <ConfidenceMark confidence={realChoice.confidence} />
@@ -490,7 +502,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         <button
           type="button"
           onClick={() => setPickerOpen((o) => !o)}
-          title="Đổi thread (Ctrl+T)"
+          title={`${t('Đổi thread', 'スレッドを変更')} (Ctrl+T)`}
           className={cx(
             'flex h-7 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-hover',
             threadPick.confidence === 'low' && 'border border-dashed border-warn',
@@ -498,10 +510,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         >
           <AppBadge app={request.app} />
           <span className="max-w-[96px] shrink-0 truncate text-[12.5px] text-ink-2" title={conversation ? `${conversation.workspace} ${conversation.name}` : undefined}>
-            {conversation?.name ?? 'Khác'}
+            {conversation?.name ?? t('Khác', 'その他')}
           </span>
           <span className="shrink-0 text-ink-3">›</span>
-          <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{thread?.title ?? 'Thread mới'}</span>
+          <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{thread?.title ?? t('Thread mới', '新しいスレッド')}</span>
           <ConfidenceMark confidence={threadPick.confidence} />
           <ChevronDown size={13} className="shrink-0 text-ink-3" />
         </button>
@@ -518,14 +530,18 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
           onManage={manageAi}
         />
         {((container && frame.customized) || windowed?.customized) && (
-          <IconButton label="Đặt lại vị trí và kích thước" onClick={windowed ? windowed.onReset : frame.reset}>
+          <IconButton label={t('Đặt lại vị trí và kích thước', '位置とサイズを元に戻す')} onClick={windowed ? windowed.onReset : frame.reset}>
             <RotateCcw size={13} />
           </IconButton>
         )}
-        <IconButton label={pinned ? 'Bỏ ghim (Ctrl+P)' : 'Ghim popup (Ctrl+P)'} active={pinned} onClick={() => setPinned((p) => !p)}>
+        <IconButton
+          label={pinned ? t('Bỏ ghim (Ctrl+P)', 'ピン留めを解除 (Ctrl+P)') : t('Ghim popup (Ctrl+P)', 'ポップアップをピン留め (Ctrl+P)')}
+          active={pinned}
+          onClick={() => setPinned((p) => !p)}
+        >
           <Pin size={14} />
         </IconButton>
-        <IconButton label="Đóng (Esc)" onClick={close}>
+        <IconButton label={t('Đóng (Esc)', '閉じる (Esc)')} onClick={close}>
           <X size={15} />
         </IconButton>
         {pickerOpen && windowed && (
@@ -560,7 +576,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
               setThreadPick({ id, confidence: 'high' })
               setPickerOpen(false)
               rootRef.current?.focus()
-              showToast('Đã chuyển sang thread khác, lần sau sẽ ưu tiên thread này')
+              showToast(t('Đã chuyển sang thread khác, lần sau sẽ ưu tiên thread này', '別のスレッドに移動しました。次回からこのスレッドを優先します'))
             }}
             onCreate={(title) => {
               const id = store.createThread(request.conversationId, title)
@@ -575,23 +591,38 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div ref={bodyRef}>
         {notice ? (
-          <Banner tone="warn" icon={<AlertTriangle size={16} />} title={notice === 'no_selection' ? 'Chưa chọn đoạn văn bản nào' : 'Không đọc được clipboard'}>
+          <Banner
+            tone="warn"
+            icon={<AlertTriangle size={16} />}
+            title={
+              notice === 'no_selection'
+                ? t('Chưa chọn đoạn văn bản nào', 'テキストが選択されていません')
+                : t('Không đọc được clipboard', 'クリップボードを読み取れません')
+            }
+          >
             {notice === 'no_selection'
-              ? 'Bôi đen tin nhắn cần dịch, hoặc đặt con trỏ trong ô chat có chữ, rồi nhấn phím tắt lại.'
-              : 'Ứng dụng khác đang giữ clipboard. Hãy thử lại.'}
+              ? t(
+                  'Bôi đen tin nhắn cần dịch, hoặc đặt con trỏ trong ô chat có chữ, rồi nhấn phím tắt lại.',
+                  '翻訳したいメッセージを選択するか、文字のある入力欄にカーソルを置いて、もう一度ショートカットを押してください。',
+                )
+              : t('Ứng dụng khác đang giữ clipboard. Hãy thử lại.', '別のアプリがクリップボードを使用中です。もう一度お試しください。')}
           </Banner>
         ) : (
         <>
 
         {!longConfirmed ? (
-          <Banner tone="warn" icon={<AlertTriangle size={16} />} title={`Văn bản dài ${source.length.toLocaleString('vi-VN')} ký tự`}>
-            Dịch đoạn dài sẽ mất nhiều thời gian và hạn mức hơn.
+          <Banner
+            tone="warn"
+            icon={<AlertTriangle size={16} />}
+            title={t(`Văn bản dài ${source.length.toLocaleString('vi-VN')} ký tự`, `${source.length.toLocaleString('ja-JP')} 文字の長い文章です`)}
+          >
+            {t('Dịch đoạn dài sẽ mất nhiều thời gian và hạn mức hơn.', '長い文章の翻訳には時間と利用枠が多く必要です。')}
             <div className="mt-2 flex gap-2">
               <Button size="sm" variant="primary" onClick={() => setLongConfirmed(true)}>
-                Tiếp tục
+                {t('Tiếp tục', '続ける')}
               </Button>
               <Button size="sm" onClick={onClose}>
-                Hủy
+                {t('Hủy', 'キャンセル')}
               </Button>
             </div>
           </Banner>
@@ -608,6 +639,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         ) : (
           <TranslationBody
             direction={direction}
+            role={role}
             stream={{
               text: live.sections.translation,
               started: live.sections.translation !== '',
@@ -618,28 +650,31 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             back={live.sections.backTranslation || undefined}
           />
         )}
-        {direction === 'ja_vi' && (replies.state !== 'idle' || replies.items.length > 0) ? (
+        {role === 'read' && (replies.state !== 'idle' || replies.items.length > 0) ? (
           <RepliesBlock
             state={replies.state}
             items={replies.items}
             error={replies.error}
             onRetry={askReplies}
-            onCopy={(r) => void copy(r.ja, 'Đã sao chép câu trả lời')}
+            onCopy={(r) => void copy(r.text, t('Đã sao chép câu trả lời', '返信をコピーしました'))}
           />
         ) : null}
         {autoCopied && (
           <div role="status" className="flex items-center gap-1.5 border-t border-line px-4 py-2 text-[12.5px] font-medium text-good">
-            <Copy size={13} /> Đã sao chép bản dịch
+            <Copy size={13} /> {t('Đã sao chép bản dịch', '翻訳をコピーしました')}
           </div>
         )}
         {resultReady && live.answeredBy?.fallbackFrom && (
           <div className="border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
-            {aiName(live.answeredBy.fallbackFrom)} không dịch được, đã dịch bằng {aiName(live.answeredBy.provider)} ({live.answeredBy.model})
+            {t(
+              `${aiName(live.answeredBy.fallbackFrom)} không dịch được, đã dịch bằng ${aiName(live.answeredBy.provider)} (${live.answeredBy.model})`,
+              `${aiName(live.answeredBy.fallbackFrom)} で翻訳できなかったため、${aiName(live.answeredBy.provider)}（${live.answeredBy.model}）で翻訳しました`,
+            )}
           </div>
         )}
         {tipVisible && (
           <FirstTip
-            direction={direction}
+            role={role}
             origin={origin}
             onDismiss={() => {
               setTipOpen(false)
@@ -665,21 +700,22 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
               rows={2}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              placeholder="Gõ câu trả lời bằng tiếng Việt..."
+              placeholder={t('Gõ câu trả lời bằng tiếng Việt...', '日本語で返信を入力…')}
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
             <div className="flex items-center justify-end gap-2">
               <Button size="sm" variant="ghost" onClick={() => setReplyMode(false)}>
-                Hủy <Kbd>Esc</Kbd>
+                {t('Hủy', 'キャンセル')} <Kbd>Esc</Kbd>
               </Button>
               <Button size="sm" variant="primary" disabled={!replyText.trim()} onClick={submitReply}>
-                Dịch sang tiếng Nhật <Kbd className="h-4 border-transparent bg-white/25 text-on-accent">Ctrl+Enter</Kbd>
+                {t('Dịch sang tiếng Nhật', 'ベトナム語に翻訳')}{' '}
+                <Kbd className="h-4 border-transparent bg-white/25 text-on-accent">Ctrl+Enter</Kbd>
               </Button>
             </div>
           </div>
         ) : (
           <FooterActions
-            direction={direction}
+            role={role}
             origin={origin}
             ready={resultReady}
             keigo={keigo}
@@ -690,11 +726,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             onReply={startReply}
             onSuggest={askReplies}
             suggesting={replies.state === 'loading'}
-            onCopy={() => void copy(finalText, 'Đã sao chép bản dịch')}
+            onCopy={() => void copy(finalText, t('Đã sao chép bản dịch', '翻訳をコピーしました'))}
             onFeedback={() => {
               setFeedbackSent(true)
               if (windowed && saved) void setFeedback(saved.messageId, true)
-              showToast('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt')
+              showToast(t('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt', 'ありがとうございます。この翻訳はプロンプト改善の参考にします'))
             }}
           />
         )}
@@ -705,33 +741,52 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 }
 
 /** The keys a new user would not guess; the buttons below already show the main one. */
-function FirstTip({ direction, origin, onDismiss }: { direction: Direction; origin: PopupOrigin; onDismiss: () => void }) {
+function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin; onDismiss: () => void }) {
+  const t = useT()
+  const lang = useLang()
   const enter = <Kbd>Enter</Kbd>
+  const tab = <Kbd>Tab</Kbd>
+  const esc = <Kbd>Esc</Kbd>
   return (
     <div role="note" className="flex items-start gap-2 border-t border-line bg-accent-soft px-4 py-2 text-[12.5px] leading-relaxed text-ink">
       <Lightbulb size={14} className="mt-[3px] shrink-0 text-accent" />
       <p className="min-w-0 flex-1">
-        {direction === 'ja_vi' ? (
-          <>Nhấn {enter} để gõ câu trả lời bằng tiếng Việt, MyTranslate sẽ dịch sang tiếng Nhật cho bạn.</>
+        {lang === 'ja' ? (
+          role === 'read' ? (
+            <>{enter} で日本語の返信を入力すると、MyTranslate がベトナム語に翻訳します。{esc} で閉じます。</>
+          ) : origin === 'composer' ? (
+            <>{enter} でベトナム語訳を入力欄に貼り付けます。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
+          ) : (
+            <>{enter} で翻訳をコピーします。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
+          )
+        ) : role === 'read' ? (
+          <>Nhấn {enter} để gõ câu trả lời bằng tiếng Việt, MyTranslate sẽ dịch sang tiếng Nhật cho bạn. {esc} để đóng.</>
         ) : origin === 'composer' ? (
-          <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. <Kbd>Tab</Kbd> đổi mức kính ngữ.</>
+          <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. {tab} đổi mức kính ngữ. {esc} để đóng.</>
         ) : (
-          <>Nhấn {enter} để sao chép bản dịch. <Kbd>Tab</Kbd> đổi mức kính ngữ.</>
-        )}{' '}
-        <Kbd>Esc</Kbd> để đóng.
+          <>Nhấn {enter} để sao chép bản dịch. {tab} đổi mức kính ngữ. {esc} để đóng.</>
+        )}
       </p>
       <button type="button" onClick={onDismiss} className="shrink-0 rounded px-1 font-medium text-accent hover:underline">
-        Đã hiểu
+        {t('Đã hiểu', 'OK')}
       </button>
     </div>
   )
 }
 
-const MOCK_REPLIES: SuggestedReply[] = [
-  { ja: '承知いたしました。確認いたします。', vi: 'Em đã hiểu. Em sẽ kiểm tra ạ.' },
-  { ja: '詳細を教えていただけますでしょうか。', vi: 'Anh có thể cho em biết chi tiết hơn được không ạ?' },
-  { ja: '本日中に確認してご連絡いたします。', vi: 'Trong hôm nay em sẽ kiểm tra và liên lạc lại ạ.' },
-]
+/** The prototype's suggested replies: in the other side's language, with the meaning in the user's. */
+const MOCK_REPLIES: Record<Lang, SuggestedReply[]> = {
+  vi: [
+    { text: '承知いたしました。確認いたします。', meaning: 'Em đã hiểu. Em sẽ kiểm tra ạ.' },
+    { text: '詳細を教えていただけますでしょうか。', meaning: 'Anh có thể cho em biết chi tiết hơn được không ạ?' },
+    { text: '本日中に確認してご連絡いたします。', meaning: 'Trong hôm nay em sẽ kiểm tra và liên lạc lại ạ.' },
+  ],
+  ja: [
+    { text: 'Anh hiểu rồi. Cảm ơn em nhé.', meaning: 'わかりました。ありがとう。' },
+    { text: 'Em cho anh biết thêm chi tiết được không?', meaning: 'もう少し詳しく教えてもらえますか。' },
+    { text: 'Anh sẽ kiểm tra và trả lời em trong hôm nay.', meaning: '今日中に確認して返事します。' },
+  ],
+}
 
 function RepliesBlock({
   state,
@@ -746,42 +801,44 @@ function RepliesBlock({
   onRetry: () => void
   onCopy: (r: SuggestedReply) => void
 }) {
+  const t = useT()
+  const lang = useLang()
   return (
     <Section className="bg-subtle">
       <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">
-        <Sparkles size={12} className="text-accent" /> Gợi ý trả lời
+        <Sparkles size={12} className="text-accent" /> {t('Gợi ý trả lời', '返信案')}
       </div>
       {state === 'loading' && (
         <div role="status" className="flex items-center gap-2 py-1 text-[13.5px] text-ink-2">
-          <Loader2 size={15} className="animate-spin text-accent motion-reduce:animate-none" /> Đang soạn gợi ý…
+          <Loader2 size={15} className="animate-spin text-accent motion-reduce:animate-none" /> {t('Đang soạn gợi ý…', '返信案を作成中…')}
         </div>
       )}
       {state === 'error' && (
         <div className="flex items-center gap-2 text-[13px] text-bad">
           <span className="min-w-0 flex-1 truncate" title={error}>
-            Không lấy được gợi ý
+            {t('Không lấy được gợi ý', '返信案を取得できません')}
           </span>
           <Button size="sm" onClick={onRetry}>
-            Thử lại
+            {t('Thử lại', '再試行')}
           </Button>
         </div>
       )}
       <div className="flex flex-col gap-1">
         {items.map((r) => (
           <button
-            key={r.ja}
+            key={r.text}
             type="button"
             onClick={() => onCopy(r)}
-            title="Bấm để sao chép"
+            title={t('Bấm để sao chép', 'クリックでコピー')}
             className="group -mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
           >
             <span className="min-w-0 flex-1">
-              <span lang="ja" className="block text-[14px] leading-relaxed text-ink">
-                {r.ja}
+              <span lang={otherLang(lang)} className="block text-[14px] leading-relaxed text-ink">
+                {r.text}
               </span>
-              {r.vi && (
-                <span lang="vi" className="block text-[12.5px] leading-relaxed text-ink-2">
-                  {r.vi}
+              {r.meaning && (
+                <span lang={lang} className="block text-[12.5px] leading-relaxed text-ink-2">
+                  {r.meaning}
                 </span>
               )}
             </span>
@@ -798,28 +855,33 @@ function Section({ children, className }: { children: ReactNode; className?: str
 }
 
 function ConfidenceMark({ confidence }: { confidence: Confidence }) {
+  const t = useT()
   if (confidence === 'low') {
     return (
-      <span title="App chưa chắc đây là đúng thread, bấm để chọn" className="shrink-0 text-[12px] font-bold text-warn">
+      <span
+        title={t('App chưa chắc đây là đúng thread, bấm để chọn', 'このスレッドで合っているか不確かです。クリックして選択')}
+        className="shrink-0 text-[12px] font-bold text-warn"
+      >
         ?
       </span>
     )
   }
   return (
     <span
-      title={confidence === 'high' ? 'Độ tin cậy cao' : 'Độ tin cậy trung bình'}
+      title={confidence === 'high' ? t('Độ tin cậy cao', '確度: 高') : t('Độ tin cậy trung bình', '確度: 中')}
       className={cx('size-1.5 shrink-0 rounded-full', confidence === 'high' ? 'bg-good' : 'bg-warn')}
     />
   )
 }
 
 function DirectionBadge({ direction, verdict }: { direction: Direction; verdict?: 'ok' | 'suggest' | 'error' }) {
+  const t = useT()
   if (direction === 'review_ja') {
-    if (!verdict) return <span className="shrink-0 px-1.5 text-[12px] font-medium whitespace-nowrap text-ink-3">Kiểm tra JA</span>
+    if (!verdict) return <span className="shrink-0 px-1.5 text-[12px] font-medium whitespace-nowrap text-ink-3">{t('Kiểm tra JA', '日本語チェック')}</span>
     const map = {
-      ok: ['bg-good-soft text-good', 'Ổn'],
-      suggest: ['bg-warn-soft text-warn', 'Nên sửa'],
-      error: ['bg-bad-soft text-bad', 'Có lỗi'],
+      ok: ['bg-good-soft text-good', t('Ổn', '問題なし')],
+      suggest: ['bg-warn-soft text-warn', t('Nên sửa', '修正推奨')],
+      error: ['bg-bad-soft text-bad', t('Có lỗi', '誤りあり')],
     } as const
     return <span className={cx('shrink-0 rounded-full px-2 py-0.5 text-[12px] font-semibold whitespace-nowrap', map[verdict][0])}>{map[verdict][1]}</span>
   }
@@ -845,30 +907,34 @@ function PendingBlock({ label }: { label: string }) {
 
 function TranslationBody({
   direction,
+  role,
   stream,
   draft,
   onDraft,
   back,
 }: {
   direction: 'ja_vi' | 'vi_ja'
+  role: Role
   stream: { text: string; started: boolean; done: boolean }
   draft: string | null
   onDraft: (v: string) => void
-  /** Vietnamese reading of a Japanese result, so the user can check the meaning before sending. */
+  /** The result read back in the user's language, so they can check the meaning before sending. */
   back?: string
 }) {
-  if (!stream.started) return <PendingBlock label="Đang dịch…" />
-  const lang = direction === 'ja_vi' ? 'vi' : 'ja'
+  const t = useT()
+  const userLang = useLang()
+  if (!stream.started) return <PendingBlock label={t('Đang dịch…', '翻訳中…')} />
+  const lang = targetLang(direction)
   return (
     <>
       <Section>
-        {direction === 'vi_ja' && stream.done && draft !== null ? (
+        {role === 'write' && stream.done && draft !== null ? (
           <textarea
             data-role="draft"
             lang={lang}
             value={draft}
             onChange={(e) => onDraft(e.target.value)}
-            aria-label="Bản tiếng Nhật, có thể sửa"
+            aria-label={t('Bản tiếng Nhật, có thể sửa', 'ベトナム語訳（編集できます）')}
             className="-mx-1.5 -my-1 block w-[calc(100%+12px)] field-sizing-content resize-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[15px] leading-relaxed text-ink hover:border-line focus:border-accent focus:bg-surface focus:outline-none"
           />
         ) : (
@@ -877,10 +943,10 @@ function TranslationBody({
           </p>
         )}
       </Section>
-      {stream.done && direction === 'vi_ja' && back && (
+      {stream.done && role === 'write' && back && (
         <Section className="bg-subtle">
-          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Ý nghĩa khi đọc lại</div>
-          <p lang="vi" className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
+          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Ý nghĩa khi đọc lại', '読み返したときの意味')}</div>
+          <p lang={userLang} className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
             {back}
           </p>
         </Section>
@@ -890,24 +956,26 @@ function TranslationBody({
 }
 
 /** Turns Claude's review tags into what the popup shows: verdict, issues and a diff of the suggestion. */
-function toReview(source: string, sections: Sections): ReviewResult {
+function toReview(source: string, sections: Sections, t: T): ReviewResult {
   const verdict = (['ok', 'suggest', 'error'] as const).find((v) => sections.verdict.trim().toLowerCase() === v) ?? 'suggest'
   const issues = sections.issues
     .split('\n')
     .map((line) => line.replace(/^\s*[-•*\d.]+\s*/, '').trim())
     .filter(Boolean)
     .map((line, i) => {
-      const at = line.indexOf(':')
+      const at = line.search(/[:：]/)
       return at > 0 && at < 20
         ? { kind: line.slice(0, at).trim(), span: String(i), text: line.slice(at + 1).trim() }
-        : { kind: 'Góp ý', span: String(i), text: line }
+        : { kind: t('Góp ý', '指摘'), span: String(i), text: line }
     })
   const suggestion = sections.suggestion || source
   return { verdict, issues, diff: diffChars(source, suggestion), suggestion, suggestionVi: sections.suggestionVi }
 }
 
 function ReviewBody({ result }: { result: ReviewResult | null }) {
-  if (!result) return <PendingBlock label="Đang kiểm tra câu tiếng Nhật…" />
+  const t = useT()
+  const lang = useLang()
+  if (!result) return <PendingBlock label={t('Đang kiểm tra câu tiếng Nhật…', '日本語をチェック中…')} />
   return (
     <>
       {result.issues.length > 0 ? (
@@ -926,12 +994,14 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
         </Section>
       ) : (
         <Section>
-          <p className="text-[13.5px] text-good">Câu đã tự nhiên và đúng kính ngữ, có thể gửi luôn.</p>
+          <p className="text-[13.5px] text-good">
+            {t('Câu đã tự nhiên và đúng kính ngữ, có thể gửi luôn.', '自然で敬語も正しい文です。このまま送れます。')}
+          </p>
         </Section>
       )}
       {result.verdict !== 'ok' && (
         <Section>
-          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">Đề xuất</div>
+          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Đề xuất', '修正案')}</div>
           <p lang="ja" className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {result.diff.map((part, i) => (
               <span
@@ -945,7 +1015,8 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
               </span>
             ))}
           </p>
-          {result.suggestionVi && (
+          {/* The Vietnamese meaning helps a Vietnamese user; a Japanese user reads the suggestion itself. */}
+          {result.suggestionVi && lang === 'vi' && (
             <p lang="vi" className="mt-1.5 text-[13px] whitespace-pre-wrap text-ink-2">
               Nghĩa: {result.suggestionVi}
             </p>
@@ -956,35 +1027,43 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
   )
 }
 
-/** Shown only when the plan is close to its limit, so the user is not surprised when translations stop. */
 /** The popup is what people see every day: mention a waiting update, and open the main window to install it. */
 function UpdateLine() {
+  const t = useT()
   const { status } = useUpdates()
   if (!status?.available) return null
+  const version = status.available.version
   return (
     <div className="flex items-center gap-2 border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
-      <span className="flex-1">Có phiên bản mới {status.available.version}</span>
+      <span className="flex-1">{t(`Có phiên bản mới ${version}`, `新しいバージョン ${version} があります`)}</span>
       <button type="button" onClick={() => void invoke('show_main_window')} className="font-medium text-accent hover:underline">
-        Cập nhật
+        {t('Cập nhật', 'アップデート')}
       </button>
     </div>
   )
 }
 
+/** Shown only when the plan is close to its limit, so the user is not surprised when translations stop. */
 function QuotaLine({ rate }: { rate: RateLimit | null }) {
+  const t = useT()
+  const lang = useLang()
   if (!rate) return null
   const used = rate.utilization ?? 0
   if (rate.status === 'allowed' && used < 0.8) return null
-  const period = rate.limitType === 'seven_day' ? 'tuần' : rate.limitType === 'five_hour' ? '5 giờ' : 'hiện tại'
+  const period =
+    rate.limitType === 'seven_day' ? t('tuần', '週間') : rate.limitType === 'five_hour' ? t('5 giờ', '5時間') : t('hiện tại', '現在')
   const reset = rate.resetsAt
-    ? new Date(rate.resetsAt * 1000).toLocaleString('vi-VN', { weekday: 'short', hour: '2-digit', minute: '2-digit' })
+    ? new Date(rate.resetsAt * 1000).toLocaleString(locale(lang), { weekday: 'short', hour: '2-digit', minute: '2-digit' })
     : null
+  const pct = Math.round(used * 100)
   return (
     <div className="flex items-center gap-1.5 border-t border-line px-4 py-2 text-[12px] text-warn">
       <AlertTriangle size={13} className="shrink-0" />
       <span>
-        {used > 0 ? `Đã dùng ${Math.round(used * 100)}% hạn mức ${period} của gói Claude` : 'Gói Claude sắp hết hạn mức'}
-        {reset && `, làm mới ${reset}`}
+        {used > 0
+          ? t(`Đã dùng ${pct}% hạn mức ${period} của gói Claude`, `Claude プランの${period}の利用枠を ${pct}% 使用しました`)
+          : t('Gói Claude sắp hết hạn mức', 'Claude プランの利用枠がまもなく上限です')}
+        {reset && t(`, làm mới ${reset}`, `（${reset} にリセット）`)}
       </span>
     </div>
   )
@@ -1030,107 +1109,99 @@ function ErrorBanner({
   onRetry: () => void
   onAction: (toast: string) => void
 }) {
+  const t = useT()
   const name = aiName(provider)
-  const retry = (
-    <div className="mt-2 flex gap-2">
-      <Button size="sm" variant="primary" onClick={onRetry}>
-        Thử lại
-      </Button>
-    </div>
+  const retryButton = (variant?: 'primary') => (
+    <Button size="sm" variant={variant} onClick={onRetry}>
+      {t('Thử lại', '再試行')}
+    </Button>
   )
+  const retry = <div className="mt-2 flex gap-2">{retryButton('primary')}</div>
   const openSettings = (
     <div className="mt-2 flex gap-2">
       <Button size="sm" variant="primary" onClick={() => void invoke('show_main_window')}>
-        Mở Cài đặt
+        {t('Mở Cài đặt', '設定を開く')}
       </Button>
-      <Button size="sm" onClick={onRetry}>
-        Thử lại
-      </Button>
+      {retryButton()}
     </div>
   )
   if (kind === 'missing_key') {
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title={`Chưa có API key ${name}`}>
-        Nhập API key ở Cài đặt &gt; Kết nối AI, hoặc chọn AI khác.
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`Chưa có API key ${name}`, `${name} の APIキーがありません`)}>
+        {t('Nhập API key ở Cài đặt > Kết nối AI, hoặc chọn AI khác.', '設定 > AI接続 で APIキーを入力するか、別のAIを選んでください。')}
         {openSettings}
       </Banner>
     )
   }
   if (kind === 'bad_key') {
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title={`API key ${name} không đúng`}>
-        Key sai hoặc đã bị thu hồi. Nhập lại key ở Cài đặt &gt; Kết nối AI.
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`API key ${name} không đúng`, `${name} の APIキーが正しくありません`)}>
+        {t('Key sai hoặc đã bị thu hồi. Nhập lại key ở Cài đặt > Kết nối AI.', 'キーが誤っているか無効になっています。設定 > AI接続 で入力し直してください。')}
         {openSettings}
       </Banner>
     )
   }
   if (kind === 'network') {
     return (
-      <Banner tone="bad" icon={<WifiOff size={16} />} title={`Không kết nối được tới ${name}`}>
-        Kiểm tra mạng (hoặc proxy của công ty) rồi thử lại.
+      <Banner tone="bad" icon={<WifiOff size={16} />} title={t(`Không kết nối được tới ${name}`, `${name} に接続できません`)}>
+        {t('Kiểm tra mạng (hoặc proxy của công ty) rồi thử lại.', 'ネットワーク（または社内プロキシ）を確認して、もう一度お試しください。')}
         {retry}
       </Banner>
     )
   }
   if (kind === 'rate_limited' && provider !== 'claude') {
     return (
-      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={`Hết hạn mức ${name}`}>
-        Tài khoản API đã hết hạn mức hoặc chưa nạp tiền. Thử lại sau, hoặc bật "Tự chuyển sang AI khác khi lỗi" trong Cài đặt.
+      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={t(`Hết hạn mức ${name}`, `${name} の利用枠を使い切りました`)}>
+        {t(
+          'Tài khoản API đã hết hạn mức hoặc chưa nạp tiền. Thử lại sau, hoặc bật "Tự chuyển sang AI khác khi lỗi" trong Cài đặt.',
+          'APIアカウントの利用枠の上限に達したか、残高がありません。時間をおいて再試行するか、設定で「エラー時に別のAIに切り替える」をオンにしてください。',
+        )}
         {retry}
       </Banner>
     )
   }
   if (kind === 'not_logged_in') {
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title="Claude Code chưa đăng nhập">
-        Mở terminal và chạy lệnh <code className="rounded bg-surface px-1 text-[12px]">claude</code> để đăng nhập bằng tài khoản Claude của bạn.
-        <div className="mt-2 flex gap-2">
-          <Button size="sm" variant="primary" onClick={onRetry}>
-            Thử lại
-          </Button>
-        </div>
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t('Claude Code chưa đăng nhập', 'Claude Code にログインしていません')}>
+        {t('Mở terminal và chạy lệnh', 'ターミナルを開いて')} <code className="rounded bg-surface px-1 text-[12px]">claude</code>{' '}
+        {t('để đăng nhập bằng tài khoản Claude của bạn.', 'を実行し、ご自身の Claude アカウントでログインしてください。')}
+        {retry}
       </Banner>
     )
   }
   if (kind === 'not_installed') {
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title="Không tìm thấy Claude Code">
-        Cài Claude Code và đăng nhập, rồi thử lại.
-        <div className="mt-2 flex gap-2">
-          <Button size="sm" variant="primary" onClick={onRetry}>
-            Thử lại
-          </Button>
-        </div>
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t('Không tìm thấy Claude Code', 'Claude Code が見つかりません')}>
+        {t('Cài Claude Code và đăng nhập, rồi thử lại.', 'Claude Code をインストールしてログインしてから、もう一度お試しください。')}
+        {retry}
       </Banner>
     )
   }
   if (kind === 'rate_limited') {
     return (
-      <Banner tone="warn" icon={<AlertTriangle size={16} />} title="Đã hết hạn mức gói Claude">
-        Hãy thử lại sau khi hạn mức được làm mới.
-        <div className="mt-2 flex gap-2">
-          <Button size="sm" onClick={onRetry}>
-            Thử lại
-          </Button>
-        </div>
+      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={t('Đã hết hạn mức gói Claude', 'Claude プランの利用枠を使い切りました')}>
+        {t('Hãy thử lại sau khi hạn mức được làm mới.', '利用枠がリセットされてから、もう一度お試しください。')}
+        <div className="mt-2 flex gap-2">{retryButton()}</div>
       </Banner>
     )
   }
   return (
-    <Banner tone="bad" icon={<WifiOff size={16} />} title={kind === 'timeout' ? `${name} không trả lời kịp` : 'Không dịch được'}>
+    <Banner
+      tone="bad"
+      icon={<WifiOff size={16} />}
+      title={kind === 'timeout' ? t(`${name} không trả lời kịp`, `${name} から時間内に応答がありません`) : t('Không dịch được', '翻訳できませんでした')}
+    >
       <span className="font-mono text-[12px] break-all">{message}</span>
       <div className="mt-2 flex gap-2">
-        <Button size="sm" variant="primary" onClick={onRetry}>
-          Thử lại
-        </Button>
+        {retryButton('primary')}
         <Button
           size="sm"
           onClick={() => {
             void navigator.clipboard.writeText(message).catch(() => undefined)
-            onAction('Đã sao chép thông tin lỗi')
+            onAction(t('Đã sao chép thông tin lỗi', 'エラー情報をコピーしました'))
           }}
         >
-          Sao chép lỗi
+          {t('Sao chép lỗi', 'エラーをコピー')}
         </Button>
       </div>
     </Banner>
@@ -1138,7 +1209,7 @@ function ErrorBanner({
 }
 
 function FooterActions({
-  direction,
+  role,
   origin,
   ready,
   keigo,
@@ -1152,7 +1223,7 @@ function FooterActions({
   onCopy,
   onFeedback,
 }: {
-  direction: Direction
+  role: Role
   origin: PopupOrigin
   ready: boolean
   keigo: Keigo
@@ -1166,53 +1237,65 @@ function FooterActions({
   onCopy: () => void
   onFeedback: () => void
 }) {
+  const t = useT()
+  const lang = useLang()
   const feedbackButton = (
-    <IconButton label={feedback ? 'Đã gửi phản hồi' : 'Dịch chưa tốt'} active={feedback} disabled={!ready} onClick={onFeedback}>
+    <IconButton
+      label={feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
+      active={feedback}
+      disabled={!ready}
+      onClick={onFeedback}
+    >
       <ThumbsDown size={14} />
     </IconButton>
   )
   const enterKbd = <Kbd className="h-4 border-transparent bg-white/25 px-1 text-[12px] text-on-accent">↵</Kbd>
 
-  if (direction === 'ja_vi') {
+  if (role === 'read') {
     return (
       // Wraps instead of overflowing when the popup is made narrow: copy moves under reply and suggest.
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={onReply}>
-          <Reply size={14} /> Trả lời <Kbd>↵</Kbd>
+          <Reply size={14} /> {t('Trả lời', '返信')} <Kbd>↵</Kbd>
         </Button>
-        <Button size="sm" disabled={!ready || suggesting} onClick={onSuggest} title="AI gợi ý 3 câu trả lời tiếng Nhật">
-          <Sparkles size={14} /> Gợi ý <Kbd>G</Kbd>
+        <Button
+          size="sm"
+          disabled={!ready || suggesting}
+          onClick={onSuggest}
+          title={t('AI gợi ý 3 câu trả lời tiếng Nhật', 'AIがベトナム語の返信案を3つ提案します')}
+        >
+          <Sparkles size={14} /> {t('Gợi ý', '返信案')} <Kbd>G</Kbd>
         </Button>
         <div className="ml-auto flex items-center gap-2">
           {feedbackButton}
           <Button size="sm" disabled={!ready} onClick={onCopy}>
-            <Copy size={14} /> Sao chép
+            <Copy size={14} /> {t('Sao chép', 'コピー')}
           </Button>
         </div>
       </div>
     )
   }
-  if (direction === 'vi_ja') {
+  if (role === 'write') {
     return (
       // Wraps instead of overflowing when the popup is made narrow: the actions move under the keigo choice.
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <span title="Tab để đổi mức kính ngữ" className="inline-flex">
+        <span title={t('Tab để đổi mức kính ngữ', 'Tab で丁寧さを切り替え')} className="inline-flex">
           <Segmented
-            label="Mức kính ngữ"
+            label={t('Mức kính ngữ', '丁寧さ')}
             value={keigo}
             onChange={onKeigo}
-            options={keigoOrder.map((k) => ({ value: k, label: keigoLabels[k] }))}
+            options={keigoOrder.map((k) => ({ value: k, label: keigoLabel(k, lang) }))}
           />
         </span>
         <div className="ml-auto flex items-center gap-2">
         {feedbackButton}
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
-            Thay vào chat {enterKbd}
+            {t('Thay vào chat', '入力欄に貼り付け')} {enterKbd}
           </Button>
         ) : (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
-            <Copy size={14} /> Sao chép {enterKbd}
+            <Copy size={14} /> {t('Sao chép', 'コピー')} {enterKbd}
           </Button>
         )}
         </div>
@@ -1222,10 +1305,10 @@ function FooterActions({
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" onClick={onKeep}>
-        Giữ nguyên <Kbd>Esc</Kbd>
+        {t('Giữ nguyên', 'そのまま')} <Kbd>Esc</Kbd>
       </Button>
       <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
-        {origin === 'composer' ? 'Dùng đề xuất' : 'Sao chép đề xuất'} {enterKbd}
+        {origin === 'composer' ? t('Dùng đề xuất', '修正案を使う') : t('Sao chép đề xuất', '修正案をコピー')} {enterKbd}
       </Button>
     </div>
   )

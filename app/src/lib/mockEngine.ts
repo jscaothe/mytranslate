@@ -1,4 +1,5 @@
 // Canned responses that stand in for Claude. No real translation happens in the prototype.
+import type { Lang } from './i18n'
 import type { Confidence, DiffPart, Keigo, ReviewResult, Thread, TranslationResult } from '../types'
 
 export function isJapanese(text: string): boolean {
@@ -126,8 +127,72 @@ const viToJaFallback: ViJaEntry['out'] = {
   },
 }
 
-export function translate(text: string, direction: 'ja_vi' | 'vi_ja', keigo: Keigo): TranslationResult {
+/** A Japanese user reading the Vietnamese team's messages (the sample chat of the Japanese prototype). */
+const viToJaRead: Record<string, string> = {
+  'Em đã sửa lỗi màn hình đăng nhập và deploy lên staging rồi ạ. Anh kiểm tra giúp em nhé.':
+    'ログイン画面の不具合を修正し、ステージングにデプロイしました。ご確認をお願いします。',
+  'Em đã test lại toàn bộ luồng đăng nhập, không có vấn đề gì ạ.': 'ログインの流れをすべて再テストしましたが、問題ありませんでした。',
+  'Về lịch release tháng 11, bên em đề xuất thứ Tư tuần sau. Anh thấy có được không ạ?':
+    '11月のリリース日程について、来週の水曜日を提案します。いかがでしょうか。',
+  'Chào buổi sáng mọi người. Hôm nay họp định kỳ lúc 15 giờ ạ.': '皆さん、おはようございます。本日15時から定例会議です。',
+  'Em đã cập nhật spec màn hình B theo góp ý của anh. Anh xem giúp em trước ngày mai nhé.':
+    'ご指摘に沿って画面Bの仕様を更新しました。明日までにご確認いただけますか。',
+  'Tôi đã kiểm tra, không còn lỗi nữa. Cảm ơn em.': '確認しました。エラーはもう出ていません。ありがとうございます。',
+}
+
+interface JaViEntry {
+  match: RegExp
+  /** The Vietnamese to send, in each register, with its Japanese reading back. */
+  out: Record<Keigo, { vi: string; ja: string }>
+}
+
+/** A Japanese user writing to the Vietnamese team. */
+const jaToViWrite: JaViEntry[] = [
+  {
+    match: /水曜|リリース|日程/,
+    out: {
+      casual: { vi: 'Thứ Tư tuần sau ok nhé. Em gửi lịch chi tiết cho anh nha.', ja: '来週の水曜日でOK。詳しいスケジュールを送ってね。' },
+      polite: {
+        vi: 'Thứ Tư tuần sau được nhé. Em gửi giúp anh lịch chi tiết.',
+        ja: '来週の水曜日で大丈夫です。詳しいスケジュールを送ってください。',
+      },
+      formal: {
+        vi: 'Thứ Tư tuần sau không có vấn đề gì. Nhờ em gửi giúp anh lịch chi tiết nhé.',
+        ja: '来週の水曜日で問題ありません。詳細なスケジュールを送っていただけますか。',
+      },
+    },
+  },
+  {
+    match: /本番|反映|デプロイ/,
+    out: {
+      casual: { vi: 'Ok rồi, em đưa lên production luôn nhé.', ja: 'OK、そのまま本番に上げてね。' },
+      polite: { vi: 'Anh đã kiểm tra xong. Em đưa lên production giúp anh nhé.', ja: '確認しました。本番に反映をお願いします。' },
+      formal: {
+        vi: 'Anh đã kiểm tra xong, không có vấn đề gì. Nhờ em đưa lên môi trường production giúp anh.',
+        ja: '確認が完了し、問題ありませんでした。本番環境への反映をお願いします。',
+      },
+    },
+  },
+]
+
+const jaToViWriteFallback: JaViEntry['out'] = {
+  casual: { vi: 'Ok, anh hiểu rồi. Anh xem rồi báo lại nhé.', ja: 'OK、わかった。確認して連絡するね。' },
+  polite: { vi: 'Anh hiểu rồi. Anh sẽ kiểm tra rồi báo lại em nhé.', ja: 'わかりました。確認して連絡します。' },
+  formal: { vi: 'Anh đã hiểu. Anh sẽ kiểm tra và liên lạc lại với em.', ja: '承知しました。確認のうえ、改めて連絡します。' },
+}
+
+export function translate(text: string, direction: 'ja_vi' | 'vi_ja', keigo: Keigo, lang: Lang = 'vi'): TranslationResult {
   const clean = text.trim()
+  if (lang === 'ja') {
+    if (direction === 'vi_ja') {
+      return {
+        translation: viToJaRead[clean] ?? `（模擬翻訳）「${clean.slice(0, 40)}${clean.length > 40 ? '…' : ''}」の日本語訳`,
+        notes: [],
+      }
+    }
+    const out = (jaToViWrite.find((e) => e.match.test(clean))?.out ?? jaToViWriteFallback)[keigo]
+    return { translation: out.vi, backTranslation: out.ja, notes: [] }
+  }
   if (direction === 'ja_vi') {
     return (
       jaToVi[clean] ?? {
@@ -141,8 +206,9 @@ export function translate(text: string, direction: 'ja_vi' | 'vi_ja', keigo: Kei
   return { translation: out.ja, backTranslation: out.vi, notes: entry?.notes[keigo] ?? [] }
 }
 
-export function review(text: string): ReviewResult {
+export function review(text: string, lang: Lang = 'vi'): ReviewResult {
   const clean = text.trim()
+  const ja = lang === 'ja'
   if (clean.includes('確認してください')) {
     const [before, after] = clean.split('確認してください')
     const diff: DiffPart[] = [
@@ -156,9 +222,11 @@ export function review(text: string): ReviewResult {
       verdict: 'suggest',
       issues: [
         {
-          kind: 'Kính ngữ',
+          kind: ja ? '敬語' : 'Kính ngữ',
           span: '確認してください',
-          text: '"確認してください" nghe hơi ra lệnh với khách. Nên dùng "ご確認いただけますでしょうか".',
+          text: ja
+            ? '「確認してください」は命令的に聞こえます。「ご確認いただけますでしょうか」がおすすめです。'
+            : '"確認してください" nghe hơi ra lệnh với khách. Nên dùng "ご確認いただけますでしょうか".',
         },
       ],
       diff: diff.filter((p) => p.text),
@@ -174,7 +242,13 @@ export function review(text: string): ReviewResult {
     ]
     return {
       verdict: 'error',
-      issues: [{ kind: 'Kính ngữ', span: 'ありがとう', text: 'Với khách hàng cần dùng "ありがとうございます".' }],
+      issues: [
+        {
+          kind: ja ? '敬語' : 'Kính ngữ',
+          span: 'ありがとう',
+          text: ja ? 'ビジネスでは「ありがとうございます」を使います。' : 'Với khách hàng cần dùng "ありがとうございます".',
+        },
+      ],
       diff: diff.filter((p) => p.text),
       suggestion: clean.replace('ありがとう', 'ありがとうございます'),
       suggestionVi: 'Cảm ơn anh.',
@@ -190,7 +264,7 @@ export function review(text: string): ReviewResult {
 }
 
 const threadHints: { threadId: string; match: RegExp }[] = [
-  { threadId: 't-login', match: /ログイン|修正|反映|deploy|đăng nhập|デプロイ|session/i },
+  { threadId: 't-login', match: /ログイン|修正|反映|deploy|đăng nhập|デプロイ|session|staging|production|本番/i },
   { threadId: 't-release', match: /リリース|release|水曜|thứ tư|lịch/i },
   { threadId: 't-payment', match: /決済|API|thanh toán|timeout/i },
   { threadId: 't-meeting', match: /会議|họp|おはよう/i },

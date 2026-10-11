@@ -1,4 +1,5 @@
 import { createContext, useContext } from 'react'
+import type { Lang } from './lib/i18n'
 import type { Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
@@ -16,6 +17,8 @@ export interface HotkeyMap {
 }
 
 export interface Settings {
+  /** The user's own language: the app's texts, and which way reading and writing translate. */
+  language: Lang
   theme: ThemePref
   defaultKeigo: Keigo
   /** Claude model (Claude Code). */
