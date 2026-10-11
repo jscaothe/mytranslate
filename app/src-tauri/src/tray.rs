@@ -256,19 +256,10 @@ pub fn show_main(app: &AppHandle) {
 /// The first time the main window is closed, says that the app keeps running in the tray: otherwise a new user
 /// may think it quit and wonder why the hotkeys still work, or look for it in the Start menu.
 pub fn notice_still_running(app: &AppHandle) {
-    use tauri_plugin_notification::NotificationExt;
     let store = app.state::<SettingsStore>();
     if store.flag("trayNoticeShown") {
         return;
     }
-    let value = match store.set_field("trayNoticeShown", Value::Bool(true)) {
-        Ok(value) => value,
-        Err(e) => {
-            log::warn!("could not save settings: {e}");
-            return;
-        }
-    };
-    crate::settings::broadcast(app, &value, "tray");
     let main = store.hotkeys().main;
     let (title, body) = match store.language() {
         Lang::Vi => (
@@ -284,6 +275,41 @@ pub fn notice_still_running(app: &AppHandle) {
             ),
         ),
     };
+    show_tray_notice(app, title, &body);
+}
+
+/// Right after installing, the app starts in the tray only. Says where it is and how to open the guide: Windows 11
+/// puts a new tray icon behind the ^ arrow, so a new user would otherwise not see that anything started.
+pub fn notice_first_start(app: &AppHandle) {
+    let store = app.state::<SettingsStore>();
+    let main = store.hotkeys().main;
+    let (title, body) = match store.language() {
+        Lang::Vi => (
+            "MyTranslate đang chạy ở khay hệ thống",
+            format!(
+                "Đã cài xong, app thu nhỏ và chạy ngầm. Bấm biểu tượng MyTranslate ở góc phải thanh tác vụ (có thể trong mũi tên ^) hoặc nhấn {main} để mở hướng dẫn."
+            ),
+        ),
+        Lang::Ja => (
+            "MyTranslate はタスクトレイで動作中です",
+            format!(
+                "インストールが完了しました。タスクバー右側の MyTranslate アイコン（^ の中の場合あり）か {main} でガイドを開けます。"
+            ),
+        ),
+    };
+    show_tray_notice(app, title, &body);
+}
+
+/// Shows a tray notice once: both notices say the app lives in the tray, so after one the other is not needed.
+fn show_tray_notice(app: &AppHandle, title: &str, body: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    match app
+        .state::<SettingsStore>()
+        .set_field("trayNoticeShown", Value::Bool(true))
+    {
+        Ok(value) => crate::settings::broadcast(app, &value, "tray"),
+        Err(e) => log::warn!("could not save settings: {e}"),
+    }
     if let Err(e) = app.notification().builder().title(title).body(body).show() {
         log::warn!("could not show the tray notice: {e}");
     }

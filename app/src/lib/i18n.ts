@@ -5,7 +5,7 @@ import type { Direction } from '../types'
 /**
  * The user's own language. A Vietnamese user reads the client's Japanese and writes Vietnamese; a Japanese
  * user reads their Vietnamese colleagues and writes Japanese. It sets the language of every text in the app
- * and which way "read" (Ctrl+Alt+J) and "write" (Ctrl+Alt+K) translate.
+ * and which way "read" and "write" go.
  */
 export type Lang = 'vi' | 'ja'
 
@@ -59,36 +59,27 @@ export function sourceLang(direction: Direction): Lang {
 /** The other side's language. */
 export const otherLang = (lang: Lang): Lang => (lang === 'ja' ? 'vi' : 'ja')
 
-/** What the user asked for: a hotkey, or a toolbar button ("translate" is `auto`). */
-export type Action = 'read' | 'write' | 'auto' | 'review'
-
-/** Latin letters with Vietnamese diacritics. */
-const VIETNAMESE_LETTER = /[À-ưẠ-ỹ]/
+/** What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button) or check Japanese. */
+export type Action = 'auto' | 'review'
 
 export function hasJapanese(text: string): boolean {
   return /[぀-ヿ一-鿿]/.test(text)
 }
 
-/** Japanese with at most a few Latin words (API, UAT, file names...), as in popup.rs. */
-export function isJapaneseOnly(text: string): boolean {
+/** More Japanese than Latin: Japanese characters against Latin words, as `is_mostly_japanese` in popup.rs. */
+export function isMostlyJapanese(text: string): boolean {
+  const japanese = (text.match(/[぀-ヿ一-鿿]/g) ?? []).length
   const latinWords = text.split(/[^A-Za-zÀ-ưẠ-ỹ]+/).filter(Boolean).length
-  return hasJapanese(text) && !VIETNAMESE_LETTER.test(text) && latinWords <= 3
+  return japanese > 0 && japanese >= latinWords
 }
 
-/** Which way to translate, like `popup::route` in the real app. */
-export function route(action: Action, text: string, lang: Lang): Direction {
-  const read = readDirection(lang)
-  const write = writeDirection(lang)
-  const alreadyOther = lang === 'vi' ? isJapaneseOnly(text) : !hasJapanese(text)
-  switch (action) {
-    case 'read':
-      return read
-    // Ctrl+Alt+K on text already in the other side's language: the user wants to read it, not replace it.
-    case 'write':
-      return alreadyOther ? read : write
-    case 'auto':
-      return hasJapanese(text) ? 'ja_vi' : 'vi_ja'
-    case 'review':
-      return hasJapanese(text) ? 'review_ja' : 'vi_ja'
-  }
+/**
+ * Which way to translate and where the result goes, like `popup::route` in the real app: the text's language
+ * decides the way; only what the user writes in the message box is replaced, everything else is shown.
+ */
+export function route(action: Action, text: string, lang: Lang, from: 'chat' | 'composer'): { direction: Direction; origin: 'chat' | 'composer' } {
+  const direction: Direction =
+    action === 'auto' ? (isMostlyJapanese(text) ? 'ja_vi' : 'vi_ja') : hasJapanese(text) ? 'review_ja' : 'vi_ja'
+  const writing = direction === writeDirection(lang) || direction === 'review_ja'
+  return { direction, origin: writing && from === 'composer' ? 'composer' : 'chat' }
 }

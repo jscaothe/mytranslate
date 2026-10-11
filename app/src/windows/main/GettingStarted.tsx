@@ -53,20 +53,20 @@ export function GettingStarted() {
 
         {lang === 'ja' ? (
           <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
-            <Way icon={<BookOpenText size={18} />} title="ベトナム語のメッセージを読む" combo={hotkeys.jaVi}>
+            <Way icon={<BookOpenText size={18} />} title="ベトナム語のメッセージを読む" combo={hotkeys.auto}>
               マウスでメッセージを選択し、表示された小さなツールバーの <b className="font-semibold text-ink">日本語に翻訳</b> をクリックします。
             </Way>
-            <Way icon={<PenLine size={18} />} title="日本語で書いてベトナム語で送る" combo={hotkeys.viJa}>
-              入力欄に日本語を書いてショートカットを押します。Enter でベトナム語訳が入力欄に入ります。
+            <Way icon={<PenLine size={18} />} title="日本語で書いてベトナム語で送る" combo={hotkeys.auto}>
+              入力欄に日本語を書いて同じショートカットを押します。Enter でベトナム語訳が入力欄に入ります。
             </Way>
           </ul>
         ) : (
           <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
-            <Way icon={<BookOpenText size={18} />} title="Đọc tin nhắn tiếng Nhật" combo={hotkeys.jaVi}>
+            <Way icon={<BookOpenText size={18} />} title="Đọc tin nhắn tiếng Nhật" combo={hotkeys.auto}>
               Bôi đen tin nhắn bằng chuột, rồi bấm <b className="font-semibold text-ink">Dịch sang Việt</b> trên thanh nhỏ hiện ra.
             </Way>
-            <Way icon={<PenLine size={18} />} title="Trả lời bằng tiếng Nhật" combo={hotkeys.viJa}>
-              Gõ tiếng Việt vào ô chat rồi nhấn phím tắt. Nhấn Enter để thay bản tiếng Nhật vào ô chat.
+            <Way icon={<PenLine size={18} />} title="Trả lời bằng tiếng Nhật" combo={hotkeys.auto}>
+              Gõ tiếng Việt vào ô chat rồi nhấn cùng phím tắt đó. Nhấn Enter để thay bản tiếng Nhật vào ô chat.
             </Way>
             <Way icon={<SpellCheck size={18} />} title="Kiểm tra tiếng Nhật bạn tự viết" combo={hotkeys.review}>
               Đặt con trỏ trong ô chat có câu tiếng Nhật rồi nhấn phím tắt để soát ngữ pháp và kính ngữ.

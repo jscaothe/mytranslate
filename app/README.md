@@ -29,7 +29,7 @@ Mở http://localhost:5173 trên trình duyệt thường, nên dùng cửa sổ
 ## Thử nghiệm
 
 - **Mô phỏng sử dụng**: một cửa sổ Slack/Teams giả.
-  Bôi đen tin tiếng Nhật rồi nhấn `Ctrl+Alt+J`, gõ tiếng Việt vào ô chat rồi nhấn `Ctrl+Alt+K`, viết tiếng Nhật rồi nhấn `Ctrl+Alt+L`.
+  Một phím dịch `Ctrl+Alt+T` cho mọi trường hợp: bôi đen tin tiếng Nhật rồi nhấn để đọc, hoặc gõ tiếng Việt vào ô chat rồi nhấn để gửi tiếng Nhật; viết tiếng Nhật rồi nhấn `Ctrl+Alt+C` để kiểm tra.
   Bôi đen bằng chuột sẽ hiện thanh thao tác nhanh (Dịch, Kiểm tra, Dịch và chép).
   Kéo thanh tiêu đề popup để di chuyển, kéo mép trái/phải/dưới hoặc góc dưới để đổi kích thước; popup sau nhớ vị trí và kích thước cho đến khi tải lại trang.
   Trong Cài đặt chỉnh được ứng dụng áp dụng (bỏ Slack khỏi danh sách thì thanh không hiện trong Slack giả lập), thứ tự nút, và kiểu icon và chữ hoặc chỉ icon.

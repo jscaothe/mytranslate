@@ -51,7 +51,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
   const message = '[data-chat-messages] [lang=ja]'
 
   await selectStart(page, message, 10)
-  await page.keyboard.press('Control+Alt+J')
+  await page.keyboard.press('Control+Alt+T')
   const tip = popup(page).getByRole('note')
   await expect(tip).toContainText('để gõ câu trả lời bằng tiếng Việt')
   await tip.getByRole('button', { name: 'Đã hiểu' }).click()
@@ -60,7 +60,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
   await expect(popup(page)).toBeHidden()
 
   await selectStart(page, message, 10)
-  await page.keyboard.press('Control+Alt+J')
+  await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   await expect(popup(page).getByRole('button', { name: /Gợi ý/ })).toBeEnabled()
   await expect(popup(page).getByRole('note')).toHaveCount(0)

@@ -10,9 +10,19 @@ test.beforeEach(async ({ page }) => {
   await expect(composer(page)).toBeVisible()
 })
 
+test('the same key reads Japanese typed in the composer without replacing it', async ({ page }) => {
+  await composer(page).fill('仕訳の入力画面でエラーが出ています。')
+  await page.keyboard.press('Control+Alt+T')
+
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
+  await expect(popup(page).locator('textarea[data-role=draft]')).toHaveCount(0)
+  await expect(popup(page).getByRole('button', { name: /Thay vào chat/ })).toHaveCount(0)
+  await expect(composer(page)).toHaveValue('仕訳の入力画面でエラーが出ています。')
+})
+
 test('Vietnamese in the composer is translated and Enter puts it back in the chat', async ({ page }) => {
   await composer(page).fill('Em đã sửa lỗi đăng nhập, anh kiểm tra giúp em nhé')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
 
   const draft = popup(page).locator('textarea[data-role=draft]')
   await expect(draft).toBeVisible()
@@ -30,7 +40,7 @@ test('Vietnamese in the composer is translated and Enter puts it back in the cha
 
 test('a message of several lines keeps its lines in the reading back', async ({ page }) => {
   await composer(page).fill('・Đã sửa lỗi đăng nhập\n・Đã cập nhật spec màn hình B')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
 
   const draft = popup(page).locator('textarea[data-role=draft]')
   await expect(draft).toBeVisible()
@@ -42,7 +52,7 @@ test('a message of several lines keeps its lines in the reading back', async ({ 
 
 test('a Japanese message is translated and Claude suggests replies that can be copied', async ({ page }) => {
   await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
-  await page.keyboard.press('Control+Alt+J')
+  await page.keyboard.press('Control+Alt+T')
 
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   const suggest = popup(page).getByRole('button', { name: /Gợi ý/ })
@@ -59,7 +69,7 @@ test('a Japanese message is translated and Claude suggests replies that can be c
 
 test('Japanese in the composer is reviewed and the suggestion replaces it', async ({ page }) => {
   await composer(page).fill('明日までに確認してください')
-  await page.keyboard.press('Control+Alt+L')
+  await page.keyboard.press('Control+Alt+C')
   await expect(popup(page).getByRole('button', { name: /Dùng đề xuất/ })).toBeEnabled()
   await popup(page).getByRole('button', { name: /Dùng đề xuất/ }).click()
   await expect(popup(page)).toBeHidden()
@@ -68,7 +78,7 @@ test('Japanese in the composer is reviewed and the suggestion replaces it', asyn
 
 test('Tab changes the keigo level and translates again', async ({ page }) => {
   await composer(page).fill('Cảm ơn anh')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
   const keigo = popup(page).getByRole('radiogroup', { name: 'Mức kính ngữ' })
   await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
   const before = await keigo.getByRole('radio', { checked: true }).textContent()
@@ -79,7 +89,7 @@ test('Tab changes the keigo level and translates again', async ({ page }) => {
 
 test('Escape closes the popup and leaves the composer alone', async ({ page }) => {
   await composer(page).fill('Xin chào')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toBeVisible()
   await popup(page).press('Escape')
   await expect(popup(page)).toBeHidden()
@@ -101,7 +111,7 @@ test('selecting text with the mouse shows the quick toolbar', async ({ page }) =
 
 test('the AI can be switched from the popup, which translates again with it', async ({ page }) => {
   await composer(page).fill('Cảm ơn anh')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
   await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
   const chip = popup(page).getByRole('button', { name: /^AI dịch: Claude Sonnet/ })
   await expect(chip).toBeVisible()

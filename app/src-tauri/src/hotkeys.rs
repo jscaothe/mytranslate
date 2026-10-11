@@ -31,7 +31,7 @@ impl HotkeyState {
     }
 }
 
-/// Parses the page's "Ctrl+Alt+J" format. The page writes the Windows key as "Win"; the plugin calls it "Super".
+/// Parses the page's "Ctrl+Alt+T" format. The page writes the Windows key as "Win"; the plugin calls it "Super".
 pub fn parse(combo: &str) -> Option<Shortcut> {
     let normalised = combo
         .split('+')
@@ -52,8 +52,6 @@ fn wanted(keys: &Hotkeys, paused: bool) -> Vec<(String, HotkeyAction)> {
     // Pausing stops the translation hotkeys only; the main window must stay reachable.
     if !paused {
         out.extend([
-            (keys.ja_vi.clone(), HotkeyAction::Popup(popup::Action::Read)),
-            (keys.vi_ja.clone(), HotkeyAction::Popup(popup::Action::Write)),
             (keys.auto.clone(), HotkeyAction::Popup(popup::Action::Auto)),
             (keys.review.clone(), HotkeyAction::Popup(popup::Action::Review)),
         ]);
@@ -103,8 +101,8 @@ mod tests {
 
     #[test]
     fn parses_page_format() {
-        let s = parse("Ctrl+Alt+J").unwrap();
-        assert_eq!(s, Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyJ));
+        let s = parse("Ctrl+Alt+T").unwrap();
+        assert_eq!(s, Shortcut::new(Some(Modifiers::CONTROL | Modifiers::ALT), Code::KeyT));
         assert_eq!(
             parse("Ctrl+Win+T").unwrap(),
             Shortcut::new(Some(Modifiers::CONTROL | Modifiers::SUPER), Code::KeyT)
@@ -118,6 +116,6 @@ mod tests {
         let paused = wanted(&keys, true);
         assert_eq!(paused.len(), 1);
         assert_eq!(paused[0].1, HotkeyAction::ShowMain);
-        assert_eq!(wanted(&keys, false).len(), 5);
+        assert_eq!(wanted(&keys, false).len(), 3);
     }
 }

@@ -866,7 +866,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let store = SettingsStore::load(app.path().app_config_dir()?.join("settings.json"));
+            let settings_path = app.path().app_config_dir()?.join("settings.json");
+            // No settings yet: the installer just started the app for the first time on this PC.
+            let first_start = !settings_path.exists();
+            let store = SettingsStore::load(settings_path);
             let model = store.model().unwrap_or_else(|| DEFAULT_MODEL.to_string());
             // Pausing is for the current session only: a restart must never leave the hotkeys silently off.
             if store.hotkeys_paused()
@@ -909,7 +912,10 @@ pub fn run() {
                         tray::notice_still_running(window.app_handle());
                     }
                 });
-                if !std::env::args().any(|a| a == BACKGROUND_ARG) {
+                // The first start stays in the tray and says so, rather than opening a window over the installer.
+                if first_start {
+                    tray::notice_first_start(app.handle());
+                } else if !std::env::args().any(|a| a == BACKGROUND_ARG) {
                     main.show()?;
                 }
             }

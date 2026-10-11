@@ -1,4 +1,14 @@
-/** Builds a "Ctrl+Alt+J" style combo from a keyboard event, using the physical key so AltGr layouts still work. */
+import type { HotkeyMap } from '../store'
+
+/** Kept in step with `Hotkeys::default` on the Rust side. */
+export const DEFAULT_HOTKEYS: HotkeyMap = { auto: 'Ctrl+Alt+T', review: 'Ctrl+Alt+C', main: 'Ctrl+Alt+M' }
+
+/** The saved hotkeys, without keys of earlier versions (the separate "read" and "write" hotkeys). */
+export function knownHotkeys(saved: Partial<HotkeyMap> | undefined): HotkeyMap {
+  return { auto: saved?.auto ?? DEFAULT_HOTKEYS.auto, review: saved?.review ?? DEFAULT_HOTKEYS.review, main: saved?.main ?? DEFAULT_HOTKEYS.main }
+}
+
+/** Builds a "Ctrl+Alt+T" style combo from a keyboard event, using the physical key so AltGr layouts still work. */
 export function comboFromEvent(e: KeyboardEvent | React.KeyboardEvent): string | null {
   const ignored = ['Control', 'Alt', 'Shift', 'Meta', 'AltGraph']
   if (ignored.includes(e.key)) return null

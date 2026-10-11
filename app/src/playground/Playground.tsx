@@ -121,7 +121,7 @@ export function Playground() {
       }
       if (got.range) replaceRange.current = got.range
 
-      const direction = route(action, got.text, lang)
+      const { direction, origin } = route(action, got.text, lang, got.origin)
 
       setQuick(null)
       requestSeq.current += 1
@@ -129,7 +129,7 @@ export function Playground() {
         id: requestSeq.current,
         direction,
         source: got.text,
-        origin: got.origin,
+        origin,
         conversationId: channel.conversationId,
         app,
         anchor: got.anchor,
@@ -190,12 +190,7 @@ export function Playground() {
       const combo = comboFromEvent(e)
       if (!combo) return
       const { hotkeys } = settings
-      const map: Record<string, Action> = {
-        [hotkeys.auto]: 'auto',
-        [hotkeys.jaVi]: 'read',
-        [hotkeys.viJa]: 'write',
-        [hotkeys.review]: 'review',
-      }
+      const map: Record<string, Action> = { [hotkeys.auto]: 'auto', [hotkeys.review]: 'review' }
       const action = map[combo]
       if (!action) return
       e.preventDefault()
@@ -337,11 +332,11 @@ export function Playground() {
             {lang === 'ja' ? (
               <>
                 <Step n={1} title="ベトナム側のメッセージを読む">
-                  ベトナム語のメッセージを選択して <Hotkey combo={settings.hotkeys.jaVi} />
+                  ベトナム語のメッセージを選択して <Hotkey combo={settings.hotkeys.auto} />
                   {settings.quickActions.enabled ? '、または表示されたツールバーの「日本語に翻訳」をクリック。' : '。'}
                 </Step>
                 <Step n={2} title="日本語で返信する">
-                  入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.viJa} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
+                  入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.auto} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
                   <Hotkey combo="Enter" /> でベトナム語訳を入力欄に貼り付けます。
                 </Step>
                 <Step n={3} title="スレッドを変更">
@@ -354,11 +349,11 @@ export function Playground() {
             ) : (
               <>
                 <Step n={1} title="Đọc tin của khách">
-                  Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.jaVi} />
+                  Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.auto} />
                   {settings.quickActions.enabled ? ', hoặc bấm "Dịch sang Việt" trên thanh thao tác hiện ra.' : '.'}
                 </Step>
                 <Step n={2} title="Trả lời bằng tiếng Việt">
-                  Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.viJa} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
+                  Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
                   <Hotkey combo="Enter" /> để thay vào ô chat.
                 </Step>
                 <Step n={3} title="Kiểm tra câu tiếng Nhật">
@@ -393,12 +388,12 @@ export function Playground() {
 
             {lang === 'ja' ? (
               <p className="border-t border-line pt-3 text-[12px] text-ink-3">
-                <Hotkey combo={settings.hotkeys.auto} /> は翻訳の向きを自動で判断します。<Hotkey combo={settings.hotkeys.main} />{' '}
+                翻訳は <Hotkey combo={settings.hotkeys.auto} /> ひとつで、文の言語から向きを自動で判断します。<Hotkey combo={settings.hotkeys.main} />{' '}
                 またはタスクトレイのアイコンでメイン画面を開きます。ツールバーの「シミュレーション」でエラー画面を確認できます。
               </p>
             ) : (
               <p className="border-t border-line pt-3 text-[12px] text-ink-3">
-                <Hotkey combo={settings.hotkeys.auto} /> tự nhận diện hướng dịch. <Hotkey combo={settings.hotkeys.main} /> hoặc icon khay
+                Chỉ cần một phím <Hotkey combo={settings.hotkeys.auto} />: app tự nhận ngôn ngữ để chọn hướng dịch. <Hotkey combo={settings.hotkeys.main} /> hoặc icon khay
                 hệ thống để mở cửa sổ chính. Đổi "Trạng thái giả lập" trên thanh công cụ để xem các màn hình lỗi.
               </p>
             )}

@@ -323,7 +323,7 @@ function TryIt() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const combo = comboFromEvent(e)
-      if (combo === settings.hotkeys.jaVi || combo === settings.hotkeys.auto) {
+      if (combo === settings.hotkeys.auto) {
         e.preventDefault()
         open(readDirection(lang))
       }
@@ -365,7 +365,7 @@ function TryIt() {
           )}
         </p>
         <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12.5px] text-ink-3">
-          <Keyboard size={15} /> {t('Hoặc bôi đen rồi nhấn', 'または選択して')} <Hotkey combo={settings.hotkeys.jaVi} />
+          <Keyboard size={15} /> {t('Hoặc bôi đen rồi nhấn', 'または選択して')} <Hotkey combo={settings.hotkeys.auto} />
           {lang === 'ja' ? ' を押します' : ''}
         </p>
       </div>

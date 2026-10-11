@@ -8,10 +8,9 @@ export type ThemePref = 'system' | 'light' | 'dark'
 
 export type AiProvider = 'claude' | 'openai' | 'gemini'
 
+/** One key translates either way (the text's language decides), one checks Japanese, one opens the main window. */
 export interface HotkeyMap {
   auto: string
-  jaVi: string
-  viJa: string
   review: string
   main: string
 }

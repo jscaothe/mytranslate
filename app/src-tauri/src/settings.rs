@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::lang::Lang;
@@ -26,13 +26,12 @@ pub struct SettingsStore {
     value: Mutex<Value>,
 }
 
-/// Global hotkeys as the page stores them, e.g. "Ctrl+Alt+J".
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+/// Global hotkeys as the page stores them, e.g. "Ctrl+Alt+T". One key translates either way (the text's
+/// language decides), one checks Japanese, one opens the main window.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Hotkeys {
     pub auto: String,
-    pub ja_vi: String,
-    pub vi_ja: String,
     pub review: String,
     pub main: String,
 }
@@ -41,13 +40,15 @@ impl Default for Hotkeys {
     fn default() -> Self {
         Self {
             auto: "Ctrl+Alt+T".into(),
-            ja_vi: "Ctrl+Alt+J".into(),
-            vi_ja: "Ctrl+Alt+K".into(),
-            review: "Ctrl+Alt+L".into(),
+            review: "Ctrl+Alt+C".into(),
             main: "Ctrl+Alt+M".into(),
         }
     }
 }
+
+/// Up to 0.1.1 there were separate "read" and "write" hotkeys, and checking was Ctrl+Alt+L.
+const REMOVED_HOTKEYS: [&str; 2] = ["jaVi", "viJa"];
+const OLD_REVIEW_HOTKEY: &str = "Ctrl+Alt+L";
 
 impl SettingsStore {
     pub fn load(path: PathBuf) -> Self {
@@ -55,9 +56,31 @@ impl SettingsStore {
             .ok()
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or(Value::Null);
-        Self {
+        let store = Self {
             path,
             value: Mutex::new(value),
+        };
+        store.migrate_hotkeys();
+        store
+    }
+
+    /// Drops the removed read and write hotkeys from saved settings, and moves the old default check hotkey to
+    /// the new one. A check hotkey the user chose is kept.
+    fn migrate_hotkeys(&self) {
+        let mut value = self.get();
+        let Some(keys) = value.get_mut("hotkeys").and_then(Value::as_object_mut) else {
+            return;
+        };
+        let mut changed = false;
+        for removed in REMOVED_HOTKEYS {
+            changed |= keys.remove(removed).is_some();
+        }
+        if keys.get("review").and_then(Value::as_str) == Some(OLD_REVIEW_HOTKEY) {
+            keys.insert("review".into(), Value::from(Hotkeys::default().review));
+            changed = true;
+        }
+        if changed && let Err(e) = self.set(value) {
+            log::warn!("could not save the new hotkeys: {e}");
         }
     }
 
@@ -110,6 +133,9 @@ impl SettingsStore {
             .is_none()
         {
             value["language"] = Value::String(self.language().code().into());
+        }
+        if self.field::<Hotkeys>("hotkeys").is_none() {
+            value["hotkeys"] = serde_json::to_value(self.hotkeys()).unwrap_or(Value::Null);
         }
         value
     }
@@ -164,6 +190,7 @@ mod tests {
     fn missing_file_gives_defaults() {
         let s = SettingsStore::load(temp_path("missing"));
         assert_eq!(s.hotkeys(), Hotkeys::default());
+        assert_eq!(s.get_for_page()["hotkeys"]["review"], "Ctrl+Alt+C");
         assert!(!s.hotkeys_paused());
         assert_eq!(s.model(), None);
         assert_eq!(s.language(), Lang::system());
@@ -188,13 +215,34 @@ mod tests {
     }
 
     #[test]
+    fn old_hotkeys_are_dropped_and_the_old_check_key_moves() {
+        let path = temp_path("migrate");
+        let old = serde_json::json!({ "auto": "Ctrl+Alt+T", "jaVi": "Ctrl+Alt+J", "viJa": "Ctrl+Alt+K", "review": "Ctrl+Alt+L", "main": "Ctrl+Alt+M" });
+        std::fs::write(&path, serde_json::json!({ "hotkeys": old }).to_string()).unwrap();
+        let s = SettingsStore::load(path.clone());
+        assert_eq!(s.hotkeys(), Hotkeys::default());
+        // Saved, so the page and the next start see them too.
+        let saved = SettingsStore::load(path.clone()).get()["hotkeys"].clone();
+        assert_eq!(
+            saved,
+            serde_json::json!({ "auto": "Ctrl+Alt+T", "review": "Ctrl+Alt+C", "main": "Ctrl+Alt+M" })
+        );
+
+        // Keys the user chose stay.
+        let custom = serde_json::json!({ "auto": "Ctrl+Shift+T", "review": "Ctrl+Shift+L", "main": "Ctrl+Alt+M" });
+        std::fs::write(&path, serde_json::json!({ "hotkeys": custom }).to_string()).unwrap();
+        assert_eq!(SettingsStore::load(path.clone()).get()["hotkeys"], custom);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn round_trips_through_disk() {
         let path = temp_path("roundtrip");
         let s = SettingsStore::load(path.clone());
         s.set(serde_json::json!({
             "model": "haiku",
             "hotkeysPaused": true,
-            "hotkeys": { "auto": "Ctrl+Shift+T", "jaVi": "Ctrl+Alt+J", "viJa": "Ctrl+Alt+K", "review": "Ctrl+Alt+L", "main": "Ctrl+Alt+M" }
+            "hotkeys": { "auto": "Ctrl+Shift+T", "review": "Ctrl+Alt+C", "main": "Ctrl+Alt+M" }
         }))
         .unwrap();
         let again = SettingsStore::load(path.clone());

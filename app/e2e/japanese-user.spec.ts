@@ -42,7 +42,7 @@ test('a Vietnamese message is read in Japanese with the mouse, without any hotke
 
 test('Japanese in the message box becomes Vietnamese, checked by reading it back in Japanese', async ({ page }) => {
   await composer(page).fill('来週の水曜日で大丈夫です。詳しいスケジュールを送ってください。')
-  await page.keyboard.press('Control+Alt+K')
+  await page.keyboard.press('Control+Alt+T')
 
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   const draft = popup(page).locator('textarea[data-role=draft]')
@@ -63,7 +63,7 @@ test('Japanese in the message box becomes Vietnamese, checked by reading it back
 
 test('a reply typed in Japanese from the reading popup is translated into Vietnamese', async ({ page }) => {
   await page.locator('p[lang=vi]', { hasText: 'Về lịch release tháng 11' }).click({ clickCount: 3 })
-  await page.keyboard.press('Control+Alt+J')
+  await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
   await expect(popup(page).getByRole('button', { name: /返信/ }).first()).toBeEnabled()
 
@@ -79,7 +79,7 @@ test('a reply typed in Japanese from the reading popup is translated into Vietna
 
 test('suggested replies are in Vietnamese with their meaning in Japanese', async ({ page }) => {
   await page.locator('p[lang=vi]', { hasText: 'Về lịch release tháng 11' }).click({ clickCount: 3 })
-  await page.keyboard.press('Control+Alt+J')
+  await page.keyboard.press('Control+Alt+T')
   await expect(popup(page).getByRole('button', { name: /返信案/ })).toBeEnabled()
   await popup(page).press('g')
 
@@ -95,10 +95,10 @@ test('the language can be switched in Settings, and the whole app follows', asyn
 
   await page.getByRole('radiogroup', { name: 'あなたの言語' }).getByRole('radio', { name: 'Tiếng Việt' }).click()
   await expect(page.getByRole('heading', { name: 'Cài đặt' })).toBeVisible()
-  await expect(page.getByText('Dịch tiếng Nhật sang tiếng Việt')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Phím tắt: Dịch (tự chọn ngôn ngữ đích)' })).toHaveText('CtrlAltT')
 
   await page.getByRole('radiogroup', { name: 'Ngôn ngữ của bạn' }).getByRole('radio', { name: '日本語' }).click()
-  await expect(page.getByText('ベトナム語を日本語に翻訳（読む）')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'ショートカット: 翻訳（翻訳先の言語を自動で判断）' })).toHaveText('CtrlAltT')
 })
 
 test('the first-run guide is in Japanese and practises on a Vietnamese message', async ({ page }) => {

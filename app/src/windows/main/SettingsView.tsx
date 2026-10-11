@@ -15,12 +15,10 @@ import { AppScopeEditor } from './AppScopeEditor'
 import { QuickActionOrderEditor } from './QuickActionOrderEditor'
 import { AiProvidersGroup } from './AiProvidersGroup'
 
-/** The hotkeys, named by what they do for this user ("read" and "write" swap languages for a Japanese user). */
+/** The hotkeys: one translates either way, the language of the text decides. */
 function hotkeyRows(t: T): { key: keyof HotkeyMap; label: string }[] {
   return [
-    { key: 'auto', label: t('Dịch, tự nhận diện hướng', '翻訳（向きを自動判断）') },
-    { key: 'jaVi', label: t('Dịch tiếng Nhật sang tiếng Việt', 'ベトナム語を日本語に翻訳（読む）') },
-    { key: 'viJa', label: t('Dịch tiếng Việt sang tiếng Nhật', '日本語をベトナム語に翻訳（書く）') },
+    { key: 'auto', label: t('Dịch (tự chọn ngôn ngữ đích)', '翻訳（翻訳先の言語を自動で判断）') },
     { key: 'review', label: t('Kiểm tra câu tiếng Nhật', '日本語をチェック') },
     { key: 'main', label: t('Mở cửa sổ chính', 'メイン画面を開く') },
   ]
@@ -115,6 +113,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                   updateSettings({ hotkeys: { ...settings.hotkeys, [row.key]: combo } })
                   setRecording(null)
                 }}
+                aria-label={t(`Phím tắt: ${row.label}`, `ショートカット: ${row.label}`)}
                 className={cx(
                   'flex h-8 min-w-[150px] items-center justify-center rounded-md border px-3',
                   recording === row.key ? 'border-accent bg-accent-soft text-[12.5px] text-accent' : 'border-line bg-surface hover:bg-hover',

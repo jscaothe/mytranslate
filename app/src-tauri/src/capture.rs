@@ -46,10 +46,12 @@ impl std::fmt::Display for CaptureError {
     }
 }
 
-/// Copies what is selected in the foreground app. With `select_all_if_empty`, an empty selection (typical in a
-/// chat composer) is retried after Ctrl+A. Returns `None` when nothing could be copied.
-pub fn copy_selection(select_all_if_empty: bool) -> Result<Option<String>, CaptureError> {
+/// Copies what is selected in the foreground app. When `select_all_if_empty` says so (the focus is in a chat
+/// message box), an empty selection is retried after Ctrl+A. It is asked once the hotkey's keys are released, so
+/// the answer can be worked out meanwhile. Returns `None` when nothing could be copied.
+pub fn copy_selection(select_all_if_empty: impl FnOnce() -> bool) -> Result<Option<String>, CaptureError> {
     wait_for_modifiers_released(Duration::from_millis(350));
+    let select_all_if_empty = select_all_if_empty();
     let saved = Snapshot::take()?;
 
     let first_wait = if select_all_if_empty {

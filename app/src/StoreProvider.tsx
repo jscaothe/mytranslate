@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { mockData } from './data/mock'
 import { loadHistory } from './lib/history'
+import { DEFAULT_HOTKEYS, knownHotkeys } from './lib/hotkeys'
 import { isTauri } from './lib/claude'
 import { pick, systemLang } from './lib/i18n'
 import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
@@ -20,7 +21,7 @@ const defaultSettings: Settings = {
   geminiModel: '',
   aiFallback: false,
   aiQuickModels: { openai: [], gemini: [] },
-  hotkeys: { auto: 'Ctrl+Alt+T', jaVi: 'Ctrl+Alt+J', viJa: 'Ctrl+Alt+K', review: 'Ctrl+Alt+L', main: 'Ctrl+Alt+M' },
+  hotkeys: DEFAULT_HOTKEYS,
   quickActions: {
     enabled: true,
     appScope: 'selected',
@@ -203,7 +204,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       if (!alive || !saved || typeof saved !== 'object') return
       // `profilePrompt` belonged to the removed self-introduction prompt; drop it so it is not saved again.
       const { profilePrompt: _removed, ...rest } = saved as Partial<Settings> & { profilePrompt?: unknown }
-      applySettings({ ...defaultSettings, ...rest })
+      applySettings({ ...defaultSettings, ...rest, hotkeys: knownHotkeys(rest.hotkeys) })
     }
     void invoke('settings_get')
       .then(merge)

@@ -4,7 +4,10 @@
 
 use windows::Win32::Foundation::POINT;
 use windows::Win32::System::Com::{CLSCTX_INPROC_SERVER, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx};
-use windows::Win32::UI::Accessibility::{CUIAutomation, IUIAutomation, IUIAutomationTextPattern, UIA_TextPatternId};
+use windows::Win32::UI::Accessibility::{
+    CUIAutomation, IUIAutomation, IUIAutomationTextPattern, IUIAutomationValuePattern, UIA_DocumentControlTypeId,
+    UIA_EditControlTypeId, UIA_TextPatternId, UIA_ValuePatternId,
+};
 
 /// Text controls are rarely deep below the element under the pointer; stop looking after this many parents.
 const MAX_PARENTS: usize = 25;
@@ -31,6 +34,27 @@ impl SelectionProbe {
     /// Whether the text control at (x, y), physical pixels, has a non-empty selection.
     pub fn has_selection_at(&self, x: i32, y: i32) -> bool {
         unsafe { self.check(x, y).unwrap_or(false) }
+    }
+
+    /// Whether the keyboard focus is in a box the user can type in (a chat message box), or `None` when UI
+    /// Automation cannot tell. Slack and Teams expose their message box as an editable Edit control, while the
+    /// conversation is a read-only Document, so selecting all is safe exactly when this is true.
+    pub fn focus_is_editable(&self) -> Option<bool> {
+        unsafe {
+            let element = self.uia.GetFocusedElement().ok()?;
+            if let Ok(value) = element.GetCurrentPatternAs::<IUIAutomationValuePattern>(UIA_ValuePatternId) {
+                return Some(!value.CurrentIsReadOnly().ok()?.as_bool());
+            }
+            let kind = element.CurrentControlType().ok()?;
+            // Rich editors (Word, the new Notepad) are Documents with a text pattern but no value pattern.
+            Some(
+                kind == UIA_EditControlTypeId
+                    || (kind == UIA_DocumentControlTypeId
+                        && element
+                            .GetCurrentPatternAs::<IUIAutomationTextPattern>(UIA_TextPatternId)
+                            .is_ok()),
+            )
+        }
     }
 
     unsafe fn check(&self, x: i32, y: i32) -> windows::core::Result<bool> {
