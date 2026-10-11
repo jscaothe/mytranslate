@@ -115,7 +115,7 @@ unsafe fn rectangles(array: *mut SAFEARRAY) -> Vec<[f64; 4]> {
         let mut data: *mut core::ffi::c_void = std::ptr::null_mut();
         if count >= 4 && SafeArrayAccessData(array, &mut data).is_ok() {
             let values = std::slice::from_raw_parts(data as *const f64, count);
-            out.extend(values.chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]));
+            out.extend_from_slice(values.as_chunks::<4>().0);
             let _ = SafeArrayUnaccessData(array);
         }
         let _ = SafeArrayDestroy(array);
