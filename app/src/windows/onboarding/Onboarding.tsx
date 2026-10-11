@@ -23,37 +23,45 @@ export function Onboarding({ chromeless = false }: { chromeless?: boolean }) {
   const [claudeReady, setClaudeReady] = useState(false)
   const finish = () => (chromeless ? updateSettings({ onboarded: true }) : setScreen('playground'))
 
+  // On a maximized window the guide keeps a readable width instead of stretching edge to edge.
+  const column = 'mx-auto w-full max-w-[880px]'
   const content = (
     <>
-        <div className="flex shrink-0 items-center gap-2 px-8 pt-6">
-          {steps.map((s, i) => (
-            <div key={s} className="flex flex-1 flex-col gap-1.5">
-              <div className={cx('h-1 rounded-full', i <= step ? 'bg-accent' : 'bg-line')} />
-              <span className={cx('text-[12px]', i === step ? 'font-semibold text-ink' : 'text-ink-3')}>
-                {i + 1}. {s}
-              </span>
-            </div>
-          ))}
+        <div className="shrink-0 px-8 pt-6">
+          <div className={cx(column, 'flex items-center gap-2')}>
+            {steps.map((s, i) => (
+              <div key={s} className="flex flex-1 flex-col gap-1.5">
+                <div className={cx('h-1 rounded-full', i <= step ? 'bg-accent' : 'bg-line')} />
+                <span className={cx('text-[12px]', i === step ? 'font-semibold text-ink' : 'text-ink-3')}>
+                  {i + 1}. {s}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-          {step === 0 && <Welcome />}
-          {step === 1 && <ConnectClaude onReady={setClaudeReady} />}
-          {step === 2 && <TryIt />}
+          <div className={cx(column, 'h-full')}>
+            {step === 0 && <Welcome />}
+            {step === 1 && <ConnectClaude onReady={setClaudeReady} />}
+            {step === 2 && <TryIt />}
+          </div>
         </div>
 
-        <div className="flex shrink-0 items-center gap-2 border-t border-line px-8 py-3.5">
-          {step > 0 && <Button onClick={() => setStep(step - 1)}>Quay lại</Button>}
-          <div className="flex-1" />
-          {step < steps.length - 1 ? (
-            <Button variant="primary" disabled={step === 1 && !claudeReady} onClick={() => setStep(step + 1)}>
-              Tiếp tục
-            </Button>
-          ) : (
-            <Button variant="primary" onClick={finish}>
-              {chromeless ? 'Hoàn tất' : 'Hoàn tất, thu nhỏ về khay'}
-            </Button>
-          )}
+        <div className="shrink-0 border-t border-line px-8 py-3.5">
+          <div className={cx(column, 'flex items-center gap-2')}>
+            {step > 0 && <Button onClick={() => setStep(step - 1)}>Quay lại</Button>}
+            <div className="flex-1" />
+            {step < steps.length - 1 ? (
+              <Button variant="primary" disabled={step === 1 && !claudeReady} onClick={() => setStep(step + 1)}>
+                Tiếp tục
+              </Button>
+            ) : (
+              <Button variant="primary" onClick={finish}>
+                {chromeless ? 'Hoàn tất' : 'Hoàn tất, thu nhỏ về khay'}
+              </Button>
+            )}
+          </div>
         </div>
     </>
   )
