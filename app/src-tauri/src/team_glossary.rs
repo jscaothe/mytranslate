@@ -8,6 +8,8 @@ use std::time::SystemTime;
 
 use serde::{Deserialize, Serialize};
 
+use crate::history::TermKind;
+
 #[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TeamGlossary {
@@ -43,6 +45,9 @@ pub struct TeamTerm {
     pub vi: String,
     #[serde(default)]
     pub note: String,
+    /// `kind: person` shares a person (a client's name, how to address them) with the team.
+    #[serde(default)]
+    pub kind: TermKind,
 }
 
 #[derive(Deserialize)]
@@ -62,6 +67,7 @@ pub fn parse(yaml: &str) -> Result<(String, Vec<TeamTerm>), String> {
             ja: t.ja.trim().to_string(),
             vi: t.vi.trim().to_string(),
             note: t.note.trim().to_string(),
+            kind: t.kind,
         })
         .filter(|t| !t.ja.is_empty() && !t.vi.is_empty())
         .collect();
@@ -122,19 +128,21 @@ mod tests {
     #[test]
     fn parses_the_documented_format() {
         let (project, terms) = parse(
-            "project: CustomerX Đặt phòng\nterms:\n  - ja: 予約確定画面\n    vi: màn hình xác nhận đặt phòng\n    note: Không dịch là \"booking confirm\"\n  - ja: 受入テスト\n    vi: UAT\n  - ja: ''\n    vi: bỏ qua\n",
+            "project: CustomerX Đặt phòng\nterms:\n  - ja: 予約確定画面\n    vi: màn hình xác nhận đặt phòng\n    note: Không dịch là \"booking confirm\"\n  - ja: 受入テスト\n    vi: UAT\n  - ja: ''\n    vi: bỏ qua\n  - ja: 田中\n    vi: Tanaka\n    kind: person\n    note: PM phía khách\n",
         )
         .unwrap();
         assert_eq!(project, "CustomerX Đặt phòng");
-        assert_eq!(terms.len(), 2);
+        assert_eq!(terms.len(), 3);
         assert_eq!(
             terms[1],
             TeamTerm {
                 ja: "受入テスト".into(),
                 vi: "UAT".into(),
-                note: String::new()
+                note: String::new(),
+                kind: TermKind::Term,
             }
         );
+        assert_eq!(terms[2].kind, TermKind::Person);
     }
 
     #[test]

@@ -16,6 +16,7 @@ use tokio::sync::oneshot;
 
 use super::claude_cli::{ErrorKind, Timing, TranslateEvent};
 use super::stream_parser::StreamParser;
+use crate::history::Tokens;
 use crate::prompt::{self, TranslateRequest};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
@@ -287,6 +288,7 @@ impl HttpApis {
         let mut parser = StreamParser::default();
         let mut first_token_ms = None;
         let mut thought = false;
+        let mut tokens = Tokens::default();
         let mut buffer = String::new();
         let mut stream = res.bytes_stream();
         loop {
@@ -309,6 +311,9 @@ impl HttpApis {
                     let Ok(msg) = serde_json::from_str::<Value>(data.trim()) else {
                         continue;
                     };
+                    if let Some(t) = read_usage(api, &msg) {
+                        tokens = t;
+                    }
                     match read_event(api, &msg) {
                         Piece::Text(t) => {
                             if first_token_ms.is_none() {
@@ -348,10 +353,36 @@ impl HttpApis {
                 prompt_version: prompt::PROMPT_VERSION,
                 provider: api.id().to_string(),
                 fallback_from: None,
+                tokens,
             },
             rate_limit: None,
         });
         Ok(())
+    }
+}
+
+/// Token counts, when this event carries them: OpenAI sends them once at the end, Gemini a running total in
+/// every chunk (the last one wins).
+fn read_usage(api: Api, msg: &Value) -> Option<Tokens> {
+    match api {
+        Api::OpenAi => {
+            let u = msg.get("response")?.get("usage")?;
+            Some(Tokens {
+                input: u["input_tokens"].as_u64(),
+                cached: u["input_tokens_details"]["cached_tokens"].as_u64(),
+                output: u["output_tokens"].as_u64(),
+            })
+        }
+        Api::Gemini => {
+            let u = msg.get("usageMetadata")?;
+            let output =
+                u["candidatesTokenCount"].as_u64().unwrap_or(0) + u["thoughtsTokenCount"].as_u64().unwrap_or(0);
+            Some(Tokens {
+                input: u["promptTokenCount"].as_u64(),
+                cached: Some(u["cachedContentTokenCount"].as_u64().unwrap_or(0)),
+                output: Some(output),
+            })
+        }
     }
 }
 

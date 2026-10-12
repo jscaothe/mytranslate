@@ -1,6 +1,6 @@
 // Canned responses that stand in for Claude. No real translation happens in the prototype.
 import type { Lang } from './i18n'
-import type { Confidence, DiffPart, Keigo, ReviewResult, Thread, TranslationResult } from '../types'
+import type { DiffPart, Keigo, ReviewResult, TranslationResult } from '../types'
 
 export function isJapanese(text: string): boolean {
   return /[぀-ヿ一-鿿]/.test(text)
@@ -261,27 +261,4 @@ export function review(text: string, lang: Lang = 'vi'): ReviewResult {
     suggestion: clean,
     suggestionVi: '(Bản dịch mô phỏng của câu bạn viết)',
   }
-}
-
-const threadHints: { threadId: string; match: RegExp }[] = [
-  { threadId: 't-login', match: /ログイン|修正|反映|deploy|đăng nhập|デプロイ|session|staging|production|本番/i },
-  { threadId: 't-release', match: /リリース|release|水曜|thứ tư|lịch/i },
-  { threadId: 't-payment', match: /決済|API|thanh toán|timeout/i },
-  { threadId: 't-meeting', match: /会議|họp|おはよう/i },
-  { threadId: 't-specb', match: /画面B|màn hình B|仕様|spec/i },
-]
-
-export function detectThread(
-  conversationId: string,
-  text: string,
-  threads: Thread[],
-  forceUncertain: boolean,
-): { threadId: string | null; confidence: Confidence } {
-  const candidates = threads.filter((t) => t.conversationId === conversationId)
-  const pinned = candidates.find((t) => t.pinned)
-  if (pinned) return { threadId: pinned.id, confidence: 'high' }
-  const hit = threadHints.find((h) => h.match.test(text) && candidates.some((c) => c.id === h.threadId))
-  if (hit) return { threadId: hit.threadId, confidence: forceUncertain ? 'low' : 'high' }
-  if (candidates.length > 0) return { threadId: candidates[0].id, confidence: 'low' }
-  return { threadId: null, confidence: 'low' }
 }

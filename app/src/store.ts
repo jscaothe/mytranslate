@@ -1,9 +1,9 @@
 import { createContext, useContext } from 'react'
 import type { Lang } from './lib/i18n'
-import type { Conversation, GlossaryTerm, Keigo, Scenario, Thread, ThreadMessage } from './types'
+import type { GlossaryTerm, Keigo, Scenario } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
-export type MainTab = 'threads' | 'glossary' | 'contacts' | 'settings'
+export type MainTab = 'glossary' | 'settings'
 export type ThemePref = 'system' | 'light' | 'dark'
 
 export type AiProvider = 'claude' | 'openai' | 'gemini'
@@ -109,20 +109,6 @@ export interface Store {
   setMainTab: (t: MainTab) => void
   scenario: Scenario
   setScenario: (s: Scenario) => void
-  /** Mock data in the prototype; the history on this PC in the real app. */
-  conversations: Conversation[]
-  threads: Thread[]
-  selectedThreadId: string
-  selectThread: (id: string) => void
-  addMessage: (threadId: string, msg: Omit<ThreadMessage, 'id'>) => void
-  createThread: (conversationId: string, title: string) => string
-  updateThread: (id: string, patch: Partial<Thread>) => void
-  /** Prototype only: merges one thread into another of the same conversation. */
-  mergeThread: (from: string, into: string) => void
-  /** Prototype only: deletes a thread, or a conversation with its threads. */
-  deleteThread: (id: string) => void
-  deleteConversation: (id: string) => void
-  updateConversation: (id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => void
   glossary: GlossaryTerm[]
   setGlossary: (g: GlossaryTerm[]) => void
   settings: Settings

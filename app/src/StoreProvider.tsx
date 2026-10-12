@@ -3,12 +3,11 @@ import { listen } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { mockData } from './data/mock'
-import { loadHistory } from './lib/history'
 import { DEFAULT_HOTKEYS, knownHotkeys } from './lib/hotkeys'
 import { isTauri } from './lib/claude'
 import { pick, systemLang } from './lib/i18n'
-import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, newId, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
-import type { Conversation, Scenario, Thread, ThreadMessage } from './types'
+import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
+import type { Scenario } from './types'
 
 const defaultSettings: Settings = {
   // The real app gets the saved language, or the language of Windows, from the Rust side.
@@ -41,24 +40,19 @@ const defaultSettings: Settings = {
   popupTipShown: false,
 }
 
-/** The prototype's sample conversations, as a user of the starting language would have them. */
+/** The prototype's sample glossary, as a user of the starting language would have it. */
 const mock = mockData(defaultSettings.language)
 
-export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'threads' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
+export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'glossary' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [mainTab, setMainTab] = useState<MainTab>(initialMainTab)
   const [scenario, setScenario] = useState<Scenario>('normal')
-  const [threads, setThreads] = useState<Thread[]>(isTauri ? [] : mock.threads)
-  const [conversations, setConversations] = useState(isTauri ? [] : mock.conversations)
-  const [selectedThreadId, selectThread] = useState(mock.threads[0].id)
   const [glossary, setGlossary] = useState(isTauri ? [] : mock.glossary)
   const [settings, setSettings] = useState(defaultSettings)
   const [toast, setToast] = useState<Toast | null>(null)
   const [popupGeometry, setPopupGeometry] = useState<PopupGeometry>({ width: DEFAULT_POPUP_WIDTH, height: null, position: null })
   const toastTimer = useRef<number | undefined>(undefined)
   const settingsRef = useRef(defaultSettings)
-  /** Prototype only: when a thread was last active, in the user's language. */
-  const justNow = useCallback(() => pick(settingsRef.current.language, 'vừa xong', 'たった今'), [])
 
   const showToast = useCallback((text: string) => {
     window.clearTimeout(toastTimer.current)
@@ -69,60 +63,6 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
   const openMain = useCallback((tab?: MainTab) => {
     if (tab) setMainTab(tab)
     setScreen('main')
-  }, [])
-
-  const addMessage = useCallback((threadId: string, msg: Omit<ThreadMessage, 'id'>) => {
-    setThreads((ts) => {
-      const target = ts.find((t) => t.id === threadId)
-      if (!target) return ts
-      const updated = { ...target, lastActive: justNow(), messages: [...target.messages, { ...msg, id: newId('m') }] }
-      // Most recent thread first, like the real list.
-      return [updated, ...ts.filter((t) => t.id !== threadId)]
-    })
-  }, [justNow])
-
-  const createThread = useCallback((conversationId: string, title: string) => {
-    const id = newId('t')
-    setThreads((ts) => [
-      { id, conversationId, title, summary: '', lastActive: justNow(), pinned: false, messages: [] },
-      ...ts,
-    ])
-    return id
-  }, [justNow])
-
-  const updateThread = useCallback((id: string, patch: Partial<Thread>) => {
-    setThreads((ts) =>
-      ts.map((t) => {
-        if (patch.pinned && t.conversationId === ts.find((x) => x.id === id)?.conversationId && t.id !== id) {
-          return { ...t, pinned: false }
-        }
-        return t.id === id ? { ...t, ...patch } : t
-      }),
-    )
-  }, [])
-
-  const mergeThread = useCallback((from: string, into: string) => {
-    setThreads((ts) => {
-      const source = ts.find((t) => t.id === from)
-      if (!source) return ts
-      return ts
-        .filter((t) => t.id !== from)
-        .map((t) => (t.id === into ? { ...t, pinned: t.pinned || source.pinned, messages: [...t.messages, ...source.messages] } : t))
-    })
-    selectThread(into)
-  }, [])
-
-  const deleteThread = useCallback((id: string) => {
-    setThreads((ts) => ts.filter((t) => t.id !== id))
-  }, [])
-
-  const deleteConversation = useCallback((id: string) => {
-    setThreads((ts) => ts.filter((t) => t.conversationId !== id))
-    setConversations((cs) => cs.filter((c) => c.id !== id))
-  }, [])
-
-  const updateConversation = useCallback((id: string, patch: Partial<Pick<Conversation, 'keigo' | 'note'>>) => {
-    setConversations((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)))
   }, [])
 
   // In the real app the Rust side owns the settings: every window loads them, saves through it, and follows
@@ -139,14 +79,8 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       const next = { ...before, ...patch }
       applySettings(next)
       if (!isTauri) {
-        // The prototype: a user of the other language has other conversations.
-        if (next.language !== before.language) {
-          const data = mockData(next.language)
-          setConversations(data.conversations)
-          setThreads(data.threads)
-          setGlossary(data.glossary)
-          selectThread(data.threads[0].id)
-        }
+        // The prototype: a user of the other language has another glossary.
+        if (next.language !== before.language) setGlossary(mockData(next.language).glossary)
         return
       }
       invoke<{ failedHotkeys: string[] }>('settings_set', { value: next })
@@ -176,26 +110,6 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     const off = listen<MainTab>('ui:open-tab', (e) => setMainTab(e.payload))
     return () => void off.then((f) => f())
   }, [])
-
-  // Real app: the Threads screen shows the history on this PC and refreshes after every filed translation
-  // (and in the new language, for the "5 minutes ago" texts).
-  const language = settings.language
-  useEffect(() => {
-    if (!isTauri) return
-    let alive = true
-    const refresh = () =>
-      void loadHistory(language).then((h) => {
-        if (!alive) return
-        setConversations(h.conversations)
-        setThreads(h.threads)
-      })
-    refresh()
-    const off = listen('history:changed', refresh)
-    return () => {
-      alive = false
-      void off.then((f) => f())
-    }
-  }, [language])
 
   useEffect(() => {
     if (!isTauri) return
@@ -229,17 +143,6 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       setMainTab,
       scenario,
       setScenario,
-      conversations,
-      threads,
-      selectedThreadId,
-      selectThread,
-      addMessage,
-      createThread,
-      updateThread,
-      mergeThread,
-      deleteThread,
-      deleteConversation,
-      updateConversation,
       glossary,
       setGlossary,
       settings,
@@ -250,7 +153,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       popupGeometry,
       setPopupGeometry,
     }),
-    [screen, mainTab, openMain, scenario, conversations, threads, selectedThreadId, addMessage, createThread, updateThread, mergeThread, deleteThread, deleteConversation, updateConversation, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
+    [screen, mainTab, openMain, scenario, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>

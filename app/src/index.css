@@ -173,9 +173,11 @@ body {
   animation: popup-in 110ms ease-out;
 }
 
-/* The popup window's content: the header first, the rest right after. Short, so it never holds up reading. */
+/* The popup window's content: the header first, the rest right after. Short, so it never holds up reading.
+   Not filled forwards: a kept transform would make each part a stacking context, and the body would then cover the
+   header's menus. */
 .anim-reveal > * {
-  animation: reveal-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: reveal-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) backwards;
 }
 
 .anim-reveal > header ~ * {

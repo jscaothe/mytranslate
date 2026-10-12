@@ -4,55 +4,17 @@ export type Direction = 'ja_vi' | 'vi_ja' | 'review_ja'
 
 export type Keigo = 'casual' | 'polite' | 'formal'
 
-export type Confidence = 'high' | 'medium' | 'low'
-
 /** Simulated backend condition, chosen from the prototype toolbar. */
-export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'network' | 'uncertain_thread'
-
-export interface Conversation {
-  id: string
-  app: ChatApp | 'other'
-  /** What the conversation belongs to: a Slack workspace or a Teams team; empty for a Teams chat. */
-  workspace: string
-  /** The Teams organisation (tenant); empty for Slack. */
-  org: string
-  /** The channel or chat. */
-  name: string
-  /** Keigo to write in for this conversation; `''` uses the default from the settings. */
-  keigo: Keigo | ''
-  /** Who the people here are (names, roles, how to address them); sent with each translation. */
-  note: string
-}
-
-export interface ThreadMessage {
-  id: string
-  author: 'me' | 'other'
-  name: string
-  time: string
-  ja: string
-  vi: string
-}
-
-export interface Thread {
-  id: string
-  conversationId: string
-  title: string
-  summary: string
-  lastActive: string
-  /** Every new message of the conversation goes into the pinned thread. */
-  pinned: boolean
-  /** Hidden from the list and never guessed for new messages. */
-  archived?: boolean
-  /** New messages arrived after the summary was made. */
-  summaryStale?: boolean
-  messages: ThreadMessage[]
-}
+export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'network'
 
 export interface GlossaryTerm {
   id: string
   ja: string
   vi: string
+  /** For a person: who they are, how to address them, which keigo to use. */
   note: string
+  /** A person is sent to the AI when their name is in the message, the recent thread or the chat's name. */
+  kind: 'term' | 'person'
   scope: 'personal' | 'project'
 }
 
@@ -66,8 +28,6 @@ export interface ChatMessage {
 
 export interface ChatChannel {
   id: string
-  /** Conversation id used for thread detection. */
-  conversationId: string
   label: string
   kind: 'channel' | 'dm'
   messages: ChatMessage[]

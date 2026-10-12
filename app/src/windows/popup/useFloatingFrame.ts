@@ -78,7 +78,7 @@ export function useFloatingFrame({
   }
 
   const onHeaderPointerDown = (e: ReactPointerEvent) => {
-    if ((e.target as HTMLElement).closest('button, input, textarea')) return
+    if (!dragsFrom(e.target)) return
     if (!container) return
     const start = current()
     track(
@@ -157,6 +157,11 @@ export function useFloatingFrame({
   const customized = geometry.position !== null || geometry.width !== DEFAULT_POPUP_WIDTH || geometry.height !== null
 
   return { style, dragging, onHeaderPointerDown, resizeHandle, reset, customized }
+}
+
+/** Whether a press here moves the popup: not on controls, nor in a menu opened from the header (its scrollbar). */
+export function dragsFrom(target: EventTarget) {
+  return !(target as HTMLElement).closest('button, input, textarea, [role=menu]')
 }
 
 function placement(request: PopupRequest, container: Size, geometry: PopupGeometry, live: Live | null): CSSProperties {

@@ -43,7 +43,6 @@ Bản thử nghiệm hiện **chưa được ký số**.
 Trong popup:
 
 - `Tab` đổi mức kính ngữ (Thân mật / Lịch sự / Trang trọng); `Esc` đóng; `Ctrl+P` ghim popup.
-- Bấm tên thread (hoặc `Ctrl+T`) để chuyển tin sang thread khác hoặc tạo thread mới.
 - Kéo thanh tiêu đề để di chuyển, kéo mép hoặc góc dưới để đổi kích thước; popup nhớ vị trí và kích thước cho đến khi tắt app.
 - Với tin của khách: `G` để Claude gợi ý 3 câu trả lời tiếng Nhật (bấm một câu để sao chép), `Enter` để tự gõ câu trả lời tiếng Việt.
 
@@ -54,11 +53,14 @@ App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Tea
 
 ### Mẹo để dịch tốt hơn
 
-- **Người liên hệ**: ghi chú tên, vai trò, cách xưng hô cho từng cuộc trò chuyện; ghi chú này đi kèm mỗi lần dịch trong cuộc trò chuyện đó.
-- **Glossary**: thêm tên màn hình, tên tính năng, thuật ngữ khách hay dùng (ví dụ `仕訳` = `bút toán`). Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được dịch đúng như glossary.
-- App tự gom tin theo cuộc trò chuyện và chủ đề (thread), và gửi kèm vài tin gần nhất để Claude hiểu các câu như 先ほどの件, それ.
-  Xem lại ở cửa sổ chính, tab **Threads**: ghim một thread để mọi tin mới của cuộc trò chuyện vào đó, gộp thread trùng, lưu trữ thread đã xong, bấm **Tóm tắt** để Claude tóm tắt bằng tiếng Việt, xuất Markdown để bàn giao.
-- **Người liên hệ**: đặt mức kính ngữ cho từng cuộc trò chuyện (ví dụ Trang trọng với PM khách, Lịch sự trong kênh nội bộ) và ghi chú về người ở đó (tên, vai trò, cách gọi). Đổi kính ngữ trong popup cũng được nhớ cho cuộc trò chuyện đó.
+- **Glossary, loại Thuật ngữ**: thêm tên màn hình, tên tính năng, thuật ngữ khách hay dùng (ví dụ `仕訳` = `bút toán`).
+  Thuật ngữ xuất hiện trong đoạn cần dịch sẽ được dịch đúng như glossary.
+- **Glossary, loại Người**: thêm người bạn hay chat cùng, với tên tiếng Nhật, tên tiếng Việt và một đoạn mô tả cho AI: vai trò, cách xưng hô, mức kính ngữ (ví dụ `田中` / `Tanaka`: "PM phía khách, gọi là 田中様, viết trang trọng").
+  Mô tả được gửi kèm khi tên người đó có trong tin đang dịch, trong các tin gần đây của cuộc trò chuyện hoặc trong tên cuộc trò chuyện.
+  Mức kính ngữ ghi trong mô tả được dùng thay mức mặc định, trừ khi bạn tự đổi bằng `Tab` trong popup.
+  Bấm biểu tượng bút ở cuối dòng để sửa.
+- App tự gom tin theo cuộc trò chuyện và chủ đề, rồi gửi kèm vài tin gần nhất để AI hiểu các câu như 先ほどの件, それ.
+  Việc này diễn ra tự động, bạn không cần chọn hay quản lý gì.
 - **Glossary chung của team**: ở tab Glossary, bấm "Chọn file..." ở thanh dưới cùng và trỏ tới file `glossary.yaml` của dự án (trong repo hoặc thư mục OneDrive). App chỉ đọc file, thuật ngữ cá nhân được ưu tiên khi trùng.
 
 ## Dùng ChatGPT hoặc Gemini thay cho Claude
@@ -80,7 +82,7 @@ Muốn kiểm tra ngay: Cài đặt > Cập nhật > Kiểm tra ngay.
 
 ## Dữ liệu và quyền riêng tư
 
-- Lịch sử dịch, thread, glossary nằm trên máy bạn: `%LOCALAPPDATA%\com.mytranslate.desktop\history.db`.
+- Lịch sử dịch và glossary (thuật ngữ, người) nằm trên máy bạn: `%LOCALAPPDATA%\com.mytranslate.desktop\history.db`.
 - Cài đặt: `%APPDATA%\com.mytranslate.desktop\settings.json`.
 - Nội dung chỉ được gửi tới Claude qua Claude Code của chính bạn; app không có máy chủ riêng và không thu thập dữ liệu.
 - Clipboard của bạn được khôi phục sau mỗi lần app lấy hoặc dán văn bản; chữ tạm của app không vào lịch sử clipboard (Win+V).

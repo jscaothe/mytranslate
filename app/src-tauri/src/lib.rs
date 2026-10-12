@@ -3,7 +3,7 @@ mod capture;
 mod chat_apps;
 mod context;
 mod credentials;
-mod export;
+mod dates;
 mod history;
 mod hotkeys;
 pub mod lang;
@@ -30,10 +30,10 @@ use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::ShortcutState;
 
-use history::{History, NewMessage};
+use history::{History, NewMessage, TermKind};
 use hotkeys::{HotkeyAction, HotkeyState};
 use lang::Lang;
-use prompt::{Direction, Keigo, ThreadMessage, TranslateRequest};
+use prompt::{Direction, Keigo, Person, ThreadMessage, TranslateRequest};
 use provider::Router;
 use provider::claude_cli::{ClaudeCli, Timing, TranslateEvent};
 use provider::stream_parser::Sections;
@@ -44,10 +44,14 @@ use team_glossary::TeamGlossaryCache;
 const DEFAULT_MODEL: &str = "sonnet";
 /// Passed by the Windows autostart entry: start in the tray without showing the main window.
 const BACKGROUND_ARG: &str = "--background";
-/// Earlier messages of the thread sent as context with each translation.
-const CONTEXT_MESSAGES: usize = 6;
-/// Messages a summary covers: the latest ones, enough for a long topic.
-const SUMMARY_MESSAGES: usize = 40;
+/// The thread context sent with each translation: its latest messages that fit in this many characters. A cap on
+/// characters rather than messages keeps the prompt, and so the wait for the first word, the same however long the
+/// messages are.
+const CONTEXT_CHARS: usize = 1200;
+/// A longer message in the context keeps only its start and end, so one pasted log cannot crowd out the rest.
+const CONTEXT_MESSAGE_CHARS: usize = 400;
+/// Messages read to fill the context.
+const CONTEXT_MAX_MESSAGES: usize = 12;
 /// How often old messages are cleaned up while the app runs (it usually runs for days, in the tray).
 const RETENTION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
@@ -74,11 +78,10 @@ fn apply_retention(app: &AppHandle) {
     }
 }
 
-/// The thread's title and its last `limit` messages, Japanese side only, as prompt context.
-fn thread_context(history: &History, thread_id: i64, limit: usize) -> Option<(String, Vec<ThreadMessage>)> {
-    let thread = history.thread(thread_id).ok().flatten()?;
+/// The thread's latest messages as prompt context, Japanese side only, oldest first.
+fn thread_context(history: &History, thread_id: i64) -> Vec<ThreadMessage> {
     let messages = history
-        .recent_messages(thread.id, limit)
+        .recent_messages(thread_id, CONTEXT_MAX_MESSAGES)
         .unwrap_or_default()
         .iter()
         .map(|m| ThreadMessage {
@@ -86,20 +89,48 @@ fn thread_context(history: &History, thread_id: i64, limit: usize) -> Option<(St
             text: m.japanese().to_string(),
         })
         .collect();
-    Some((thread.title, messages))
+    within_budget(messages)
 }
 
-/// Glossary terms that occur in `text`: personal ones, then the team's for Japanese not already covered.
-fn glossary_for(app: &AppHandle, text: &str) -> Vec<(String, String)> {
-    let lower = text.to_lowercase();
-    let mut terms: Vec<(String, String)> = app
-        .state::<History>()
-        .glossary()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|t| t.appears_in(text, &lower))
-        .map(|t| (t.ja, t.vi))
-        .collect();
+/// The latest messages that fit in `CONTEXT_CHARS`, each cut to `CONTEXT_MESSAGE_CHARS`. The newest one always stays.
+fn within_budget(messages: Vec<ThreadMessage>) -> Vec<ThreadMessage> {
+    let mut kept = Vec::new();
+    let mut used = 0;
+    for mut m in messages.into_iter().rev() {
+        m.text = shorten(m.text.trim(), CONTEXT_MESSAGE_CHARS);
+        let n = m.text.chars().count();
+        if !kept.is_empty() && used + n > CONTEXT_CHARS {
+            break;
+        }
+        used += n;
+        kept.push(m);
+    }
+    kept.reverse();
+    kept
+}
+
+/// The start and the end of a text longer than `max` characters, joined by an ellipsis.
+fn shorten(text: &str, max: usize) -> String {
+    let n = text.chars().count();
+    if n <= max {
+        return text.to_string();
+    }
+    let head = max * 2 / 3;
+    let tail = max - head - 1;
+    let start: String = text.chars().take(head).collect();
+    let end: String = text.chars().skip(n - tail).collect();
+    format!("{start}…{end}")
+}
+
+/// What the glossary gives a request: the terms that occur in `text`, and the people named in the text, the thread
+/// context or the chat's name (a direct message is named after the person). Personal entries come first; the team's
+/// are added for Japanese not already covered.
+fn glossary_for(
+    app: &AppHandle,
+    text: &str,
+    context: &[ThreadMessage],
+    place: &str,
+) -> (Vec<(String, String)>, Vec<Person>) {
     let path = app
         .state::<SettingsStore>()
         .get()
@@ -107,25 +138,84 @@ fn glossary_for(app: &AppHandle, text: &str) -> Vec<(String, String)> {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string();
-    for t in app.state::<TeamGlossaryCache>().get(&path).terms {
-        let term = history::GlossaryTerm {
+    let team = app
+        .state::<TeamGlossaryCache>()
+        .get(&path)
+        .terms
+        .into_iter()
+        .map(|t| history::GlossaryTerm {
             id: 0,
             ja: t.ja,
             vi: t.vi,
             note: t.note,
-        };
-        if term.appears_in(text, &lower) && !terms.iter().any(|(ja, _)| *ja == term.ja) {
-            terms.push((term.ja, term.vi));
-        }
-    }
-    terms
+            kind: t.kind,
+        });
+    let personal = app.state::<History>().glossary().unwrap_or_default();
+    match_glossary(personal.into_iter().chain(team), text, context, place)
 }
 
-fn conversation_note(app: &AppHandle, conversation_id: Option<i64>) -> String {
+fn match_glossary(
+    entries: impl Iterator<Item = history::GlossaryTerm>,
+    text: &str,
+    context: &[ThreadMessage],
+    place: &str,
+) -> (Vec<(String, String)>, Vec<Person>) {
+    let lower = text.to_lowercase();
+    let mut around = format!("{text}\n{place}");
+    for m in context {
+        around.push('\n');
+        around.push_str(&m.text);
+    }
+    let around_lower = around.to_lowercase();
+    let mut terms: Vec<(String, String)> = Vec::new();
+    let mut people: Vec<Person> = Vec::new();
+    for e in entries {
+        match e.kind {
+            TermKind::Term => {
+                if e.appears_in(text, &lower) && !terms.iter().any(|(ja, _)| *ja == e.ja) {
+                    terms.push((e.ja, e.vi));
+                }
+            }
+            TermKind::Person => {
+                if e.appears_in(&around, &around_lower) && !people.iter().any(|p| p.ja == e.ja) {
+                    people.push(Person {
+                        ja: e.ja,
+                        vi: e.vi,
+                        note: e.note,
+                    });
+                }
+            }
+        }
+    }
+    (terms, people)
+}
+
+/// The chat's name, which is the person's in a direct message.
+fn conversation_name(history: &History, conversation_id: Option<i64>) -> String {
     conversation_id
-        .and_then(|id| app.state::<History>().conversation(id).ok().flatten())
-        .map(|c| c.note)
+        .and_then(|id| history.conversation(id).ok().flatten())
+        .map(|c| c.name)
         .unwrap_or_default()
+}
+
+/// Fills in what the app adds to a request from the history and the glossary: the thread context, the terms and
+/// the people. A thread that no longer exists starts a new one.
+fn add_context(app: &AppHandle, request: &mut TranslateRequest) {
+    let history = app.state::<History>();
+    if request
+        .thread_id
+        .is_some_and(|id| !matches!(history.thread(id), Ok(Some(_))))
+    {
+        request.thread_id = None;
+    }
+    request.thread_messages = request
+        .thread_id
+        .map(|id| thread_context(&history, id))
+        .unwrap_or_default();
+    let place = conversation_name(&history, request.conversation_id);
+    // Only what occurs in this text: a short prompt keeps the first character fast.
+    (request.glossary, request.people) = glossary_for(app, &request.text, &request.thread_messages, &place);
+    request.user_lang = language(app);
 }
 
 /// Runs a request to the end and returns its sections (for tasks that are not streamed to a page).
@@ -148,7 +238,7 @@ fn language(app: &AppHandle) -> Lang {
     app.state::<SettingsStore>().language()
 }
 
-/// Title of a thread the user did not name.
+/// Title of a thread whose first message gave none.
 fn new_thread_title(lang: Lang) -> String {
     lang.pick("Thread mới", "新しいスレッド").to_string()
 }
@@ -168,25 +258,7 @@ async fn translate(
     ) {
         return Err("only translate and review are streamed".into());
     }
-    match request
-        .thread_id
-        .and_then(|id| thread_context(&app.state::<History>(), id, CONTEXT_MESSAGES))
-    {
-        Some((title, messages)) => {
-            request.thread_messages = messages;
-            request.thread_title = Some(title);
-        }
-        None => {
-            request.thread_id = None;
-            request.thread_messages.clear();
-        }
-    }
-    request.ask_title =
-        request.conversation_id.is_some() && request.thread_id.is_none() && request.new_thread_title.is_none();
-    // Only the terms that occur in this text: a short prompt keeps the first character fast.
-    request.glossary = glossary_for(&app, &request.text);
-    request.conversation_note = conversation_note(&app, request.conversation_id);
-    request.user_lang = language(&app);
+    add_context(&app, &mut request);
 
     let router = router.inner().clone();
     let filed = request.clone();
@@ -194,7 +266,16 @@ async fn translate(
     router
         .translate(request_id, request, &routes, move |event| {
             let saved = match &event {
-                TranslateEvent::Done { sections, timing, .. } => file_result(&app, &filed, sections, timing),
+                TranslateEvent::Done { sections, timing, .. } => {
+                    log::info!(
+                        "{} {}: {:?} tokens, first token {:?} ms",
+                        timing.provider,
+                        timing.model,
+                        timing.tokens,
+                        timing.first_token_ms
+                    );
+                    file_result(&app, &filed, sections, timing)
+                }
                 _ => None,
             };
             let _ = on_event.send(event);
@@ -216,7 +297,7 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         Direction::JaVi => ("ja_vi", &s.translation, &s.back_translation),
         Direction::ViJa => ("vi_ja", &s.translation, &s.back_translation),
         Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
-        Direction::Summarize | Direction::Reply => return None,
+        Direction::Reply => return None,
     };
     // The user's own message goes from their language into the other side's; a review is always theirs.
     let mine = !matches!(
@@ -226,24 +307,15 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
     if result.trim().is_empty() {
         return None;
     }
-    let (thread_id, thread_title) = match req.thread_id {
-        Some(id) => (id, history.thread(id).ok()??.title),
-        None => {
-            let title = [req.new_thread_title.as_deref(), Some(s.thread_title.as_str())]
-                .into_iter()
-                .flatten()
-                .map(str::trim)
-                .find(|t| !t.is_empty())
-                .map(str::to_string)
-                .unwrap_or_else(|| fallback_title(req, s));
-            match history.create_thread(conversation, &title) {
-                Ok(id) => (id, title),
-                Err(e) => {
-                    log::warn!("could not create a thread: {e}");
-                    return None;
-                }
+    let thread_id = match req.thread_id {
+        Some(id) => id,
+        None => match history.create_thread(conversation, &fallback_title(req, s)) {
+            Ok(id) => id,
+            Err(e) => {
+                log::warn!("could not create a thread: {e}");
+                return None;
             }
-        }
+        },
     };
     let message = NewMessage {
         direction,
@@ -255,13 +327,10 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         prompt_version: t.prompt_version,
         first_token_ms: t.first_token_ms,
         total_ms: t.total_ms,
+        tokens: t.tokens,
     };
     match history.add_message(thread_id, &message) {
-        Ok(message_id) => Some(TranslateEvent::Saved {
-            message_id,
-            thread_id,
-            thread_title,
-        }),
+        Ok(message_id) => Some(TranslateEvent::Saved { message_id, thread_id }),
         Err(e) => {
             log::warn!("could not save the translation: {e}");
             None
@@ -269,14 +338,14 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
     }
 }
 
-/// The start of the side in the user's language, when Claude gave no title.
+/// A thread's title: the start of its first message, in the user's language.
 fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
     let own = match (req.direction, req.user_lang) {
         (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja) => s.translation.as_str(),
         (Direction::ViJa, Lang::Vi) | (Direction::JaVi, Lang::Ja) => req.text.as_str(),
         (Direction::ReviewJa, Lang::Vi) => s.suggestion_vi.as_str(),
         (Direction::ReviewJa, Lang::Ja) => s.suggestion.as_str(),
-        (Direction::Summarize | Direction::Reply, _) => "",
+        (Direction::Reply, _) => "",
     };
     // Japanese has no spaces between words: keep the first characters instead.
     let title = if req.user_lang == Lang::Ja {
@@ -291,79 +360,6 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
     }
 }
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HistorySnapshot {
-    conversations: Vec<history::ConversationInfo>,
-    threads: Vec<history::ThreadInfo>,
-}
-
-#[tauri::command]
-fn history_snapshot(history: State<'_, History>) -> Result<HistorySnapshot, String> {
-    Ok(HistorySnapshot {
-        conversations: history.conversations().map_err(|e| e.to_string())?,
-        threads: history.all_threads().map_err(|e| e.to_string())?,
-    })
-}
-
-#[tauri::command]
-fn history_messages(history: State<'_, History>, thread_id: i64) -> Result<Vec<history::MessageInfo>, String> {
-    history.messages(thread_id).map_err(|e| e.to_string())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ThreadRef {
-    thread_id: i64,
-    thread_title: String,
-}
-
-/// The user put a translated message in another thread, or in a new one with the title they typed.
-#[tauri::command]
-fn history_move(
-    app: AppHandle,
-    message_id: i64,
-    conversation_id: i64,
-    from_thread: Option<i64>,
-    to_thread: Option<i64>,
-    new_title: Option<String>,
-) -> Result<ThreadRef, String> {
-    let history = app.state::<History>();
-    let (thread_id, thread_title) = match (to_thread, new_title) {
-        (Some(id), _) => (
-            id,
-            history
-                .thread(id)
-                .map_err(|e| e.to_string())?
-                .ok_or("thread not found")?
-                .title,
-        ),
-        (None, title) => {
-            let title = title
-                .filter(|t| !t.trim().is_empty())
-                .unwrap_or_else(|| new_thread_title(language(&app)));
-            (
-                history
-                    .create_thread(conversation_id, &title)
-                    .map_err(|e| e.to_string())?,
-                title,
-            )
-        }
-    };
-    history.move_message(message_id, thread_id).map_err(|e| e.to_string())?;
-    let _ = history.record_correction(conversation_id, from_thread, thread_id);
-    let _ = app.emit("history:changed", ());
-    Ok(ThreadRef {
-        thread_id,
-        thread_title,
-    })
-}
-
-#[tauri::command]
-fn history_search(history: State<'_, History>, query: String) -> Result<Vec<i64>, String> {
-    history.search_threads(&query).map_err(|e| e.to_string())
-}
-
 /// "Dịch chưa tốt" in the popup, kept with the message to improve the prompt later.
 #[tauri::command]
 fn history_feedback(history: State<'_, History>, message_id: i64, bad: bool) -> Result<(), String> {
@@ -373,7 +369,7 @@ fn history_feedback(history: State<'_, History>, message_id: i64, bad: bool) -> 
 /// Asks where to save, then writes a copy of the whole history. `None` when cancelled.
 #[tauri::command]
 async fn data_backup(app: AppHandle) -> Result<Option<String>, String> {
-    let name = format!("mytranslate-{}.db", &export::date(history::now_ms())[..10]);
+    let name = format!("mytranslate-{}.db", &dates::date(history::now_ms())[..10]);
     let mut dialog = app
         .dialog()
         .file()
@@ -419,126 +415,12 @@ fn backup_filter(lang: Lang) -> &'static str {
     lang.pick("Bản sao lưu MyTranslate", "MyTranslate バックアップ")
 }
 
-/// Deletes all history and personal glossary terms; the settings stay.
+/// Deletes all history and the personal glossary (terms and people); the settings stay.
 #[tauri::command]
 fn data_wipe(app: AppHandle) -> Result<(), String> {
     app.state::<History>().wipe().map_err(|e| e.to_string())?;
     let _ = app.emit("history:changed", ());
     Ok(())
-}
-
-#[tauri::command]
-fn history_set_pinned(app: AppHandle, thread_id: i64, pinned: bool) -> Result<(), String> {
-    app.state::<History>()
-        .set_pinned(thread_id, pinned)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
-#[tauri::command]
-fn history_set_archived(app: AppHandle, thread_id: i64, archived: bool) -> Result<(), String> {
-    app.state::<History>()
-        .set_archived(thread_id, archived)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
-#[tauri::command]
-fn history_delete_thread(app: AppHandle, thread_id: i64) -> Result<(), String> {
-    app.state::<History>()
-        .delete_thread(thread_id)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
-#[tauri::command]
-fn history_delete_conversation(app: AppHandle, conversation_id: i64) -> Result<(), String> {
-    app.state::<History>()
-        .delete_conversation(conversation_id)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
-#[tauri::command]
-fn history_merge(app: AppHandle, from: i64, into: i64) -> Result<(), String> {
-    app.state::<History>()
-        .merge_threads(from, into)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
-/// Asks where to save, then writes the thread as Markdown. Returns the file, or `None` when cancelled.
-#[tauri::command]
-async fn history_export(app: AppHandle, thread_id: i64) -> Result<Option<String>, String> {
-    let history = app.state::<History>();
-    let thread = history
-        .thread(thread_id)
-        .map_err(|e| e.to_string())?
-        .ok_or("thread not found")?;
-    let conversation = history
-        .conversation(thread.conversation_id)
-        .map_err(|e| e.to_string())?;
-    let messages = history.messages(thread_id).map_err(|e| e.to_string())?;
-    let lang = language(&app);
-    let markdown = export::thread_markdown(lang, conversation.as_ref(), &thread, &messages);
-
-    let mut dialog = app
-        .dialog()
-        .file()
-        .set_title(lang.pick("Xuất thread ra Markdown", "スレッドを Markdown で書き出す"))
-        .set_file_name(export::file_name(&thread.title))
-        .add_filter("Markdown", &["md"]);
-    if let Some(main) = app.get_webview_window("main") {
-        dialog = dialog.set_parent(&main);
-    }
-    let picked = tauri::async_runtime::spawn_blocking(move || dialog.blocking_save_file())
-        .await
-        .map_err(|e| e.to_string())?;
-    let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
-        return Ok(None);
-    };
-    std::fs::write(&path, markdown).map_err(|e| e.to_string())?;
-    Ok(Some(path.display().to_string()))
-}
-
-/// Summarizes a thread in the user's language and stores the summary.
-#[tauri::command]
-async fn thread_summarize(
-    app: AppHandle,
-    router: State<'_, Arc<Router>>,
-    thread_id: i64,
-) -> Result<history::ThreadInfo, String> {
-    let history = app.state::<History>();
-    let (title, messages) = thread_context(&history, thread_id, SUMMARY_MESSAGES).ok_or("thread not found")?;
-    let lang = language(&app);
-    if messages.is_empty() {
-        return Err(lang
-            .pick("Thread chưa có tin nào", "このスレッドにはまだメッセージがありません")
-            .into());
-    }
-    let mut request = TranslateRequest::task(Direction::Summarize, "", Keigo::Polite);
-    request.thread_title = Some(title);
-    request.thread_messages = messages;
-    request.user_lang = lang;
-    let sections = complete(&app, router.inner(), request).await?;
-    if sections.summary.trim().is_empty() {
-        return Err(lang
-            .pick("AI không trả về tóm tắt", "AIから要約が返りませんでした")
-            .into());
-    }
-    history
-        .set_summary(thread_id, &sections.summary)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    history
-        .thread(thread_id)
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| "thread not found".into())
 }
 
 /// A reply in the other side's language, with its meaning in the user's.
@@ -559,15 +441,9 @@ async fn suggest_replies(
     thread_id: Option<i64>,
 ) -> Result<Vec<Reply>, String> {
     let mut request = TranslateRequest::task(Direction::Reply, &text, keigo);
-    if let Some((title, messages)) =
-        thread_id.and_then(|id| thread_context(&app.state::<History>(), id, CONTEXT_MESSAGES))
-    {
-        request.thread_title = Some(title);
-        request.thread_messages = messages;
-    }
-    request.glossary = glossary_for(&app, &text);
-    request.conversation_note = conversation_note(&app, conversation_id);
-    request.user_lang = language(&app);
+    request.conversation_id = conversation_id;
+    request.thread_id = thread_id;
+    add_context(&app, &mut request);
     let sections = complete(&app, router.inner(), request).await?;
     let replies = parse_replies(&sections.replies);
     if replies.is_empty() {
@@ -606,33 +482,6 @@ fn parse_replies(text: &str) -> Vec<Reply> {
         .collect()
 }
 
-/// Keigo level ('' = default) and note for a conversation; without a note the stored one is kept.
-#[tauri::command]
-fn conversation_update(
-    app: AppHandle,
-    conversation_id: i64,
-    keigo: String,
-    note: Option<String>,
-) -> Result<(), String> {
-    if !matches!(keigo.as_str(), "" | "casual" | "polite" | "formal") {
-        return Err(format!("unknown keigo {keigo}"));
-    }
-    let history = app.state::<History>();
-    let note = match note {
-        Some(n) => n,
-        None => history
-            .conversation(conversation_id)
-            .map_err(|e| e.to_string())?
-            .map(|c| c.note)
-            .unwrap_or_default(),
-    };
-    history
-        .update_conversation(conversation_id, &keigo, &note)
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
-}
-
 /// The team glossary file named in the settings, read-only.
 #[tauri::command]
 fn glossary_team(store: State<'_, SettingsStore>, cache: State<'_, TeamGlossaryCache>) -> team_glossary::TeamGlossary {
@@ -657,28 +506,42 @@ fn glossary_add(
     ja: String,
     vi: String,
     note: String,
+    kind: TermKind,
 ) -> Result<i64, String> {
+    both_languages(&store, &ja, &vi)?;
+    history
+        .add_glossary_term(&ja, &vi, &note, kind)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn glossary_update(
+    history: State<'_, History>,
+    store: State<'_, SettingsStore>,
+    id: i64,
+    ja: String,
+    vi: String,
+    note: String,
+) -> Result<(), String> {
+    both_languages(&store, &ja, &vi)?;
+    history
+        .update_glossary_term(id, &ja, &vi, &note)
+        .map_err(|e| e.to_string())
+}
+
+fn both_languages(store: &SettingsStore, ja: &str, vi: &str) -> Result<(), String> {
     if ja.trim().is_empty() || vi.trim().is_empty() {
         return Err(store
             .language()
             .pick("Cần cả tiếng Nhật và tiếng Việt", "日本語とベトナム語の両方が必要です")
             .into());
     }
-    history.add_glossary_term(&ja, &vi, &note).map_err(|e| e.to_string())
+    Ok(())
 }
 
 #[tauri::command]
 fn glossary_delete(history: State<'_, History>, id: i64) -> Result<(), String> {
     history.delete_glossary_term(id).map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-fn history_rename_thread(app: AppHandle, thread_id: i64, title: String) -> Result<(), String> {
-    app.state::<History>()
-        .rename_thread(thread_id, title.trim())
-        .map_err(|e| e.to_string())?;
-    let _ = app.emit("history:changed", ());
-    Ok(())
 }
 
 #[tauri::command]
@@ -949,16 +812,11 @@ pub fn run() {
             settings_get,
             settings_set,
             show_main_window,
-            history_snapshot,
-            history_messages,
-            history_move,
-            history_rename_thread,
             glossary_list,
             glossary_add,
+            glossary_update,
             glossary_delete,
             glossary_team,
-            history_set_pinned,
-            history_search,
             history_feedback,
             data_backup,
             data_restore,
@@ -971,14 +829,7 @@ pub fn run() {
             updates::update_status,
             updates::update_check,
             updates::update_install,
-            history_set_archived,
-            history_merge,
-            history_delete_thread,
-            history_delete_conversation,
-            history_export,
-            thread_summarize,
             suggest_replies,
-            conversation_update,
             popup::popup_hide,
             popup::popup_apply,
             popup::popup_copy,
@@ -1017,5 +868,73 @@ mod tests {
             (r[2].text.as_str(), r[2].meaning.as_str()),
             ("ご連絡ありがとうございます。", "")
         );
+    }
+
+    fn msg(text: &str) -> ThreadMessage {
+        ThreadMessage {
+            from_client: true,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn context_keeps_the_latest_messages_that_fit() {
+        let long = "あ".repeat(1000);
+        let kept = within_budget(vec![
+            msg("古い"),
+            msg(&"い".repeat(500)),
+            msg(&"う".repeat(500)),
+            msg(&long),
+            msg("最新"),
+        ]);
+        // Long messages keep their start and end only; the older ones no longer fit.
+        assert_eq!(kept.len(), 3);
+        assert!(kept[0].text.starts_with('う'));
+        assert_eq!(kept[0].text.chars().count(), 400);
+        assert!(kept[1].text.starts_with('あ') && kept[1].text.contains('…'));
+        assert_eq!(kept[2].text, "最新");
+        // The newest message stays even when it is long on its own.
+        assert_eq!(within_budget(vec![msg(&long)]).len(), 1);
+        assert!(within_budget(Vec::new()).is_empty());
+    }
+
+    fn entry(ja: &str, vi: &str, kind: TermKind) -> history::GlossaryTerm {
+        history::GlossaryTerm {
+            id: 0,
+            ja: ja.into(),
+            vi: vi.into(),
+            note: format!("note {vi}"),
+            kind,
+        }
+    }
+
+    #[test]
+    fn people_come_from_the_text_the_thread_or_the_chat_name() {
+        let entries = vec![
+            entry("仕訳", "bút toán", TermKind::Term),
+            entry("田中", "Tanaka", TermKind::Person),
+            entry("鈴木", "Suzuki", TermKind::Person),
+            entry("佐藤", "Sato", TermKind::Person),
+            entry("山田", "Yamada", TermKind::Person),
+            // The team's copy of a personal entry is not sent twice.
+            entry("田中", "Tanaka-san", TermKind::Person),
+        ];
+        let (terms, people) = match_glossary(
+            entries.into_iter(),
+            "仕訳の件、鈴木さんに確認します",
+            &[msg("佐藤です。よろしくお願いします。")],
+            "Tanaka Taro",
+        );
+        assert_eq!(terms, [("仕訳".to_string(), "bút toán".to_string())]);
+        let names: Vec<&str> = people.iter().map(|p| p.vi.as_str()).collect();
+        assert_eq!(names, ["Tanaka", "Suzuki", "Sato"]);
+        // A term is only sent for the text itself, not for the thread around it.
+        let (terms, _) = match_glossary(
+            vec![entry("仕訳", "bút toán", TermKind::Term)].into_iter(),
+            "OK",
+            &[msg("仕訳")],
+            "",
+        );
+        assert!(terms.is_empty());
     }
 }
