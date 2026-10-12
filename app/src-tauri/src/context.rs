@@ -25,10 +25,21 @@ pub struct Context {
     pub hwnd: isize,
     pub exe: String,
     pub app: ChatApp,
-    /// Conversation name taken from the title, e.g. "Team Acme" or "#dev-qa".
+    /// Conversation name taken from the title: a channel ("dev-qa", "General") or a chat ("Team Acme").
     pub conversation: String,
-    /// Workspace or organisation, when the title has one.
+    /// What the conversation belongs to, when the title has it: a Slack workspace or a Teams team.
     pub workspace: Option<String>,
+    /// The Teams organisation (tenant) the conversation is in, when the title has it.
+    pub org: Option<String>,
+}
+
+/// Where a window title says the user is.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Place {
+    pub app: ChatApp,
+    pub conversation: String,
+    pub workspace: Option<String>,
+    pub org: Option<String>,
 }
 
 pub fn foreground() -> Context {
@@ -38,13 +49,14 @@ pub fn foreground() -> Context {
         let n = GetWindowTextW(hwnd, &mut buf);
         let title = String::from_utf16_lossy(&buf[..n.max(0) as usize]);
         let exe = process_name(hwnd).unwrap_or_default();
-        let (app, conversation, workspace) = parse_title(&exe, &title);
+        let place = parse_title(&exe, &title);
         Context {
             hwnd: hwnd.0 as isize,
             exe,
-            app,
-            conversation,
-            workspace,
+            app: place.app,
+            conversation: place.conversation,
+            workspace: place.workspace,
+            org: place.org,
         }
     }
 }
@@ -66,12 +78,13 @@ fn process_name(hwnd: HWND) -> Option<String> {
     }
 }
 
-/// Turns a window title into (app, conversation, workspace).
+/// Reads the app, conversation, workspace and organisation from a window title.
 ///
 /// Slack: `<name> (DM|Channel|...) - <workspace> - Slack`.
-/// Teams: `<section> | <conversation> | ... | <organisation> | <account> | Microsoft Teams`, where the section is
-/// the left rail item (Chat, Activity, チャット...).
-pub fn parse_title(exe: &str, title: &str) -> (ChatApp, String, Option<String>) {
+/// Teams: `<section> | <team> | <channel> | <organisation> | <account> | Microsoft Teams` for a channel and
+/// `<section> | <chat> | <organisation> | <account> | Microsoft Teams` for a chat, where the section is the left
+/// rail item (Chat, Teams and channels, チャット...).
+pub fn parse_title(exe: &str, title: &str) -> Place {
     let exe = exe.to_lowercase();
     if exe == "slack.exe" {
         let core = title.strip_suffix(" - Slack").unwrap_or(title);
@@ -86,7 +99,12 @@ pub fn parse_title(exe: &str, title: &str) -> (ChatApp, String, Option<String>) 
             Some(i) if name.ends_with(')') => &name[..i],
             _ => name,
         };
-        return (ChatApp::Slack, name.trim().to_string(), workspace);
+        return Place {
+            app: ChatApp::Slack,
+            conversation: name.trim().to_string(),
+            workspace,
+            org: None,
+        };
     }
     if exe == "ms-teams.exe" || exe == "teams.exe" {
         let mut parts: Vec<&str> = title.split(" | ").map(str::trim).collect();
@@ -94,15 +112,26 @@ pub fn parse_title(exe: &str, title: &str) -> (ChatApp, String, Option<String>) 
             parts.pop();
         }
         parts.retain(|p| !p.contains('@'));
-        let conversation = parts.get(1).or(parts.first()).copied().unwrap_or("").to_string();
-        let workspace = if parts.len() > 2 {
-            parts.last().map(|s| s.to_string())
-        } else {
-            None
+        let own = |s: &str| Some(s.to_string());
+        let (conversation, workspace, org) = match parts.as_slice() {
+            [_, team, channel, .., org] => (channel.to_string(), own(team), own(org)),
+            [_, chat, org] => (chat.to_string(), None, own(org)),
+            [_, chat] | [chat] => (chat.to_string(), None, None),
+            _ => (String::new(), None, None),
         };
-        return (ChatApp::Teams, conversation, workspace);
+        return Place {
+            app: ChatApp::Teams,
+            conversation,
+            workspace,
+            org,
+        };
     }
-    (ChatApp::Other, title.trim().to_string(), None)
+    Place {
+        app: ChatApp::Other,
+        conversation: title.trim().to_string(),
+        workspace: None,
+        org: None,
+    }
 }
 
 #[cfg(test)]
@@ -111,32 +140,59 @@ mod tests {
 
     #[test]
     fn slack_dm_title() {
-        let (app, name, ws) = parse_title("Slack.exe", "Team Acme (DM) - Acme Tech - Slack");
-        assert_eq!(app, ChatApp::Slack);
-        assert_eq!(name, "Team Acme");
-        assert_eq!(ws.as_deref(), Some("Acme Tech"));
+        let p = parse_title("Slack.exe", "Team Acme (DM) - Acme Tech - Slack");
+        assert_eq!(p.app, ChatApp::Slack);
+        assert_eq!(p.conversation, "Team Acme");
+        assert_eq!(p.workspace.as_deref(), Some("Acme Tech"));
+        assert_eq!(p.org, None);
     }
 
     #[test]
     fn slack_channel_with_dash_in_name() {
-        let (_, name, ws) = parse_title("slack.exe", "dev-qa (Channel) - CustomerX - Slack");
-        assert_eq!(name, "dev-qa");
-        assert_eq!(ws.as_deref(), Some("CustomerX"));
+        let p = parse_title("slack.exe", "dev-qa (Channel) - CustomerX - Slack");
+        assert_eq!(p.conversation, "dev-qa");
+        assert_eq!(p.workspace.as_deref(), Some("CustomerX"));
     }
 
     #[test]
-    fn teams_japanese_ui_title() {
+    fn teams_channel_title() {
+        let title = "チームとチャネル | ALPHA_PROJECT_BOOK | General | acme.example | someone@acme.example | Microsoft Teams";
+        let p = parse_title("ms-teams.exe", title);
+        assert_eq!(
+            p,
+            Place {
+                app: ChatApp::Teams,
+                conversation: "General".into(),
+                workspace: Some("ALPHA_PROJECT_BOOK".into()),
+                org: Some("acme.example".into()),
+            }
+        );
+    }
+
+    #[test]
+    fn teams_channel_opened_from_chat() {
         let title = "チャット | ACME_ALPHA情報共有 | スターターキット_全般 | ACMECLIENT | someone@example.com | Microsoft Teams";
-        let (app, name, ws) = parse_title("ms-teams.exe", title);
-        assert_eq!(app, ChatApp::Teams);
-        assert_eq!(name, "ACME_ALPHA情報共有");
-        assert_eq!(ws.as_deref(), Some("ACMECLIENT"));
+        let p = parse_title("ms-teams.exe", title);
+        assert_eq!(p.conversation, "スターターキット_全般");
+        assert_eq!(p.workspace.as_deref(), Some("ACME_ALPHA情報共有"));
+        assert_eq!(p.org.as_deref(), Some("ACMECLIENT"));
+    }
+
+    #[test]
+    fn teams_chat_title() {
+        let p = parse_title(
+            "ms-teams.exe",
+            "Chat | Tanaka Taro | ACMECLIENT | someone@example.com | Microsoft Teams",
+        );
+        assert_eq!(p.conversation, "Tanaka Taro");
+        assert_eq!(p.workspace, None);
+        assert_eq!(p.org.as_deref(), Some("ACMECLIENT"));
     }
 
     #[test]
     fn other_app_keeps_title() {
-        let (app, name, _) = parse_title("notepad.exe", "memo.txt - Notepad");
-        assert_eq!(app, ChatApp::Other);
-        assert_eq!(name, "memo.txt - Notepad");
+        let p = parse_title("notepad.exe", "memo.txt - Notepad");
+        assert_eq!(p.app, ChatApp::Other);
+        assert_eq!(p.conversation, "memo.txt - Notepad");
     }
 }

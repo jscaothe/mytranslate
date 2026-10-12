@@ -67,7 +67,8 @@ function ConversationCard({ conversation: c }: { conversation: Conversation }) {
     if (isTauri) void saveConversation(c.id, keigo, nextNote).catch((e) => showToast(`${t('Không lưu được', '保存できません')}: ${String(e)}`))
   }
 
-  const dm = !c.name.startsWith('#')
+  // A Teams conversation in a team is a channel; a Slack channel is written with its #.
+  const dm = c.app === 'teams' ? !c.workspace : !c.name.startsWith('#')
   const name = dm ? c.name : c.name.slice(1)
 
   const remove = () => {
@@ -98,7 +99,7 @@ function ConversationCard({ conversation: c }: { conversation: Conversation }) {
           <div className="truncate text-[14px] font-semibold">{name}</div>
           <div className="flex items-center gap-1.5 truncate text-[12.5px] text-ink-2">
             <AppBadge app={c.app} className="size-3.5 text-[8px]" />
-            {[c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : t('Khác', 'その他'), c.workspace].filter(Boolean).join(' · ')}
+            {[c.app === 'slack' ? 'Slack' : c.app === 'teams' ? 'Teams' : t('Khác', 'その他'), c.org, c.workspace].filter(Boolean).join(' · ')}
           </div>
         </div>
         <span className={cx('transition-opacity', !confirming && 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100')}>

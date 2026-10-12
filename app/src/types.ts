@@ -12,7 +12,11 @@ export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'net
 export interface Conversation {
   id: string
   app: ChatApp | 'other'
+  /** What the conversation belongs to: a Slack workspace or a Teams team; empty for a Teams chat. */
   workspace: string
+  /** The Teams organisation (tenant); empty for Slack. */
+  org: string
+  /** The channel or chat. */
   name: string
   /** Keigo to write in for this conversation; `''` uses the default from the settings. */
   keigo: Keigo | ''
