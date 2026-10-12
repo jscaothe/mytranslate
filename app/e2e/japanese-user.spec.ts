@@ -32,8 +32,8 @@ test('the app follows Windows: Japanese texts and a chat with the Vietnamese tea
 test('a Vietnamese message is read in Japanese with the mouse, without any hotkey', async ({ page }) => {
   await selectMessage(page, 'Về lịch release tháng 11')
   const bar = page.locator('[data-quick-bar]')
-  await expect(bar.getByRole('button', { name: /日本語に翻訳/ })).toBeVisible()
-  await bar.getByRole('button', { name: /日本語に翻訳/ }).click()
+  await expect(bar.getByRole('button', { name: '翻訳', exact: true })).toBeVisible()
+  await bar.getByRole('button', { name: '翻訳', exact: true }).click()
 
   await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
   await expect(popup(page).locator('p[lang=ja]')).toHaveText('11月のリリース日程について、来週の水曜日を提案します。いかがでしょうか。')
@@ -120,7 +120,7 @@ test('the first-run guide is in Japanese and practises on a Vietnamese message',
   // Only "translate": the sample is the other side's message, with nothing of the user's own to check.
   const bar = page.locator('[data-quick-bar]')
   await expect(bar.getByRole('button', { name: /チェック/ })).toHaveCount(0)
-  await bar.getByRole('button', { name: /日本語に翻訳/ }).click()
+  await bar.getByRole('button', { name: '翻訳', exact: true }).click()
   await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
 })
 

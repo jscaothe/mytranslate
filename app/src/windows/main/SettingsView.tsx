@@ -201,10 +201,10 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
               <div className="flex flex-col gap-2.5 px-4 py-3.5">
                 <div className="text-[13.5px] text-ink">{t('Xem trước', 'プレビュー')}</div>
                 <PreviewLine label={t('Khi bôi đen tiếng Nhật', '日本語を選択したとき')}>
-                  <QuickActionBar japanese items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
+                  <QuickActionBar items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
                 </PreviewLine>
                 <PreviewLine label={t('Khi bôi đen tiếng Việt', 'ベトナム語を選択したとき')}>
-                  <QuickActionBar japanese={false} items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
+                  <QuickActionBar items={qa.items} display={qa.display} onAction={previewAction} onDismiss={() => undefined} className="animate-none" />
                 </PreviewLine>
               </div>
             </>

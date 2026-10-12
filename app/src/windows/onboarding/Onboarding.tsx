@@ -575,10 +575,7 @@ function StatusIcon({ state }: { state: CheckState }) {
   return <span className="mt-px size-[18px] shrink-0 rounded-full border-2 border-line" />
 }
 
-/**
- * Only "translate": the sample is the other side's message, so there is nothing of the user's own to check, and
- * "Dịch và chép" would copy silently, which teaches nothing here.
- */
+/** Only "translate": the sample is the other side's message, so there is nothing of the user's own to check. */
 const tryItActions: QuickActionId[] = ['translate']
 
 function TryIt() {
@@ -641,11 +638,11 @@ function TryIt() {
         <p className="mt-1 text-[13.5px] text-ink-2">
           {lang === 'ja' ? (
             <>
-              下のベトナム語の文をマウスで選択し、表示された小さなツールバーの <span className="font-semibold text-ink">日本語に翻訳</span> をクリックしてください。
+              下のベトナム語の文をマウスで選択し、表示された小さなツールバーの <span className="font-semibold text-ink">翻訳</span> をクリックしてください。
             </>
           ) : (
             <>
-              Dùng chuột bôi đen câu tiếng Nhật dưới đây, rồi bấm <span className="font-semibold text-ink">Dịch sang Việt</span> trên thanh nhỏ hiện ra.
+              Dùng chuột bôi đen câu tiếng Nhật dưới đây, rồi bấm <span className="font-semibold text-ink">Dịch</span> trên thanh nhỏ hiện ra.
             </>
           )}
         </p>
@@ -665,7 +662,6 @@ function TryIt() {
         </p>
         {bar && !request && (
           <QuickActionBar
-            japanese={lang === 'vi'}
             items={items}
             display={settings.quickActions.display}
             onAction={() => open(readDirection(lang), bar.text)}

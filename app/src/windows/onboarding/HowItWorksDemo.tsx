@@ -81,7 +81,6 @@ export function HowItWorksDemo() {
 
         {phase === 2 && (
           <QuickActionBar
-            japanese={lang === 'vi'}
             items={settings.quickActions.items}
             display={settings.quickActions.display}
             onAction={() => undefined}

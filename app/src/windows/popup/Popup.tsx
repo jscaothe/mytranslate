@@ -42,8 +42,6 @@ const MAX_SHOWN_ISSUES = 3
 const keigoOrder: Keigo[] = ['casual', 'polite', 'formal']
 /** A popup that could not read any text explains why, then gets out of the way. */
 const NOTICE_CLOSE_MS = 2200
-/** How long "copied" stays on screen after translate-and-copy. */
-const AUTO_COPY_CLOSE_MS = 1200
 
 export interface PopupProps {
   request: PopupRequest
@@ -162,24 +160,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     return () => window.clearTimeout(t)
   }, [notice, onClose])
 
-  const tipVisible = tipOpen && resultReady && !isReview && !request.window?.autoCopy
+  const tipVisible = tipOpen && resultReady && !isReview
   const { updateSettings } = store
   useEffect(() => {
     if (tipVisible && !settings.popupTipShown) updateSettings({ popupTipShown: true })
   }, [tipVisible, settings.popupTipShown, updateSettings])
-
-  // Toolbar "translate and copy": put the result on the clipboard as soon as it is ready, say so, then close.
-  const autoCopy = Boolean(windowed && request.window?.autoCopy)
-  const [autoCopied, setAutoCopied] = useState(false)
-  useEffect(() => {
-    if (!autoCopy || !resultReady || autoCopied) return
-    void invoke('clipboard_write', { text: resultText }).then(() => setAutoCopied(true))
-  }, [autoCopy, resultReady, autoCopied, resultText])
-  useEffect(() => {
-    if (!autoCopied) return
-    const t = window.setTimeout(onClose, AUTO_COPY_CLOSE_MS)
-    return () => window.clearTimeout(t)
-  }, [autoCopied, onClose])
 
   // A real window follows its content's height (the Rust side ignores this once the user sets a height).
   useEffect(() => {
@@ -509,11 +494,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             onCopy={(r) => void copy(r.text, t('Đã sao chép câu trả lời', '返信をコピーしました'))}
           />
         ) : null}
-        {autoCopied && (
-          <div role="status" className="flex items-center gap-1.5 border-t border-line px-4 py-2 text-[12.5px] font-medium text-good">
-            <Copy size={13} /> {t('Đã sao chép bản dịch', '翻訳をコピーしました')}
-          </div>
-        )}
         {resultReady && live.answeredBy?.fallbackFrom && (
           <div className="border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
             {t(

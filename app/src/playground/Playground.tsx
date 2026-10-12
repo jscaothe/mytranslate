@@ -6,7 +6,6 @@ import { cx } from '../components/styles'
 import { mockData } from '../data/mock'
 import { comboFromEvent } from '../lib/hotkeys'
 import { locale, route, useLang, useT, type Action, type Lang } from '../lib/i18n'
-import { isJapanese, translate } from '../lib/mockEngine'
 import { useStore, type QuickActionId } from '../store'
 import type { ChatApp as ChatAppKind, ChatChannel } from '../types'
 import { Popup } from '../windows/popup/Popup'
@@ -35,7 +34,7 @@ function firstChannels(lang: Lang): Record<ChatAppKind, string> {
 }
 
 export function Playground() {
-  const { settings, showToast, scenario } = useStore()
+  const { settings, showToast } = useStore()
   const t = useT()
   const lang = useLang()
   const [app, setApp] = useState<ChatAppKind>('slack')
@@ -53,7 +52,7 @@ export function Playground() {
   }
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [guideOpen, setGuideOpen] = useState(true)
-  const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
+  const [quick, setQuick] = useState<{ x: number; y: number; startY: number } | null>(null)
   /** Where the current mouse selection started, to keep the toolbar off the selected lines. */
   const downY = useRef(0)
 
@@ -162,29 +161,13 @@ export function Playground() {
         setQuick(null)
         return
       }
-      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current, japanese: isJapanese(got.text) })
+      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current })
     }, 0)
   }
 
   const runQuick = (action: QuickActionId) => {
     if (action === 'translate') return trigger('auto')
-    if (action === 'review') return trigger('review')
-    const got = capture()
-    setQuick(null)
-    if (!got?.text) return
-    if (scenario === 'not_logged_in' || scenario === 'quota' || scenario === 'network') {
-      showToast(
-        t(
-          'Không dịch được: Claude đang báo lỗi, thử lại bằng popup để xem chi tiết',
-          '翻訳できません: Claude でエラーが発生しています。ポップアップで再試行すると詳細を確認できます',
-        ),
-      )
-      return
-    }
-    const result = translate(got.text, isJapanese(got.text) ? 'ja_vi' : 'vi_ja', settings.defaultKeigo, lang)
-    void navigator.clipboard.writeText(result.translation).catch(() => undefined)
-    const preview = `${result.translation.slice(0, 36)}${result.translation.length > 36 ? '...' : ''}`
-    showToast(t(`Đã dịch và sao chép: ${preview}`, `翻訳してコピーしました: ${preview}`))
+    trigger('review')
   }
 
   // Global shortcuts (in the real app these are OS-wide).
@@ -356,7 +339,7 @@ export function Playground() {
               <>
                 <Step n={1} title="Đọc tin của khách">
                   Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.auto} />
-                  {settings.quickActions.enabled ? ', hoặc bấm "Dịch sang Việt" trên thanh thao tác hiện ra.' : '.'}
+                  {settings.quickActions.enabled ? ', hoặc bấm "Dịch" trên thanh thao tác hiện ra.' : '.'}
                 </Step>
                 <Step n={2} title="Trả lời bằng tiếng Việt">
                   Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
@@ -410,7 +393,6 @@ export function Playground() {
 
       {quick && !request && (
         <QuickActionBar
-          japanese={quick.japanese}
           items={settings.quickActions.items}
           display={settings.quickActions.display}
           onAction={runQuick}

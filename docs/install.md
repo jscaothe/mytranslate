@@ -46,7 +46,7 @@ Trong popup:
 - Kéo thanh tiêu đề để di chuyển, kéo mép hoặc góc dưới để đổi kích thước; popup nhớ vị trí và kích thước cho đến khi tắt app.
 - Với tin của khách: `G` để Claude gợi ý 3 câu trả lời tiếng Nhật (bấm một câu để sao chép), `Enter` để tự gõ câu trả lời tiếng Việt.
 
-Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với các nút Dịch, Kiểm tra, Dịch và sao chép.
+Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với hai nút: Dịch (app tự nhận ra tiếng Nhật hay tiếng Việt) và Kiểm tra.
 Bật/tắt và chọn ứng dụng ở Cài đặt > Thao tác nhanh khi bôi đen.
 
 App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Teams/Slack.

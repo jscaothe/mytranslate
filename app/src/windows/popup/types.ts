@@ -9,8 +9,6 @@ export interface WindowContext {
   /** History: the conversation, and the thread the Rust side filed the text under (null = a new one). */
   conversationId: number | null
   threadId: number | null
-  /** Copy the result as soon as it is ready, then close (toolbar "translate and copy"). */
-  autoCopy: boolean
 }
 
 export type ResizeDirection = 'East' | 'West' | 'South' | 'SouthEast' | 'SouthWest'

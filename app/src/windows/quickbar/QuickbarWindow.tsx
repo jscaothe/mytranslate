@@ -31,7 +31,6 @@ export function QuickbarWindow() {
     <div ref={barRef} className="flex w-max">
       <QuickActionBar
         bare
-        japanese={null}
         items={settings.quickActions.items}
         display={settings.quickActions.display}
         onAction={(action) => void invoke('quickbar_action', { action })}
