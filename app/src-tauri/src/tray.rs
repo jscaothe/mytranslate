@@ -278,22 +278,23 @@ pub fn notice_still_running(app: &AppHandle) {
     show_tray_notice(app, title, &body);
 }
 
-/// Right after installing, the app starts in the tray only. Says where it is and how to open the guide: Windows 11
-/// puts a new tray icon behind the ^ arrow, so a new user would otherwise not see that anything started.
-pub fn notice_first_start(app: &AppHandle) {
+/// The guide is done and the window went to the tray. Says where the app is and how to use it: Windows 11 puts a
+/// new tray icon behind the ^ arrow, so a new user would otherwise think it quit.
+pub fn notice_setup_done(app: &AppHandle) {
     let store = app.state::<SettingsStore>();
-    let main = store.hotkeys().main;
+    let hotkeys = store.hotkeys();
+    let (translate, main) = (hotkeys.auto, hotkeys.main);
     let (title, body) = match store.language() {
         Lang::Vi => (
-            "MyTranslate đang chạy ở khay hệ thống",
+            "Đã cài đặt xong, MyTranslate chạy ở khay hệ thống",
             format!(
-                "Đã cài xong, app thu nhỏ và chạy ngầm. Bấm biểu tượng MyTranslate ở góc phải thanh tác vụ (có thể trong mũi tên ^) hoặc nhấn {main} để mở hướng dẫn."
+                "Bôi đen tin nhắn trong Teams hoặc Slack rồi bấm Dịch, hoặc nhấn {translate}. Nhấn {main} hoặc bấm biểu tượng ở góc phải thanh tác vụ (có thể trong mũi tên ^) để mở lại."
             ),
         ),
         Lang::Ja => (
-            "MyTranslate はタスクトレイで動作中です",
+            "設定が完了しました。MyTranslate はタスクトレイで動作中です",
             format!(
-                "インストールが完了しました。タスクバー右側の MyTranslate アイコン（^ の中の場合あり）か {main} でガイドを開けます。"
+                "Teams や Slack でメッセージを選択して「翻訳」をクリックするか、{translate} を押してください。{main} またはタスクバー右側のアイコン（^ の中の場合あり）で再び開けます。"
             ),
         ),
     };
