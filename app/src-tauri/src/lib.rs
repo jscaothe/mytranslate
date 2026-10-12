@@ -52,14 +52,14 @@ const SUMMARY_MESSAGES: usize = 40;
 const RETENTION_INTERVAL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 const DAY_MS: i64 = 24 * 60 * 60 * 1000;
 
-/// Deletes messages older than the "keep history for" setting (0 or missing keeps everything).
+/// Deletes messages older than the "keep history for" setting: 3 months when missing, 0 keeps everything.
 fn apply_retention(app: &AppHandle) {
     let months = app
         .state::<SettingsStore>()
         .get()
         .get("retentionMonths")
         .and_then(Value::as_i64)
-        .unwrap_or(0);
+        .unwrap_or(3);
     if months <= 0 {
         return;
     }

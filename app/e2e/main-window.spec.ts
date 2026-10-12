@@ -155,6 +155,7 @@ test('glossary: the team file is chosen and dropped from the Glossary tab', asyn
 test('settings: history retention and the two-step wipe', async ({ page }) => {
   await openTab(page, 'Cài đặt')
   const keep = page.getByRole('radiogroup', { name: 'Giữ lịch sử' })
+  await expect(keep.getByRole('radio', { name: '3 tháng' })).toHaveAttribute('aria-checked', 'true')
   await keep.getByRole('radio', { name: '6 tháng' }).click()
   await expect(keep.getByRole('radio', { name: '6 tháng' })).toHaveAttribute('aria-checked', 'true')
 
