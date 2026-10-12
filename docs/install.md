@@ -26,7 +26,10 @@ App hiện tiếng Nhật khi Windows dùng tiếng Nhật; đổi ở Cài đ�
 ### Nếu Windows chặn file cài đặt
 
 Bản thử nghiệm hiện **chưa được ký số**.
+Trang https://mytranslate.pages.dev/#install có hoạt họa từng bước bên dưới.
 
+- Edge báo file "isn't commonly downloaded": trong bảng Downloads bấm **···**, chọn **Keep**, rồi **Show more** và **Keep anyway**.
+- Chrome báo "Suspicious download blocked": bấm vào file trong bảng tải xuống, rồi **Download suspicious file**.
 - SmartScreen báo "Windows protected your PC": bấm **More info**, rồi **Run anyway**.
 - Máy bật **Smart App Control** sẽ chặn hẳn app chưa ký số và không có nút bỏ qua.
   Kiểm tra tại Windows Security > App & browser control > Smart App Control.
