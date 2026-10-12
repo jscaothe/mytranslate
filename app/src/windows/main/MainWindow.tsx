@@ -1,5 +1,6 @@
-import { BookOpen, Settings } from 'lucide-react'
+import { BookOpen, PenLine, Settings } from 'lucide-react'
 import type { ReactNode } from 'react'
+import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { AppMark, WindowFrame } from '../../components/ui'
 import { UpdateBanner } from '../../components/UpdatePanel'
 import { useUpdates } from '../../lib/updates'
@@ -8,9 +9,11 @@ import { useT, type T } from '../../lib/i18n'
 import { useStore, type MainTab } from '../../store'
 import { GlossaryView } from './GlossaryView'
 import { SettingsView } from './SettingsView'
+import { WritingView } from './WritingView'
 
 const nav = (t: T): { tab: MainTab; label: string; icon: ReactNode }[] => [
   { tab: 'glossary', label: t('Glossary', '用語集'), icon: <BookOpen size={19} /> },
+  { tab: 'writing', label: t('Kỹ năng viết', '文章力'), icon: <PenLine size={19} /> },
 ]
 
 /** In the prototype the window is drawn on a fake desktop; in Tauri (`chromeless`) the OS draws the frame. */
@@ -57,8 +60,12 @@ function MainContent() {
           <Settings size={19} />
         </NavButton>
       </nav>
-      {mainTab === 'glossary' && <GlossaryView />}
-      {mainTab === 'settings' && <SettingsView updates={updates} />}
+      {/* Keyed by tab: opening another tab leaves an error behind. */}
+      <ErrorBoundary key={mainTab}>
+        {mainTab === 'glossary' && <GlossaryView />}
+        {mainTab === 'writing' && <WritingView />}
+        {mainTab === 'settings' && <SettingsView updates={updates} />}
+      </ErrorBoundary>
     </div>
     </div>
   )

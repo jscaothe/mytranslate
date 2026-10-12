@@ -4,11 +4,12 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Popup } from './Popup'
 import type { PopupRequest, WindowedHost } from './types'
+import type { Direction } from '../../types'
 
 /** What the Rust side sends when a hotkey fires (see `popup.rs`). */
 interface OpenPayload {
   id: number
-  direction: 'ja_vi' | 'vi_ja' | 'review_ja'
+  direction: Direction
   text: string
   origin: 'chat' | 'composer'
   app: 'slack' | 'teams' | 'other'

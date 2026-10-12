@@ -19,7 +19,7 @@ App hiện tiếng Nhật khi Windows dùng tiếng Nhật; đổi ở Cài đ�
 2. Cài xong, app tự mở **Hướng dẫn ban đầu**: kết nối AI (Claude Code, hoặc API key ChatGPT / Gemini) và dịch thử một câu.
    Chưa xong hướng dẫn thì mỗi lần app khởi động, kể cả khi mở máy, hướng dẫn lại hiện ra.
 3. Bấm **Hoàn tất, thu nhỏ về khay**: app thu nhỏ xuống **khay hệ thống** (góc dưới bên phải, có thể nằm trong mũi tên ^) và Windows hiện thông báo cách dùng.
-   Bấm icon MyTranslate ở khay (hoặc nhấn `Ctrl+Alt+M`) để mở lại; trang **Bắt đầu dùng MyTranslate** nhắc lại ba cách dùng chính và có nút mở Teams / Slack.
+   Bấm icon MyTranslate ở khay (hoặc nhấn `Ctrl+Alt+M`) để mở lại cửa sổ chính.
 4. Từ đó, mỗi lần mở máy app tự chạy, thu nhỏ ở khay, và phím tắt luôn sẵn sàng (tắt được trong Cài đặt > Khởi động cùng Windows).
    Đóng cửa sổ chính thì app vẫn chạy ở khay.
 
@@ -37,7 +37,7 @@ Bản thử nghiệm hiện **chưa được ký số**.
 | Phím tắt | Việc |
 | --- | --- |
 | `Ctrl+Alt+T` | Dịch, app tự chọn ngôn ngữ đích. Bôi đen tin tiếng Nhật rồi nhấn: xem bản dịch tiếng Việt. Gõ tiếng Việt trong ô chat (không cần bôi đen) rồi nhấn: xem bản tiếng Nhật, **Enter** để thay vào ô chat |
-| `Ctrl+Alt+C` | Câu tiếng Nhật bạn tự viết: kiểm tra ngữ pháp, kính ngữ, **Enter** để dùng câu đề xuất |
+| `Ctrl+Alt+C` | Kiểm tra câu bạn tự viết theo đúng ngôn ngữ của câu: tiếng Nhật được kiểm tra như tiếng Nhật (ngữ pháp, kính ngữ, độ tự nhiên), tiếng Việt như tiếng Việt (chính tả, ngữ pháp, cách xưng hô), không dịch. Popup chỉ ra chỗ cần sửa và câu đề xuất, **Enter** để dùng câu đề xuất |
 | `Ctrl+Alt+M` | Mở cửa sổ chính |
 
 Trong popup:
@@ -50,6 +50,12 @@ Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạn
 Bật/tắt và chọn ứng dụng ở Cài đặt > Thao tác nhanh khi bôi đen.
 
 App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Teams/Slack.
+
+### Kỹ năng viết
+
+Mỗi lần kiểm tra câu, app ghi lại các lỗi trên máy bạn.
+Tab **Kỹ năng viết** trong cửa sổ chính tổng hợp chúng theo từng ngôn ngữ: số lần kiểm tra, tỉ lệ câu không cần sửa, lỗi theo loại, lỗi bạn hay lặp lại và các lỗi gần đây.
+Bấm **Phân tích lỗi của tôi** để AI đọc các lỗi đó và đưa ra vài điểm cần lưu ý; kết quả được giữ lại cho tới khi có lỗi mới.
 
 ### Mẹo để dịch tốt hơn
 

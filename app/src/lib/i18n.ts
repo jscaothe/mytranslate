@@ -31,7 +31,7 @@ export function useT(): T {
 /** BCP 47 locale for dates and numbers. */
 export const locale = (lang: Lang) => (lang === 'ja' ? 'ja-JP' : 'vi-VN')
 
-/** What a popup does for this user: read the other side, write to them, or check Japanese. */
+/** What a popup does for this user: read the other side, write to them, or check a sentence they wrote. */
 export type Role = 'read' | 'write' | 'review'
 
 export function readDirection(lang: Lang): 'ja_vi' | 'vi_ja' {
@@ -43,23 +43,23 @@ export function writeDirection(lang: Lang): 'ja_vi' | 'vi_ja' {
 }
 
 export function roleOf(direction: Direction, lang: Lang): Role {
-  if (direction === 'review_ja') return 'review'
+  if (direction === 'review_ja' || direction === 'review_vi') return 'review'
   return direction === readDirection(lang) ? 'read' : 'write'
 }
 
-/** The language a translation produces. */
+/** The language a translation produces; a review stays in the language of the sentence. */
 export function targetLang(direction: Direction): Lang {
-  return direction === 'ja_vi' ? 'vi' : 'ja'
+  return direction === 'ja_vi' || direction === 'review_vi' ? 'vi' : 'ja'
 }
 
 export function sourceLang(direction: Direction): Lang {
-  return direction === 'vi_ja' ? 'vi' : 'ja'
+  return direction === 'vi_ja' || direction === 'review_vi' ? 'vi' : 'ja'
 }
 
 /** The other side's language. */
 export const otherLang = (lang: Lang): Lang => (lang === 'ja' ? 'vi' : 'ja')
 
-/** What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button) or check Japanese. */
+/** What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button) or check what they wrote. */
 export type Action = 'auto' | 'review'
 
 export function hasJapanese(text: string): boolean {
@@ -75,11 +75,12 @@ export function isMostlyJapanese(text: string): boolean {
 
 /**
  * Which way to translate and where the result goes, like `popup::route` in the real app: the text's language
- * decides the way; only what the user writes in the message box is replaced, everything else is shown.
+ * decides the way, and a check stays in that language; only what the user writes in the message box is replaced,
+ * everything else is shown.
  */
 export function route(action: Action, text: string, lang: Lang, from: 'chat' | 'composer'): { direction: Direction; origin: 'chat' | 'composer' } {
-  const direction: Direction =
-    action === 'auto' ? (isMostlyJapanese(text) ? 'ja_vi' : 'vi_ja') : hasJapanese(text) ? 'review_ja' : 'vi_ja'
-  const writing = direction === writeDirection(lang) || direction === 'review_ja'
+  const japanese = isMostlyJapanese(text)
+  const direction: Direction = action === 'auto' ? (japanese ? 'ja_vi' : 'vi_ja') : japanese ? 'review_ja' : 'review_vi'
+  const writing = direction === writeDirection(lang) || action === 'review'
   return { direction, origin: writing && from === 'composer' ? 'composer' : 'chat' }
 }

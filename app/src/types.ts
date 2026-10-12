@@ -1,6 +1,7 @@
 export type ChatApp = 'slack' | 'teams'
 
-export type Direction = 'ja_vi' | 'vi_ja' | 'review_ja'
+/** `review_ja` and `review_vi` check a sentence the user wrote, in its own language, instead of translating it. */
+export type Direction = 'ja_vi' | 'vi_ja' | 'review_ja' | 'review_vi'
 
 export type Keigo = 'casual' | 'polite' | 'formal'
 
@@ -38,10 +39,16 @@ export interface Note {
   text: string
 }
 
+/** What a review found wrong. `other` also covers lines the AI did not write in the expected form. */
+export type IssueKind = 'grammar' | 'politeness' | 'natural' | 'spelling' | 'word_choice' | 'other'
+
 export interface ReviewIssue {
-  /** Usually Ngữ pháp, Kính ngữ, Tự nhiên or Chính tả, as named by Claude. */
-  kind: string
-  span: string
+  kind: IssueKind
+  /** The words as written; empty when the issue is about the whole sentence. */
+  wrong: string
+  /** What to write instead; empty when there is no single replacement. */
+  fix: string
+  /** Why, in the user's language. */
   text: string
 }
 

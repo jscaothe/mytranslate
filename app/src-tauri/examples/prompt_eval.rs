@@ -107,7 +107,9 @@ fn main() {
         let direction = match case.direction {
             Direction::JaVi => format!("JA→VI ({:?})", case.keigo).to_lowercase(),
             Direction::ViJa => format!("VI→JA ({:?})", case.keigo).to_lowercase(),
-            Direction::ReviewJa => format!("Kiểm tra ({:?})", case.keigo).to_lowercase(),
+            Direction::ReviewJa => format!("Kiểm tra JA ({:?})", case.keigo).to_lowercase(),
+            Direction::ReviewVi => "kiểm tra vi".into(),
+            Direction::WritingAdvice => "lời khuyên".into(),
             Direction::Reply => format!("Gợi ý trả lời ({:?})", case.keigo).to_lowercase(),
         };
         let direction = match case.user {
@@ -118,7 +120,7 @@ fn main() {
             Some(TranslateEvent::Done {
                 sections: s, timing, ..
             }) => match case.direction {
-                Direction::ReviewJa => (
+                Direction::ReviewJa | Direction::ReviewVi => (
                     format!("[{}] {}", s.verdict, s.suggestion),
                     format!("{} {}", s.suggestion_vi, s.issues.replace('\n', "; ")),
                     first(&timing),

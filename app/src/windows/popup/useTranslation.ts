@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { emptySections, isTauri, startTranslation, type ErrorKind, type RateLimit, type Sections } from '../../lib/claude'
 import { useLang } from '../../lib/i18n'
-import type { Keigo, Scenario } from '../../types'
+import type { Direction, Keigo, Scenario } from '../../types'
 
 export type TranslationPhase = 'waiting' | 'thinking' | 'streaming' | 'done' | 'error'
 
@@ -48,7 +48,7 @@ export function useTranslation({
   history,
   ai,
 }: {
-  direction: 'ja_vi' | 'vi_ja' | 'review_ja'
+  direction: Direction
   text: string
   keigo: Keigo
   /** The user picked `keigo` for this message, rather than it being their default. */

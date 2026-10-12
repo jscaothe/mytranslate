@@ -117,9 +117,26 @@ test('the first-run guide is in Japanese and practises on a Vietnamese message',
     window.getSelection()!.addRange(range)
     el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
   })
-  // Only "translate": a Japanese user has no need to check their own Japanese here.
+  // Only "translate": the sample is the other side's message, with nothing of the user's own to check.
   const bar = page.locator('[data-quick-bar]')
   await expect(bar.getByRole('button', { name: /チェック/ })).toHaveCount(0)
   await bar.getByRole('button', { name: /日本語に翻訳/ }).click()
   await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
+})
+
+test('Japanese checked as Japanese, with the explanations and writing advice in Japanese', async ({ page }) => {
+  await composer(page).fill('明日までに確認してください。')
+  await page.keyboard.press('Control+Alt+C')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'review_ja')
+  await expect(popup(page).locator('[data-issue=politeness]')).toContainText('敬語')
+  await expect(popup(page).locator('[data-issue=politeness]')).toContainText('命令的')
+  await popup(page).press('Escape')
+
+  await page.getByRole('button', { name: 'メイン画面' }).click()
+  await page.getByRole('button', { name: '文章力', exact: true }).click()
+  // A Japanese user writes Vietnamese to the other side: that is shown first.
+  await expect(page.getByRole('radiogroup', { name: '文の言語' }).getByRole('radio', { name: 'ベトナム語' })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByText('呼び方').first()).toBeVisible()
+  await page.getByRole('button', { name: '自分の誤りを分析' }).click()
+  await expect(page.getByText('略語を使わない')).toBeVisible()
 })

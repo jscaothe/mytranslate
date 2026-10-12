@@ -55,6 +55,7 @@ pub enum Direction {
     JaVi,
     ViJa,
     ReviewJa,
+    ReviewVi,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -499,15 +500,15 @@ pub fn route(action: Action, text: &str, lang: Lang, in_message_box: Option<bool
     let direction = match action {
         Action::Auto if is_mostly_japanese(text) => Direction::JaVi,
         Action::Auto => Direction::ViJa,
-        // Nothing Japanese to check: translate the Vietnamese instead of reviewing it.
-        Action::Review if !has_japanese(text) => Direction::ViJa,
-        Action::Review => Direction::ReviewJa,
+        // A review checks the text in its own language, whichever the user's is.
+        Action::Review if is_mostly_japanese(text) => Direction::ReviewJa,
+        Action::Review => Direction::ReviewVi,
     };
     let write = match lang {
         Lang::Vi => Direction::ViJa,
         Lang::Ja => Direction::JaVi,
     };
-    let writing = direction == write || direction == Direction::ReviewJa;
+    let writing = direction == write || matches!(direction, Direction::ReviewJa | Direction::ReviewVi);
     let origin = if writing && in_message_box != Some(false) {
         Origin::Composer
     } else {
@@ -532,11 +533,6 @@ fn is_vietnamese_letter(c: char) -> bool {
     !c.is_ascii() && matches!(c, '\u{00C0}'..='\u{01B0}' | '\u{1EA0}'..='\u{1EF9}')
 }
 
-pub fn has_japanese(text: &str) -> bool {
-    text.chars().any(is_japanese_char)
-}
-
-/// Kana and kanji.
 fn is_japanese_char(c: char) -> bool {
     matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}')
 }
@@ -664,7 +660,7 @@ mod tests {
             route(Action::Auto, ja, Lang::Ja, message_box),
             (Direction::JaVi, Origin::Composer)
         );
-        // Checking Japanese works the same for both; Vietnamese text is translated instead.
+        // A review checks the text in its own language, for both users.
         assert_eq!(
             route(Action::Review, ja, Lang::Ja, message_box),
             (Direction::ReviewJa, Origin::Composer)
@@ -675,14 +671,11 @@ mod tests {
         );
         assert_eq!(
             route(Action::Review, vi, Lang::Vi, message_box),
-            (Direction::ViJa, Origin::Composer)
+            (Direction::ReviewVi, Origin::Composer)
         );
-    }
-
-    #[test]
-    fn detects_japanese() {
-        assert!(has_japanese("確認しました"));
-        assert!(has_japanese("カタカナ"));
-        assert!(!has_japanese("Đã xác nhận, cảm ơn"));
+        assert_eq!(
+            route(Action::Review, vi, Lang::Ja, chat),
+            (Direction::ReviewVi, Origin::Chat)
+        );
     }
 }

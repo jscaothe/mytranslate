@@ -575,8 +575,11 @@ function StatusIcon({ state }: { state: CheckState }) {
   return <span className="mt-px size-[18px] shrink-0 rounded-full border-2 border-line" />
 }
 
-/** Only the buttons that open the popup; "Dịch và chép" would copy silently, which teaches nothing here. */
-const tryItActions: QuickActionId[] = ['translate', 'review']
+/**
+ * Only "translate": the sample is the other side's message, so there is nothing of the user's own to check, and
+ * "Dịch và chép" would copy silently, which teaches nothing here.
+ */
+const tryItActions: QuickActionId[] = ['translate']
 
 function TryIt() {
   const { settings } = useStore()
@@ -629,8 +632,7 @@ function TryIt() {
     }, 0)
   }
 
-  // A Japanese user does not need their own Japanese checked here: only "translate".
-  const items = settings.quickActions.items.filter((i) => tryItActions.includes(i.id) && (lang === 'vi' || i.id === 'translate'))
+  const items = settings.quickActions.items.filter((i) => tryItActions.includes(i.id))
 
   return (
     <div className="flex flex-col gap-4">
@@ -666,7 +668,7 @@ function TryIt() {
             japanese={lang === 'vi'}
             items={items}
             display={settings.quickActions.display}
-            onAction={(a) => open(a === 'review' ? 'review_ja' : readDirection(lang), bar.text)}
+            onAction={() => open(readDirection(lang), bar.text)}
             onDismiss={() => setBar(null)}
             className="absolute z-10"
             style={{ left: bar.x, top: bar.y }}

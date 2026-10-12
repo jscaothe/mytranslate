@@ -9,8 +9,6 @@ export interface QuickActionMeta {
   icon: LucideIcon
   /** Button text on the toolbar; may depend on the selected language (`null`: not known yet). */
   label: (japanese: boolean | null) => string
-  /** Whether the button makes sense for the current selection. */
-  applies: (japanese: boolean | null) => boolean
   primary?: boolean
   title?: string
 }
@@ -28,32 +26,28 @@ export function quickActionMeta(lang: Lang): Record<QuickActionId, QuickActionMe
       icon: Languages,
       label: (ja) =>
         ja === null ? t('Dịch', '翻訳') : ja ? t('Dịch sang Việt', 'ベトナム語に翻訳') : t('Dịch sang Nhật', '日本語に翻訳'),
-      applies: () => true,
       primary: true,
     },
     review: {
-      name: t('Kiểm tra tiếng Nhật', '日本語チェック'),
+      name: t('Kiểm tra câu', '文章チェック'),
       description: t(
-        'Mở popup kiểm tra ngữ pháp và kính ngữ. Chỉ hiện khi đoạn bôi đen là tiếng Nhật.',
-        '文法と敬語をチェックするポップアップを開きます。日本語を選択したときだけ表示されます。',
+        'Kiểm tra câu bạn viết bằng chính ngôn ngữ đó (tiếng Nhật hoặc tiếng Việt) và đề xuất cách sửa.',
+        '書いた文を、その言語（日本語またはベトナム語）のままチェックし、修正案を出します。',
       ),
       icon: SpellCheck,
       label: () => t('Kiểm tra', 'チェック'),
-      applies: (ja) => ja !== false,
     },
     copyTranslation: {
       name: t('Dịch và chép', '翻訳してコピー'),
       description: t('Dịch rồi sao chép thẳng vào clipboard, không mở popup.', '翻訳結果をポップアップを開かずにクリップボードへコピーします。'),
       icon: ClipboardCopy,
       label: () => t('Dịch và chép', '翻訳してコピー'),
-      applies: () => true,
       title: t('Dịch rồi sao chép luôn, không mở popup', 'ポップアップを開かずに翻訳してコピー'),
     },
   }
 }
 
 /** Buttons to draw on the toolbar, in the user's order. */
-export function visibleQuickActions(items: QuickActionItem[], japanese: boolean | null): QuickActionId[] {
-  const meta = quickActionMeta('vi')
-  return items.filter((i) => i.enabled && meta[i.id].applies(japanese)).map((i) => i.id)
+export function visibleQuickActions(items: QuickActionItem[]): QuickActionId[] {
+  return items.filter((i) => i.enabled).map((i) => i.id)
 }
