@@ -31,7 +31,7 @@ const defaultSettings: Settings = {
   },
   // The prototype shows how a configured team glossary looks; the real app starts without one.
   glossaryPath: isTauri ? '' : 'D:\\projects\\customerx\\docs\\glossary.yaml',
-  retentionMonths: 0,
+  retentionMonths: 3,
   autoUpdateCheck: true,
   autostart: true,
   blockedApps: ['1Password.exe', 'KeePass.exe'],
