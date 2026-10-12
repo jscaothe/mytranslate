@@ -2,9 +2,9 @@
 //! Japanese person chatting with Vietnamese colleagues). It sets the language of the app's texts and which way
 //! "read" and "write" translate.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Lang {
     #[default]

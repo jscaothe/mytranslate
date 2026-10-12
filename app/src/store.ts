@@ -3,7 +3,7 @@ import type { Lang } from './lib/i18n'
 import type { GlossaryTerm, Keigo, Scenario } from './types'
 
 export type Screen = 'playground' | 'main' | 'onboarding'
-export type MainTab = 'glossary' | 'settings'
+export type MainTab = 'glossary' | 'writing' | 'settings'
 export type ThemePref = 'system' | 'light' | 'dark'
 
 export type AiProvider = 'claude' | 'openai' | 'gemini'

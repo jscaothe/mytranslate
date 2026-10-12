@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 
-// The main window: Glossary (terms and people) and Settings, with the prototype's sample data.
+// The main window: Glossary (terms and people), writing skills and Settings, with the prototype's sample data.
 
 const openTab = async (page: Page, tab: string) => {
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
@@ -12,11 +12,12 @@ test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('the main window has the Glossary and Settings only: threads and contacts are kept out of sight', async ({ page }) => {
+test('the main window has the Glossary, writing skills and Settings: threads and contacts are kept out of sight', async ({ page }) => {
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   const nav = page.getByRole('navigation', { name: 'Điều hướng' })
-  await expect(nav.getByRole('button')).toHaveText(['', ''])
+  await expect(nav.getByRole('button')).toHaveText(['', '', ''])
   await expect(nav.getByRole('button', { name: 'Glossary' })).toHaveAttribute('aria-current', 'page')
+  await expect(nav.getByRole('button', { name: 'Kỹ năng viết' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Cài đặt' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Threads', exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Người liên hệ', exact: true })).toHaveCount(0)
@@ -139,4 +140,34 @@ test('settings: set up ChatGPT in its card, star a model, and make it the defaul
   await card.getByRole('button', { name: 'Dùng ChatGPT' }).click()
   await expect(card.getByText('Đang dùng')).toBeVisible()
   await expect(page.getByText('ChatGPT · GPT-5.6 Luna')).toBeVisible()
+})
+
+test('writing: what the checks found, per language and period, and advice from the AI', async ({ page }) => {
+  await openTab(page, 'Kỹ năng viết')
+  // A Vietnamese user checks the Japanese they send first.
+  const language = page.getByRole('radiogroup', { name: 'Ngôn ngữ của câu' })
+  await expect(language.getByRole('radio', { name: 'Tiếng Nhật' })).toHaveAttribute('aria-checked', 'true')
+  await expect(page.getByText('Câu đã kiểm tra')).toBeVisible()
+  const kinds = page.getByRole('list', { name: 'Lỗi theo loại' })
+  await expect(kinds.getByRole('listitem').first()).toContainText('Kính ngữ')
+  const repeated = page.locator('section', { has: page.getByRole('heading', { name: 'Lỗi lặp lại' }) })
+  await expect(repeated.getByRole('listitem').first()).toContainText('確認してください')
+  await expect(repeated.getByRole('listitem').first()).toContainText('lần')
+
+  // Vietnamese: politeness is about forms of address.
+  await language.getByRole('radio', { name: 'Tiếng Việt' }).click()
+  await expect(repeated.getByRole('listitem').first()).toContainText('ko')
+  await expect(page.getByText('Xưng hô').first()).toBeVisible()
+
+  // A shorter period leaves out older checks.
+  const period = page.getByRole('radiogroup', { name: 'Khoảng thời gian' })
+  const recent = page.locator('section', { has: page.getByRole('heading', { name: 'Gần đây' }) }).getByRole('listitem')
+  await period.getByRole('radio', { name: 'Tất cả' }).click()
+  const all = await recent.count()
+  await period.getByRole('radio', { name: '30 ngày' }).click()
+  await expect(recent).not.toHaveCount(all)
+
+  await page.getByRole('button', { name: 'Phân tích lỗi của tôi' }).click()
+  await expect(page.getByText('Viết đủ từ, không viết tắt')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Làm mới' })).toBeVisible()
 })

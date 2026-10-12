@@ -8,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::lang::Lang;
+use crate::review::{AdviceItem, Issue};
 
 /// Bump with a new entry in `MIGRATIONS` whenever the schema changes.
 const MIGRATIONS: &[&str] = &[
@@ -125,11 +126,35 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE messages ADD COLUMN cached_tokens INTEGER;
     ALTER TABLE messages ADD COLUMN output_tokens INTEGER;
 "#,
+    r#"
+    -- Reviews: how each check came out and every problem it found, so the Writing tab can show the user the
+    -- mistakes they make most. They go with their message (history retention, wipe).
+    ALTER TABLE messages ADD COLUMN verdict TEXT NOT NULL DEFAULT '';
+    CREATE TABLE review_issues (
+        id          INTEGER PRIMARY KEY,
+        message_id  INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+        lang        TEXT NOT NULL,
+        kind        TEXT NOT NULL,
+        wrong       TEXT NOT NULL DEFAULT '',
+        fix         TEXT NOT NULL DEFAULT '',
+        explanation TEXT NOT NULL DEFAULT '',
+        created_at  INTEGER NOT NULL
+    );
+    CREATE INDEX review_issues_by_lang ON review_issues (lang, created_at);
+    -- The AI's last advice on the user's mistakes in a language, kept until they ask again.
+    CREATE TABLE writing_advice (
+        lang       TEXT PRIMARY KEY,
+        items      TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+    );
+"#,
 ];
 
 /// Every table holding user data, children first (for wiping).
-const DATA_TABLES: [&str; 5] = [
+const DATA_TABLES: [&str; 7] = [
     "thread_corrections",
+    "review_issues",
+    "writing_advice",
     "messages",
     "threads",
     "conversations",
@@ -453,6 +478,154 @@ impl History {
         Ok(id)
     }
 
+    /// Stores how a review came out and what it found.
+    pub fn set_review(&self, message_id: i64, lang: Lang, verdict: &str, issues: &[Issue]) -> rusqlite::Result<()> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        tx.execute(
+            "UPDATE messages SET verdict = ?2 WHERE id = ?1",
+            params![message_id, verdict],
+        )?;
+        let now = now_ms();
+        for i in issues {
+            tx.execute(
+                "INSERT INTO review_issues (message_id, lang, kind, wrong, fix, explanation, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![message_id, lang.code(), i.kind, i.wrong, i.fix, i.explanation, now],
+            )?;
+        }
+        tx.commit()
+    }
+
+    /// The user's writing in each language since `since_ms`: how often a review found nothing to fix, the kinds of
+    /// mistakes, the ones made again and again, and the latest.
+    pub fn writing_stats(&self, since_ms: i64) -> rusqlite::Result<Vec<WritingStats>> {
+        let conn = self.conn.lock().unwrap();
+        [Lang::Ja, Lang::Vi]
+            .into_iter()
+            .map(|lang| {
+                let direction = match lang {
+                    Lang::Ja => "review_ja",
+                    Lang::Vi => "review_vi",
+                };
+                // Checks from before reviews were recorded have no verdict: they would only lower the share.
+                let (reviews, clean): (i64, i64) = conn.query_row(
+                    "SELECT COUNT(*), COALESCE(SUM(verdict = 'ok'), 0) FROM messages
+                     WHERE direction = ?1 AND created_at >= ?2 AND verdict != ''",
+                    params![direction, since_ms],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?;
+                let lang = lang.code();
+                let kinds = conn
+                    .prepare(
+                        "SELECT kind, COUNT(*) AS n FROM review_issues WHERE lang = ?1 AND created_at >= ?2
+                         GROUP BY kind ORDER BY n DESC, kind",
+                    )?
+                    .query_map(params![lang, since_ms], |r| {
+                        Ok(KindCount {
+                            kind: r.get(0)?,
+                            count: r.get(1)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                // The same words written wrong more than once; the latest fix shows how to write them.
+                let repeated = conn
+                    .prepare(
+                        "SELECT kind, wrong, fix, n FROM (
+                            SELECT kind, wrong, fix, COUNT(*) OVER (PARTITION BY lower(wrong)) AS n,
+                                   ROW_NUMBER() OVER (PARTITION BY lower(wrong) ORDER BY created_at DESC, id DESC) AS latest
+                            FROM review_issues WHERE lang = ?1 AND created_at >= ?2 AND wrong != '')
+                         WHERE latest = 1 AND n > 1 ORDER BY n DESC, wrong LIMIT 10",
+                    )?
+                    .query_map(params![lang, since_ms], |r| {
+                        Ok(Repeated {
+                            kind: r.get(0)?,
+                            wrong: r.get(1)?,
+                            fix: r.get(2)?,
+                            count: r.get(3)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                let recent = conn
+                    .prepare(
+                        "SELECT kind, wrong, fix, explanation, created_at FROM review_issues
+                         WHERE lang = ?1 AND created_at >= ?2 ORDER BY created_at DESC, id DESC LIMIT 20",
+                    )?
+                    .query_map(params![lang, since_ms], |r| {
+                        Ok(RecentIssue {
+                            kind: r.get(0)?,
+                            wrong: r.get(1)?,
+                            fix: r.get(2)?,
+                            explanation: r.get(3)?,
+                            created_at: r.get(4)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<_>>()?;
+                Ok(WritingStats {
+                    lang: lang.to_string(),
+                    reviews,
+                    clean,
+                    kinds,
+                    repeated,
+                    recent,
+                })
+            })
+            .collect()
+    }
+
+    /// The latest mistakes in a language, newest first, for the AI to find the habits behind them.
+    pub fn writing_issues(&self, lang: Lang, limit: usize) -> rusqlite::Result<Vec<Issue>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT kind, wrong, fix, explanation FROM review_issues WHERE lang = ?1
+             ORDER BY created_at DESC, id DESC LIMIT ?2",
+        )?;
+        stmt.query_map(params![lang.code(), limit as i64], |r| {
+            Ok(Issue {
+                kind: r.get(0)?,
+                wrong: r.get(1)?,
+                fix: r.get(2)?,
+                explanation: r.get(3)?,
+            })
+        })?
+        .collect()
+    }
+
+    /// The stored advice for a language; stale once a review found something new after it was made.
+    pub fn advice(&self, lang: Lang) -> rusqlite::Result<Option<Advice>> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT items, created_at,
+                    EXISTS (SELECT 1 FROM review_issues i WHERE i.lang = a.lang AND i.created_at > a.created_at)
+             FROM writing_advice a WHERE lang = ?1",
+            [lang.code()],
+            |r| {
+                let items: String = r.get(0)?;
+                Ok(Advice {
+                    items: serde_json::from_str(&items).unwrap_or_default(),
+                    created_at: r.get(1)?,
+                    stale: r.get(2)?,
+                })
+            },
+        )
+        .optional()
+    }
+
+    pub fn set_advice(&self, lang: Lang, items: &[AdviceItem]) -> rusqlite::Result<Advice> {
+        let conn = self.conn.lock().unwrap();
+        let now = now_ms();
+        conn.execute(
+            "INSERT INTO writing_advice (lang, items, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (lang) DO UPDATE SET items = excluded.items, created_at = excluded.created_at",
+            params![lang.code(), serde_json::to_string(items).unwrap_or_default(), now],
+        )?;
+        Ok(Advice {
+            items: items.to_vec(),
+            created_at: now,
+            stale: false,
+        })
+    }
+
     pub fn glossary(&self) -> rusqlite::Result<Vec<GlossaryTerm>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt =
@@ -551,6 +724,53 @@ pub struct GlossaryTerm {
     /// For a term, a note for the user; for a person, a prompt about them (role, how to address them, keigo).
     pub note: String,
     pub kind: TermKind,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WritingStats {
+    /// The language written: `ja` or `vi`.
+    pub lang: String,
+    pub reviews: i64,
+    /// Reviews that found nothing to fix.
+    pub clean: i64,
+    pub kinds: Vec<KindCount>,
+    pub repeated: Vec<Repeated>,
+    pub recent: Vec<RecentIssue>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KindCount {
+    pub kind: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Repeated {
+    pub kind: String,
+    pub wrong: String,
+    pub fix: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentIssue {
+    pub kind: String,
+    pub wrong: String,
+    pub fix: String,
+    pub explanation: String,
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Advice {
+    pub items: Vec<AdviceItem>,
+    pub created_at: i64,
+    pub stale: bool,
 }
 
 /// A word to translate the same way every time, or a person the user writes to or about.
@@ -841,6 +1061,87 @@ mod tests {
             )
             .unwrap();
         assert_eq!(stored, (1450, 1024, 80));
+    }
+
+    fn review(h: &History, t: i64, lang: Lang, verdict: &str, issues: &[(&str, &str, &str)]) {
+        let direction = match lang {
+            Lang::Ja => "review_ja",
+            Lang::Vi => "review_vi",
+        };
+        let id = h.add_message(t, &msg(direction, "x", "y")).unwrap();
+        let issues: Vec<Issue> = issues
+            .iter()
+            .map(|(kind, wrong, fix)| Issue {
+                kind: kind.to_string(),
+                wrong: wrong.to_string(),
+                fix: fix.to_string(),
+                explanation: String::new(),
+            })
+            .collect();
+        h.set_review(id, lang, verdict, &issues).unwrap();
+    }
+
+    #[test]
+    fn writing_stats_count_reviews_kinds_and_repeated_mistakes() {
+        let h = History::in_memory();
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
+        let t = h.create_thread(conv, "x").unwrap();
+        review(&h, t, Lang::Vi, "ok", &[]);
+        review(
+            &h,
+            t,
+            Lang::Vi,
+            "suggest",
+            &[("spelling", "ko", "không"), ("politeness", "bạn", "anh")],
+        );
+        review(&h, t, Lang::Vi, "suggest", &[("spelling", "Ko", "không")]);
+        review(
+            &h,
+            t,
+            Lang::Ja,
+            "error",
+            &[("politeness", "見てください", "ご確認ください")],
+        );
+
+        let stats = h.writing_stats(0).unwrap();
+        let (ja, vi) = (&stats[0], &stats[1]);
+        assert_eq!((ja.lang.as_str(), ja.reviews, ja.clean), ("ja", 1, 0));
+        assert_eq!((vi.lang.as_str(), vi.reviews, vi.clean), ("vi", 3, 1));
+        assert_eq!(
+            vi.kinds.iter().map(|k| (k.kind.as_str(), k.count)).collect::<Vec<_>>(),
+            [("spelling", 2), ("politeness", 1)]
+        );
+        // "ko" twice, whatever the case; the latest spelling is shown.
+        assert_eq!(vi.repeated.len(), 1);
+        assert_eq!((vi.repeated[0].wrong.as_str(), vi.repeated[0].count), ("Ko", 2));
+        assert_eq!(vi.recent.len(), 3);
+        assert_eq!(h.writing_issues(Lang::Ja, 10).unwrap()[0].fix, "ご確認ください");
+        // A later period sees none of it.
+        assert_eq!(h.writing_stats(now_ms() + 1000).unwrap()[1].reviews, 0);
+    }
+
+    #[test]
+    fn advice_goes_stale_with_new_mistakes() {
+        let h = History::in_memory();
+        assert!(h.advice(Lang::Vi).unwrap().is_none());
+        let item = AdviceItem {
+            title: "Viết đủ".into(),
+            advice: "Không viết tắt.".into(),
+            example: "không".into(),
+        };
+        h.set_advice(Lang::Vi, std::slice::from_ref(&item)).unwrap();
+        let a = h.advice(Lang::Vi).unwrap().unwrap();
+        assert_eq!((a.items, a.stale), (vec![item], false));
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
+        let t = h.create_thread(conv, "x").unwrap();
+        review(&h, t, Lang::Vi, "suggest", &[("spelling", "ko", "không")]);
+        h.conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE review_issues SET created_at = created_at + 1000", [])
+            .unwrap();
+        assert!(h.advice(Lang::Vi).unwrap().unwrap().stale);
+        assert!(!h.advice(Lang::Ja).unwrap().is_some_and(|a| a.stale));
     }
 
     #[test]

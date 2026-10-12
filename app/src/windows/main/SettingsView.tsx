@@ -19,7 +19,7 @@ import { AiProvidersGroup } from './AiProvidersGroup'
 function hotkeyRows(t: T): { key: keyof HotkeyMap; label: string }[] {
   return [
     { key: 'auto', label: t('Dịch (tự chọn ngôn ngữ đích)', '翻訳（翻訳先の言語を自動で判断）') },
-    { key: 'review', label: t('Kiểm tra câu tiếng Nhật', '日本語をチェック') },
+    { key: 'review', label: t('Kiểm tra câu đã viết', '書いた文をチェック') },
     { key: 'main', label: t('Mở cửa sổ chính', 'メイン画面を開く') },
   ]
 }
@@ -302,8 +302,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           <Row
             label={t('Giữ lịch sử', '履歴の保存期間')}
             hint={t(
-              'Tin đã dịch cũ hơn thời hạn này được tự xóa. App dùng các tin gần đây làm ngữ cảnh khi dịch.',
-              '期間より古い翻訳済みメッセージは自動で削除されます。最近のやり取りは翻訳の文脈に使われます。',
+              'Tin đã dịch và kết quả kiểm tra câu cũ hơn thời hạn này được tự xóa. App dùng các tin gần đây làm ngữ cảnh khi dịch.',
+              '期間より古い翻訳済みメッセージと文章チェックの結果は自動で削除されます。最近のやり取りは翻訳の文脈に使われます。',
             )}
           >
             <Segmented
@@ -320,7 +320,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           </Row>
           <Row
             label={t('Sao lưu', 'バックアップ')}
-            hint={t('Một file .db chứa toàn bộ lịch sử dịch và glossary cá nhân (thuật ngữ, người).', '翻訳履歴と個人用語集（用語・人物）をすべて含む .db ファイルです。')}
+            hint={t('Một file .db chứa toàn bộ lịch sử dịch, kết quả kiểm tra câu và glossary cá nhân (thuật ngữ, người).', '翻訳履歴、文章チェックの結果、個人用語集（用語・人物）をすべて含む .db ファイルです。')}
           >
             <Button onClick={backup}>{t('Sao lưu...', 'バックアップ…')}</Button>
           </Row>
@@ -339,8 +339,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           <Row
             label={t('Xóa toàn bộ dữ liệu', 'すべてのデータを削除')}
             hint={t(
-              'Xóa lịch sử dịch và glossary cá nhân (thuật ngữ, người). Cài đặt được giữ lại. Không thể hoàn tác.',
-              '翻訳履歴と個人用語集（用語・人物）を削除します。設定は残ります。元に戻せません。',
+              'Xóa lịch sử dịch, kết quả kiểm tra câu và glossary cá nhân (thuật ngữ, người). Cài đặt được giữ lại. Không thể hoàn tác.',
+              '翻訳履歴、文章チェックの結果、個人用語集（用語・人物）を削除します。設定は残ります。元に戻せません。',
             )}
           >
             {confirm === 'wipe' ? (

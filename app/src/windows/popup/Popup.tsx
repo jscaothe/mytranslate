@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import {
   AlertTriangle,
+  ArrowRight,
   CircleAlert,
   Copy,
   GripVertical,
@@ -20,8 +21,8 @@ import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
-import { diffChars } from '../../lib/diff'
-import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role, type T } from '../../lib/i18n'
+import { diffChars, diffWords } from '../../lib/diff'
+import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
 import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
 import { useStore } from '../../store'
 import { defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
@@ -29,12 +30,15 @@ import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
 import type { Direction, Keigo, ReviewResult } from '../../types'
+import { issueLabel, parseIssues } from '../../lib/review'
 import { AiSwitcher } from './AiSwitcher'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
 import { dragsFrom, useFloatingFrame } from './useFloatingFrame'
 import { useTranslation } from './useTranslation'
 
 const LONG_TEXT_LIMIT = 4000
+/** A review spells out at most this many points; the suggestion covers them all. */
+const MAX_SHOWN_ISSUES = 3
 const keigoOrder: Keigo[] = ['casual', 'polite', 'formal']
 /** A popup that could not read any text explains why, then gets out of the way. */
 const NOTICE_CLOSE_MS = 2200
@@ -97,8 +101,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     rootRef,
   })
 
-  const isReview = direction === 'review_ja'
-  // Reading the other side, writing to them, or checking Japanese: the popup's actions follow from it.
+  const isReview = direction === 'review_ja' || direction === 'review_vi'
+  // Reading the other side, writing to them, or checking what they wrote: the popup's actions follow from it.
   const role = roleOf(direction, lang)
   // Translations and reviews stream from Claude (canned answers in the browser prototype).
   const live = useTranslation({
@@ -141,8 +145,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   if (saved && saved.threadId !== filedThread) setFiledThread(saved.threadId)
 
   const reviewResult = useMemo(
-    () => (isReview && live.phase === 'done' ? toReview(source, live.sections, t) : null),
-    [isReview, live.phase, live.sections, source, t],
+    () => (isReview && live.phase === 'done' ? toReview(source, live.sections, direction === 'review_ja' ? 'ja' : 'vi') : null),
+    [isReview, live.phase, live.sections, source, direction],
   )
 
   const resultReady = live.phase === 'done'
@@ -481,7 +485,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             onAction={(t) => showToast(t)}
           />
         ) : isReview ? (
-          <ReviewBody result={reviewResult} />
+          <ReviewBody result={reviewResult} streaming={live.sections.suggestion} textLang={direction === 'review_ja' ? 'ja' : 'vi'} />
         ) : (
           <TranslationBody
             direction={direction}
@@ -702,8 +706,14 @@ function Section({ children, className }: { children: ReactNode; className?: str
 
 function DirectionBadge({ direction, verdict }: { direction: Direction; verdict?: 'ok' | 'suggest' | 'error' }) {
   const t = useT()
-  if (direction === 'review_ja') {
-    if (!verdict) return <span className="shrink-0 px-1.5 text-[12px] font-medium whitespace-nowrap text-ink-3">{t('Kiểm tra JA', '日本語チェック')}</span>
+  if (direction === 'review_ja' || direction === 'review_vi') {
+    if (!verdict) {
+      return (
+        <span className="shrink-0 px-1.5 text-[12px] font-medium whitespace-nowrap text-ink-3">
+          {direction === 'review_ja' ? t('Kiểm tra JA', '日本語チェック') : t('Kiểm tra VI', 'ベトナム語チェック')}
+        </span>
+      )
+    }
     const map = {
       ok: ['bg-good-soft text-good', t('Ổn', '問題なし')],
       suggest: ['bg-warn-soft text-warn', t('Nên sửa', '修正推奨')],
@@ -801,53 +811,57 @@ function TranslationBody({
 }
 
 /** Turns Claude's review tags into what the popup shows: verdict, issues and a diff of the suggestion. */
-function toReview(source: string, sections: Sections, t: T): ReviewResult {
+function toReview(source: string, sections: Sections, textLang: Lang): ReviewResult {
   const verdict = (['ok', 'suggest', 'error'] as const).find((v) => sections.verdict.trim().toLowerCase() === v) ?? 'suggest'
-  const issues = sections.issues
-    .split('\n')
-    .map((line) => line.replace(/^\s*[-•*\d.]+\s*/, '').trim())
-    .filter(Boolean)
-    .map((line, i) => {
-      const at = line.search(/[:：]/)
-      return at > 0 && at < 20
-        ? { kind: line.slice(0, at).trim(), span: String(i), text: line.slice(at + 1).trim() }
-        : { kind: t('Góp ý', '指摘'), span: String(i), text: line }
-    })
   const suggestion = sections.suggestion || source
-  return { verdict, issues, diff: diffChars(source, suggestion), suggestion, suggestionVi: sections.suggestionVi }
+  // Japanese has no spaces between words: compare characters; Vietnamese reads better word by word.
+  const diff = textLang === 'ja' ? diffChars(source, suggestion) : diffWords(source, suggestion)
+  return { verdict, issues: parseIssues(sections.issues), diff, suggestion, suggestionVi: sections.suggestionVi }
 }
 
-function ReviewBody({ result }: { result: ReviewResult | null }) {
+/** The check of a sentence the user wrote, in `textLang`: what is wrong, then the corrected sentence. */
+function ReviewBody({ result, streaming, textLang }: { result: ReviewResult | null; streaming: string; textLang: Lang }) {
   const t = useT()
   const lang = useLang()
-  if (!result) return <PendingBlock label={t('Đang kiểm tra câu tiếng Nhật…', '日本語をチェック中…')} />
+  // The AI writes the suggestion first: show it as it arrives, the points it found follow once it is done.
+  if (!result && streaming) {
+    return (
+      <>
+        <Section>
+          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Đề xuất', '修正案')}</div>
+          <p lang={textLang} className="stream-caret text-[15px] leading-relaxed whitespace-pre-wrap">
+            <InkText text={streaming} />
+          </p>
+        </Section>
+        <PendingBlock label={t('Đang tìm góp ý…', '指摘をまとめています…')} />
+      </>
+    )
+  }
+  if (!result) {
+    return (
+      <PendingBlock
+        label={textLang === 'ja' ? t('Đang kiểm tra câu tiếng Nhật…', '日本語をチェック中…') : t('Đang kiểm tra câu tiếng Việt…', 'ベトナム語をチェック中…')}
+      />
+    )
+  }
+  // The suggestion fixes everything found; only the most important points are spelled out under it (the AI lists
+  // them most important first).
+  const shown = result.issues.slice(0, MAX_SHOWN_ISSUES)
+  const more = result.issues.length - shown.length
   return (
     <>
-      {result.issues.length > 0 ? (
-        <Section className="flex flex-col gap-2">
-          {result.issues.map((issue, i) => (
-            <div key={`${i}-${issue.kind}`} className="flex gap-2 text-[13px] leading-snug">
-              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full bg-warn-soft text-[11px] font-bold text-warn">
-                {i + 1}
-              </span>
-              <div>
-                <span className="mr-1.5 rounded bg-subtle px-1.5 py-px text-[11.5px] font-semibold text-ink-2">{issue.kind}</span>
-                <span className="text-ink">{issue.text}</span>
-              </div>
-            </div>
-          ))}
+      {result.verdict === 'ok' ? (
+        <Section>
+          <p className="text-[13.5px] text-good">
+            {textLang === 'ja'
+              ? t('Câu đã tự nhiên và đúng kính ngữ, có thể gửi luôn.', '自然で敬語も正しい文です。このまま送れます。')
+              : t('Câu đã tự nhiên và đúng, có thể gửi luôn.', '自然で正しい文です。このまま送れます。')}
+          </p>
         </Section>
       ) : (
         <Section>
-          <p className="text-[13.5px] text-good">
-            {t('Câu đã tự nhiên và đúng kính ngữ, có thể gửi luôn.', '自然で敬語も正しい文です。このまま送れます。')}
-          </p>
-        </Section>
-      )}
-      {result.verdict !== 'ok' && (
-        <Section>
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Đề xuất', '修正案')}</div>
-          <p lang="ja" className="text-[15px] leading-relaxed whitespace-pre-wrap">
+          <p lang={textLang} className="text-[15px] leading-relaxed whitespace-pre-wrap">
             {result.diff.map((part, i) => (
               <span
                 key={i}
@@ -860,10 +874,45 @@ function ReviewBody({ result }: { result: ReviewResult | null }) {
               </span>
             ))}
           </p>
-          {/* The Vietnamese meaning helps a Vietnamese user; a Japanese user reads the suggestion itself. */}
-          {result.suggestionVi && lang === 'vi' && (
-            <p lang="vi" className="mt-1.5 text-[13px] whitespace-pre-wrap text-ink-2">
-              Nghĩa: {result.suggestionVi}
+          {/* The meaning helps only when the sentence is not in the user's own language. */}
+          {result.suggestionVi && textLang !== lang && (
+            <p lang={lang} className="mt-1.5 text-[13px] whitespace-pre-wrap text-ink-2">
+              {t('Nghĩa', '意味')}: {result.suggestionVi}
+            </p>
+          )}
+        </Section>
+      )}
+      {shown.length > 0 && (
+        <Section className="flex flex-col gap-2.5">
+          <div className="text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Góp ý chính', '主な指摘')}</div>
+          {shown.map((issue, i) => (
+            <div key={`${i}-${issue.kind}`} data-issue={issue.kind} className="flex gap-2 text-[13px] leading-snug">
+              <span className="mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full bg-warn-soft text-[11px] font-bold text-warn">
+                {i + 1}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+                  <span className="rounded bg-subtle px-1.5 py-px text-[11.5px] font-semibold text-ink-2">{issueLabel(issue.kind, textLang, lang)}</span>
+                  {issue.wrong && (
+                    <span lang={textLang} className="text-bad line-through decoration-bad/70">
+                      {issue.wrong}
+                    </span>
+                  )}
+                  {issue.wrong && issue.fix && <ArrowRight size={12} className="shrink-0 text-ink-3" aria-label={t('sửa thành', '修正後')} />}
+                  {issue.fix && (
+                    <span lang={textLang} className="rounded-sm bg-good-soft px-0.5 text-good">
+                      {issue.fix}
+                    </span>
+                  )}
+                  {!issue.wrong && !issue.fix && issue.text && <span className="text-ink">{issue.text}</span>}
+                </div>
+                {(issue.wrong || issue.fix) && issue.text && <p className="mt-1 text-ink">{issue.text}</p>}
+              </div>
+            </div>
+          ))}
+          {more > 0 && (
+            <p className="text-[12.5px] text-ink-3">
+              {t(`Và ${more} góp ý nhỏ khác, đã được sửa trong đề xuất.`, `ほか ${more} 件の細かい指摘も修正案に反映済みです。`)}
             </p>
           )}
         </Section>

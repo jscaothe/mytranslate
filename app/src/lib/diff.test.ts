@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { diffChars } from './diff'
+import { diffChars, diffWords } from './diff'
 
 describe('diffChars', () => {
   it('marks a keigo correction precisely', () => {
@@ -28,6 +28,22 @@ describe('diffChars', () => {
     expect(diffChars(long, long + 'い')).toEqual([
       { text: long, type: 'del' },
       { text: long + 'い', type: 'ins' },
+    ])
+  })
+})
+
+describe('diffWords', () => {
+  it('shows a corrected Vietnamese word whole', () => {
+    expect(diffWords('e đã check lại, ko thấy lỗi', 'em đã kiểm tra lại, không thấy lỗi')).toEqual([
+      { text: 'e', type: 'del' },
+      { text: 'em', type: 'ins' },
+      { text: ' đã ', type: 'same' },
+      { text: 'check', type: 'del' },
+      { text: 'kiểm tra', type: 'ins' },
+      { text: ' lại, ', type: 'same' },
+      { text: 'ko', type: 'del' },
+      { text: 'không', type: 'ins' },
+      { text: ' thấy lỗi', type: 'same' },
     ])
   })
 })

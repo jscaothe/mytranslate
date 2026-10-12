@@ -49,7 +49,7 @@ export function QuickActionBar({
         className,
       )}
     >
-      {visibleQuickActions(items, japanese).map((id) => {
+      {visibleQuickActions(items).map((id) => {
         const action = meta[id]
         const Icon = action.icon
         return (

@@ -12,6 +12,7 @@ mod popup;
 pub mod prompt;
 pub mod provider;
 mod quickbar;
+mod review;
 mod selection_watch;
 mod settings;
 mod team_glossary;
@@ -78,12 +79,14 @@ fn apply_retention(app: &AppHandle) {
     }
 }
 
-/// The thread's latest messages as prompt context, Japanese side only, oldest first.
+/// The thread's latest messages as prompt context, Japanese side only, oldest first. A checked Vietnamese message
+/// has no Japanese side.
 fn thread_context(history: &History, thread_id: i64) -> Vec<ThreadMessage> {
     let messages = history
         .recent_messages(thread_id, CONTEXT_MAX_MESSAGES)
         .unwrap_or_default()
         .iter()
+        .filter(|m| m.direction != "review_vi")
         .map(|m| ThreadMessage {
             from_client: !m.mine,
             text: m.japanese().to_string(),
@@ -254,7 +257,7 @@ async fn translate(
 ) -> Result<(), String> {
     if !matches!(
         request.direction,
-        Direction::JaVi | Direction::ViJa | Direction::ReviewJa
+        Direction::JaVi | Direction::ViJa | Direction::ReviewJa | Direction::ReviewVi
     ) {
         return Err("only translate and review are streamed".into());
     }
@@ -297,7 +300,8 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         Direction::JaVi => ("ja_vi", &s.translation, &s.back_translation),
         Direction::ViJa => ("vi_ja", &s.translation, &s.back_translation),
         Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
-        Direction::Reply => return None,
+        Direction::ReviewVi => ("review_vi", &s.suggestion, &s.suggestion_vi),
+        Direction::Reply | Direction::WritingAdvice => return None,
     };
     // The user's own message goes from their language into the other side's; a review is always theirs.
     let mine = !matches!(
@@ -330,7 +334,20 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         tokens: t.tokens,
     };
     match history.add_message(thread_id, &message) {
-        Ok(message_id) => Some(TranslateEvent::Saved { message_id, thread_id }),
+        Ok(message_id) => {
+            let written = match req.direction {
+                Direction::ReviewJa => Some(Lang::Ja),
+                Direction::ReviewVi => Some(Lang::Vi),
+                _ => None,
+            };
+            if let Some(lang) = written {
+                let verdict = s.verdict.trim().to_lowercase();
+                if let Err(e) = history.set_review(message_id, lang, &verdict, &review::parse_issues(&s.issues)) {
+                    log::warn!("could not save the review: {e}");
+                }
+            }
+            Some(TranslateEvent::Saved { message_id, thread_id })
+        }
         Err(e) => {
             log::warn!("could not save the translation: {e}");
             None
@@ -344,8 +361,9 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
         (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja) => s.translation.as_str(),
         (Direction::ViJa, Lang::Vi) | (Direction::JaVi, Lang::Ja) => req.text.as_str(),
         (Direction::ReviewJa, Lang::Vi) => s.suggestion_vi.as_str(),
-        (Direction::ReviewJa, Lang::Ja) => s.suggestion.as_str(),
-        (Direction::Reply, _) => "",
+        (Direction::ReviewJa, Lang::Ja) | (Direction::ReviewVi, Lang::Vi) => s.suggestion.as_str(),
+        (Direction::ReviewVi, Lang::Ja) => s.suggestion_vi.as_str(),
+        (Direction::Reply | Direction::WritingAdvice, _) => "",
     };
     // Japanese has no spaces between words: keep the first characters instead.
     let title = if req.user_lang == Lang::Ja {
@@ -421,6 +439,60 @@ fn data_wipe(app: AppHandle) -> Result<(), String> {
     app.state::<History>().wipe().map_err(|e| e.to_string())?;
     let _ = app.emit("history:changed", ());
     Ok(())
+}
+
+/// Mistakes the advice is based on: the latest, enough to show habits, few enough to answer quickly.
+const ADVICE_ISSUES: usize = 80;
+
+#[derive(Serialize)]
+struct WritingOverview {
+    /// Japanese, then Vietnamese, whether or not the user wrote any.
+    languages: Vec<history::WritingStats>,
+}
+
+/// The user's writing in each language over the last `days` (all of the history when `None`).
+#[tauri::command]
+fn writing_stats(history: State<'_, History>, days: Option<i64>) -> Result<WritingOverview, String> {
+    let since = days.map_or(i64::MIN, |d| history::now_ms() - d * DAY_MS);
+    let languages = history.writing_stats(since).map_err(|e| e.to_string())?;
+    Ok(WritingOverview { languages })
+}
+
+#[tauri::command]
+fn writing_advice_get(history: State<'_, History>, lang: Lang) -> Result<Option<history::Advice>, String> {
+    history.advice(lang).map_err(|e| e.to_string())
+}
+
+/// Asks the AI what the user's recent mistakes in `lang` have in common, and keeps its advice.
+#[tauri::command]
+async fn writing_advice_make(
+    app: AppHandle,
+    router: State<'_, Arc<Router>>,
+    lang: Lang,
+) -> Result<history::Advice, String> {
+    let history = app.state::<History>();
+    let issues = history.writing_issues(lang, ADVICE_ISSUES).map_err(|e| e.to_string())?;
+    let user = language(&app);
+    if issues.is_empty() {
+        return Err(user
+            .pick("Chưa có lỗi nào để phân tích", "分析できる誤りがまだありません")
+            .into());
+    }
+    let list: Vec<String> = issues
+        .iter()
+        .map(|i| format!("{} || {} || {}", i.kind, i.wrong, i.fix))
+        .collect();
+    let mut request = TranslateRequest::task(Direction::WritingAdvice, &list.join("\n"), Keigo::Polite);
+    request.user_lang = user;
+    request.review_lang = lang;
+    let sections = complete(&app, router.inner(), request).await?;
+    let items = review::parse_advice(&sections.advice);
+    if items.is_empty() {
+        return Err(user
+            .pick("AI không trả về lời khuyên", "AIから助言が返りませんでした")
+            .into());
+    }
+    history.set_advice(lang, &items).map_err(|e| e.to_string())
 }
 
 /// A reply in the other side's language, with its meaning in the user's.
@@ -830,6 +902,9 @@ pub fn run() {
             updates::update_check,
             updates::update_install,
             suggest_replies,
+            writing_stats,
+            writing_advice_get,
+            writing_advice_make,
             popup::popup_hide,
             popup::popup_apply,
             popup::popup_copy,

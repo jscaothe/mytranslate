@@ -13,17 +13,19 @@ import { Popup } from '../windows/popup/Popup'
 import type { PopupRequest } from '../windows/popup/types'
 import { ChatApp } from './ChatApp'
 
-/** Texts to try, typed into the message box: what each user writes, and Japanese worth checking. */
+/** Texts to try, typed into the message box: what each user writes, and sentences worth checking. */
 const samples: Record<Lang, { label: string; text: string }[]> = {
   vi: [
     { label: 'Câu tiếng Việt', text: 'Em đã deploy bản sửa rồi, nhờ anh kiểm tra lại giúp em' },
     { label: 'Trả lời lịch release', text: 'Thứ Tư tuần sau được ạ, em sẽ gửi lịch chi tiết sau' },
     { label: 'Tiếng Nhật cần sửa', text: '明日までに確認してください。' },
+    { label: 'Tiếng Việt cần sửa', text: 'e đã check lại rồi, ko thấy lỗi nữa ạ' },
   ],
   ja: [
     { label: 'リリース日程への返信', text: '来週の水曜日で大丈夫です。詳しいスケジュールを送ってください。' },
     { label: '本番反映の依頼', text: '確認しました。本番に反映してください。' },
     { label: 'チェックしたい日本語', text: '明日までに確認してください。' },
+    { label: 'チェックしたいベトナム語', text: 'Tôi đã check lại, ko thấy lỗi nữa.' },
   ],
 }
 
@@ -340,10 +342,13 @@ export function Playground() {
                   入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.auto} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
                   <Hotkey combo="Enter" /> でベトナム語訳を入力欄に貼り付けます。
                 </Step>
-                <Step n={3} title="相手のことを AI に伝える">
+                <Step n={3} title="書いた文をチェックする">
+                  入力欄に日本語またはベトナム語を書いて <Hotkey combo={settings.hotkeys.review} />。その言語のまま誤りを指摘し、修正案を出します。
+                </Step>
+                <Step n={4} title="相手のことを AI に伝える">
                   用語集に種類「人物」で相手を追加し、役割や呼び方を書きます。名前が会話に出ると、AI に一緒に送られます。
                 </Step>
-                <Step n={4} title="ポップアップの移動とサイズ変更">
+                <Step n={5} title="ポップアップの移動とサイズ変更">
                   タイトルバーをドラッグして移動、左右・下の端や下の角をドラッグしてサイズを変更できます。次のポップアップもアプリを終了するまで同じ位置とサイズで開きます。
                 </Step>
               </>
@@ -357,8 +362,9 @@ export function Playground() {
                   Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}
                   <Hotkey combo="Enter" /> để thay vào ô chat.
                 </Step>
-                <Step n={3} title="Kiểm tra câu tiếng Nhật">
-                  Viết tiếng Nhật vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />.
+                <Step n={3} title="Kiểm tra câu bạn viết">
+                  Viết tiếng Nhật hoặc tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />. App chỉ ra lỗi và đề xuất cách sửa
+                  bằng chính ngôn ngữ đó.
                 </Step>
                 <Step n={4} title="Cho AI biết bạn đang nói với ai">
                   Thêm người vào Glossary với loại "Người", ghi vai trò và cách xưng hô. Khi tên họ có trong cuộc chat, app gửi kèm cho AI.

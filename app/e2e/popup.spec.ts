@@ -70,10 +70,42 @@ test('a Japanese message is translated and Claude suggests replies that can be c
 test('Japanese in the composer is reviewed and the suggestion replaces it', async ({ page }) => {
   await composer(page).fill('明日までに確認してください')
   await page.keyboard.press('Control+Alt+C')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'review_ja')
+  await expect(popup(page).locator('[data-issue=politeness]')).toContainText('Kính ngữ')
   await expect(popup(page).getByRole('button', { name: /Dùng đề xuất/ })).toBeEnabled()
   await popup(page).getByRole('button', { name: /Dùng đề xuất/ }).click()
   await expect(popup(page)).toBeHidden()
   await expect(composer(page)).not.toHaveValue('明日までに確認してください')
+})
+
+test('Vietnamese the user wrote is checked as Vietnamese, not translated into Japanese', async ({ page }) => {
+  await composer(page).fill('e đã check lại rồi, ko thấy lỗi nữa ạ')
+  await page.keyboard.press('Control+Alt+C')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'review_vi')
+  await expect(popup(page).getByText('Kiểm tra VI')).toBeVisible()
+  const issues = popup(page).locator('[data-issue]')
+  await expect(issues).toHaveCount(3)
+  await expect(popup(page).locator('[data-issue=spelling]')).toContainText('Chính tả')
+  await expect(popup(page).locator('[data-issue=politeness]')).toContainText('Xưng hô')
+  // Nothing Japanese: no translation, and the suggestion is Vietnamese.
+  await expect(popup(page).locator('textarea[data-role=draft]')).toHaveCount(0)
+  await expect(popup(page).locator('p[lang=ja]')).toHaveCount(0)
+  await popup(page).getByRole('button', { name: /Dùng đề xuất/ }).click()
+  await expect(composer(page)).toHaveValue('em đã kiểm tra lại rồi, không thấy lỗi nữa ạ')
+})
+
+test('a review shows the suggestion first, then at most three main points', async ({ page }) => {
+  await composer(page).fill('e đã check lại rồi, ko thấy lỗi, đc chưa ạ')
+  await page.keyboard.press('Control+Alt+C')
+  const suggestion = popup(page).getByText('Đề xuất', { exact: true })
+  const points = popup(page).getByText('Góp ý chính', { exact: true })
+  await expect(points).toBeVisible()
+  expect((await suggestion.boundingBox())!.y).toBeLessThan((await points.boundingBox())!.y)
+  // Four mistakes: three spelled out, the fourth only counted; the suggestion fixes all four.
+  await expect(popup(page).locator('[data-issue]')).toHaveCount(3)
+  await expect(popup(page).getByText('Và 1 góp ý nhỏ khác, đã được sửa trong đề xuất.')).toBeVisible()
+  await popup(page).getByRole('button', { name: /Dùng đề xuất/ }).click()
+  await expect(composer(page)).toHaveValue('em đã kiểm tra lại rồi, không thấy lỗi, được chưa ạ')
 })
 
 test('Tab changes the keigo level and translates again', async ({ page }) => {

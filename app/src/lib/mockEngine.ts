@@ -1,6 +1,7 @@
 // Canned responses that stand in for Claude. No real translation happens in the prototype.
+import { diffChars } from './diff'
 import type { Lang } from './i18n'
-import type { DiffPart, Keigo, ReviewResult, TranslationResult } from '../types'
+import type { IssueKind, Keigo, ReviewResult, TranslationResult } from '../types'
 
 export function isJapanese(text: string): boolean {
   return /[぀-ヿ一-鿿]/.test(text)
@@ -206,59 +207,86 @@ export function translate(text: string, direction: 'ja_vi' | 'vi_ja', keigo: Kei
   return { translation: out.ja, backTranslation: out.vi, notes: entry?.notes[keigo] ?? [] }
 }
 
-export function review(text: string, lang: Lang = 'vi'): ReviewResult {
+/** A mistake the prototype knows how to spot, with its explanation for each user language. */
+interface MockFix {
+  kind: IssueKind
+  wrong: string
+  fix: string
+  why: Record<Lang, string>
+}
+
+const japaneseFixes: MockFix[] = [
+  {
+    kind: 'politeness',
+    wrong: '確認してください',
+    fix: 'ご確認いただけますでしょうか',
+    why: {
+      vi: '"確認してください" nghe hơi ra lệnh với khách. Nên dùng "ご確認いただけますでしょうか".',
+      ja: '「確認してください」は命令的に聞こえます。「ご確認いただけますでしょうか」がおすすめです。',
+    },
+  },
+  {
+    kind: 'politeness',
+    wrong: 'ありがとう。',
+    fix: 'ありがとうございます。',
+    why: { vi: 'Với khách hàng cần dùng "ありがとうございます".', ja: 'ビジネスでは「ありがとうございます」を使います。' },
+  },
+]
+
+const vietnameseFixes: MockFix[] = [
+  {
+    kind: 'spelling',
+    wrong: 'ko',
+    fix: 'không',
+    why: { vi: 'Viết tắt "ko" không hợp với tin nhắn công việc.', ja: '「ko」は略語です。仕事のメッセージでは「không」と書きます。' },
+  },
+  {
+    kind: 'spelling',
+    wrong: 'đc',
+    fix: 'được',
+    why: { vi: 'Viết đủ "được" cho trang trọng.', ja: '「đc」は略語です。「được」と書きます。' },
+  },
+  {
+    kind: 'politeness',
+    wrong: 'e',
+    fix: 'em',
+    why: { vi: 'Xưng "em" đầy đủ khi nhắn với anh chị.', ja: '自分を指す「em」を略さずに書きます。' },
+  },
+  {
+    kind: 'word_choice',
+    wrong: 'check',
+    fix: 'kiểm tra',
+    why: { vi: 'Dùng "kiểm tra" thay cho từ tiếng Anh "check".', ja: '英語の「check」より「kiểm tra」が自然です。' },
+  },
+]
+
+/** The prototype's check of a sentence the user wrote: canned fixes for a few common mistakes. */
+export function review(text: string, direction: 'review_ja' | 'review_vi', lang: Lang = 'vi'): ReviewResult {
   const clean = text.trim()
-  const ja = lang === 'ja'
-  if (clean.includes('確認してください')) {
-    const [before, after] = clean.split('確認してください')
-    const diff: DiffPart[] = [
-      { text: before, type: 'same' },
-      { text: '確認してください', type: 'del' },
-      { text: 'ご確認いただけますでしょうか', type: 'ins' },
-      { text: after.replace(/^。/, ''), type: 'same' },
-      { text: '。', type: 'same' },
-    ]
-    return {
-      verdict: 'suggest',
-      issues: [
-        {
-          kind: ja ? '敬語' : 'Kính ngữ',
-          span: '確認してください',
-          text: ja
-            ? '「確認してください」は命令的に聞こえます。「ご確認いただけますでしょうか」がおすすめです。'
-            : '"確認してください" nghe hơi ra lệnh với khách. Nên dùng "ご確認いただけますでしょうか".',
-        },
-      ],
-      diff: diff.filter((p) => p.text),
-      suggestion: `${before}ご確認いただけますでしょうか。`,
-      suggestionVi: 'Anh có thể kiểm tra giúp được không ạ?',
-    }
-  }
-  if (clean.includes('ありがとう') && !clean.includes('ございます')) {
-    const diff: DiffPart[] = [
-      { text: 'ありがとう', type: 'same' },
-      { text: 'ございます', type: 'ins' },
-      { text: clean.replace('ありがとう', ''), type: 'same' },
-    ]
-    return {
-      verdict: 'error',
-      issues: [
-        {
-          kind: ja ? '敬語' : 'Kính ngữ',
-          span: 'ありがとう',
-          text: ja ? 'ビジネスでは「ありがとうございます」を使います。' : 'Với khách hàng cần dùng "ありがとうございます".',
-        },
-      ],
-      diff: diff.filter((p) => p.text),
-      suggestion: clean.replace('ありがとう', 'ありがとうございます'),
-      suggestionVi: 'Cảm ơn anh.',
-    }
-  }
+  const textLang: Lang = direction === 'review_ja' ? 'ja' : 'vi'
+  // Vietnamese mistakes are whole words ("e", "ko"), never part of a longer one.
+  const pattern = (f: MockFix) =>
+    textLang === 'ja' ? new RegExp(escapeRegExp(f.wrong), 'g') : new RegExp(`(?<!\\p{L})${escapeRegExp(f.wrong)}(?!\\p{L})`, 'giu')
+  const fixes = (textLang === 'ja' ? japaneseFixes : vietnameseFixes).filter((f) => pattern(f).test(clean))
+  const suggestion = fixes.reduce((s, f) => s.replace(pattern(f), f.fix), clean)
+  // The meaning only helps when the sentence is not in the user's own language.
+  const meaning =
+    textLang === lang
+      ? ''
+      : textLang === 'ja'
+        ? clean.includes('確認')
+          ? 'Anh có thể kiểm tra giúp được không ạ?'
+          : '(Nghĩa mô phỏng của câu bạn viết)'
+        : '（あなたが書いたベトナム語の意味の例）'
   return {
-    verdict: 'ok',
-    issues: [],
-    diff: [{ text: clean, type: 'same' }],
-    suggestion: clean,
-    suggestionVi: '(Bản dịch mô phỏng của câu bạn viết)',
+    verdict: fixes.length === 0 ? 'ok' : fixes.some((f) => f.kind === 'politeness') && textLang === 'ja' ? 'error' : 'suggest',
+    issues: fixes.map((f) => ({ kind: f.kind, wrong: f.wrong, fix: f.fix, text: f.why[lang] })),
+    diff: diffChars(clean, suggestion),
+    suggestion,
+    suggestionVi: meaning,
   }
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }

@@ -19,10 +19,13 @@ describe('route', () => {
     expect(roleOf('vi_ja', 'ja')).toBe('read')
   })
 
-  it('checks Japanese only, translating Vietnamese instead', () => {
+  it('checks a sentence in its own language', () => {
     expect(route('review', ja, 'ja', 'composer')).toEqual({ direction: 'review_ja', origin: 'composer' })
-    expect(route('review', vi, 'vi', 'composer')).toEqual({ direction: 'vi_ja', origin: 'composer' })
+    expect(route('review', ja, 'vi', 'composer')).toEqual({ direction: 'review_ja', origin: 'composer' })
+    expect(route('review', vi, 'vi', 'composer')).toEqual({ direction: 'review_vi', origin: 'composer' })
+    expect(route('review', vi, 'ja', 'chat')).toEqual({ direction: 'review_vi', origin: 'chat' })
     expect(roleOf('review_ja', 'ja')).toBe('review')
+    expect(roleOf('review_vi', 'vi')).toBe('review')
   })
 
   it('tells Japanese with a few English words from Vietnamese naming a Japanese term', () => {

@@ -1,7 +1,7 @@
 // Bridge to the Rust ClaudeCliProvider. In a plain browser (the prototype) it falls back to canned answers,
 // so every screen still works without Tauri.
 import { Channel, invoke } from '@tauri-apps/api/core'
-import type { Keigo } from '../types'
+import type { Direction, Keigo } from '../types'
 import type { Lang } from './i18n'
 import { review as mockReview, translate as mockTranslate } from './mockEngine'
 
@@ -72,8 +72,8 @@ export type TranslateEvent =
   | { type: 'saved'; messageId: number; threadId: number }
 
 export interface TranslateRequest {
-  /** `review_ja` checks Japanese the user wrote instead of translating it. */
-  direction: 'ja_vi' | 'vi_ja' | 'review_ja'
+  /** `review_ja` and `review_vi` check a sentence the user wrote, in its own language, instead of translating it. */
+  direction: Direction
   text: string
   keigo: Keigo
   /** The user picked `keigo` for this message; otherwise it is their default, which a person's note may override. */
@@ -118,7 +118,8 @@ export async function claudeStatus(): Promise<ClaudeStatus> {
 function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => void, lang: Lang): () => void {
   const final = mockSections(request, lang)
   // Stream the field the user reads first, like Claude does.
-  const field: keyof Sections = request.direction === 'review_ja' ? 'suggestion' : 'translation'
+  const reviewing = request.direction === 'review_ja' || request.direction === 'review_vi'
+  const field: keyof Sections = reviewing ? 'suggestion' : 'translation'
   const full = final[field]
   const start = performance.now()
   let i = 0
@@ -128,7 +129,7 @@ function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => v
   const tick = () => {
     i = Math.min(full.length, i + 3)
     first ??= performance.now() - start
-    onEvent({ type: 'delta', sections: { ...emptySections, ...(request.direction === 'review_ja' ? { verdict: final.verdict } : {}), [field]: full.slice(0, i) } })
+    onEvent({ type: 'delta', sections: { ...emptySections, ...(reviewing ? { verdict: final.verdict } : {}), [field]: full.slice(0, i) } })
     if (i < full.length) {
       timer = window.setTimeout(tick, 25)
       return
@@ -148,12 +149,12 @@ function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => v
 }
 
 function mockSections(request: TranslateRequest, lang: Lang): Sections {
-  if (request.direction === 'review_ja') {
-    const r = mockReview(request.text, lang)
+  if (request.direction === 'review_ja' || request.direction === 'review_vi') {
+    const r = mockReview(request.text, request.direction, lang)
     return {
       ...emptySections,
       verdict: r.verdict,
-      issues: r.issues.map((i) => `${i.kind}: ${i.text}`).join('\n'),
+      issues: r.issues.map((i) => [i.kind, i.wrong, i.fix, i.text].join(' || ')).join('\n'),
       suggestion: r.suggestion,
       suggestionVi: r.suggestionVi,
     }
