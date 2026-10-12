@@ -6,7 +6,7 @@ import { mockData } from './data/mock'
 import { DEFAULT_HOTKEYS, knownHotkeys } from './lib/hotkeys'
 import { isTauri } from './lib/claude'
 import { pick, systemLang } from './lib/i18n'
-import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
+import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, knownQuickActions, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
 import type { Scenario } from './types'
 
 const defaultSettings: Settings = {
@@ -118,7 +118,13 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       if (!alive || !saved || typeof saved !== 'object') return
       // `profilePrompt` belonged to the removed self-introduction prompt; drop it so it is not saved again.
       const { profilePrompt: _removed, ...rest } = saved as Partial<Settings> & { profilePrompt?: unknown }
-      applySettings({ ...defaultSettings, ...rest, hotkeys: knownHotkeys(rest.hotkeys) })
+      const quickActions = { ...defaultSettings.quickActions, ...rest.quickActions }
+      applySettings({
+        ...defaultSettings,
+        ...rest,
+        hotkeys: knownHotkeys(rest.hotkeys),
+        quickActions: { ...quickActions, items: knownQuickActions(quickActions.items) },
+      })
     }
     void invoke('settings_get')
       .then(merge)

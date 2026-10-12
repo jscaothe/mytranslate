@@ -18,7 +18,6 @@ interface OpenPayload {
   error: string | null
   conversationId: number | null
   threadId: number | null
-  autoCopy: boolean
 }
 
 interface GeometryInfo {
@@ -42,7 +41,6 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
     error: p.error,
     conversationId: p.conversationId,
     threadId: p.threadId,
-    autoCopy: p.autoCopy,
   },
   anchor: { x: 0, y: 0 },
   placement: 'below',

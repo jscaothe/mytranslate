@@ -51,7 +51,7 @@ export interface Settings {
   popupTipShown: boolean
 }
 
-export type QuickActionId = 'translate' | 'review' | 'copyTranslation'
+export type QuickActionId = 'translate' | 'review'
 
 export interface QuickActionItem {
   id: QuickActionId
@@ -61,8 +61,18 @@ export interface QuickActionItem {
 export const DEFAULT_QUICK_ACTION_ITEMS: QuickActionItem[] = [
   { id: 'translate', enabled: true },
   { id: 'review', enabled: true },
-  { id: 'copyTranslation', enabled: true },
 ]
+
+/**
+ * Saved toolbar buttons as this version knows them: buttons that no longer exist (such as the removed "Dịch và
+ * chép") are dropped, new ones are added at the end, the user's order and choices are kept.
+ */
+export function knownQuickActions(saved: QuickActionItem[] | undefined): QuickActionItem[] {
+  const known = (saved ?? []).filter((i, at, all) =>
+    DEFAULT_QUICK_ACTION_ITEMS.some((d) => d.id === i.id) && all.findIndex((x) => x.id === i.id) === at,
+  )
+  return [...known, ...DEFAULT_QUICK_ACTION_ITEMS.filter((d) => !known.some((i) => i.id === d.id))]
+}
 
 /** A desktop application, identified by its executable like Windows does. */
 export interface AppRef {

@@ -286,12 +286,11 @@ pub fn quickbar_action(app: AppHandle, action: String) {
     hide(&app);
     let Some(target) = target else { return };
     crate::ai::prewarm(&app);
-    let (popup_action, auto_copy) = match action.as_str() {
-        "review" => (popup::Action::Review, false),
-        "copyTranslation" => (popup::Action::Auto, true),
-        _ => (popup::Action::Auto, false),
+    let popup_action = match action.as_str() {
+        "review" => popup::Action::Review,
+        _ => popup::Action::Auto,
     };
-    popup::run(&app, popup_action, Some(target), auto_copy, span);
+    popup::run(&app, popup_action, Some(target), span);
 }
 
 #[cfg(test)]

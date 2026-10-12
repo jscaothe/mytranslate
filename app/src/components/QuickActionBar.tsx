@@ -10,7 +10,6 @@ import { cx } from './styles'
  * (and the composer focus) survive the click, exactly like the real app must not steal focus.
  */
 export function QuickActionBar({
-  japanese,
   items,
   display = 'iconText',
   onAction,
@@ -19,8 +18,6 @@ export function QuickActionBar({
   className,
   bare = false,
 }: {
-  /** Whether the selected text is Japanese; decides labels and which buttons apply. `null`: not known. */
-  japanese: boolean | null
   /** Buttons in display order, from Settings. */
   items: QuickActionItem[]
   /** Icon with label, or icon only with the label as tooltip. */
@@ -62,7 +59,7 @@ export function QuickActionBar({
             nativeTooltip={bare}
             title={action.title}
           >
-            {action.label(japanese)}
+            {action.label}
           </BarButton>
         )
       })}

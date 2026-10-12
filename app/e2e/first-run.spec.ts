@@ -36,9 +36,9 @@ test('the guide asks for nothing and teaches the toolbar: select, press Dịch, 
   await selectStart(page, 'p[lang=ja].cursor-text', 12)
   const bar = page.getByRole('toolbar', { name: 'Thao tác nhanh MyTranslate' })
   await expect(bar).toBeVisible()
-  // Only buttons that open the popup; "Dịch và chép" would copy silently.
-  await expect(bar.getByRole('button', { name: 'Dịch và chép' })).toHaveCount(0)
-  await bar.getByRole('button', { name: 'Dịch sang Việt' }).click()
+  // Only the button that opens the popup, labelled the same whichever the language.
+  await expect(bar.getByRole('button', { name: 'Kiểm tra' })).toHaveCount(0)
+  await bar.getByRole('button', { name: 'Dịch', exact: true }).click()
 
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
   await expect(page.getByText('Trong Teams và Slack cũng làm y như vậy.')).toBeVisible()

@@ -1,4 +1,4 @@
-import { ClipboardCopy, Languages, SpellCheck, type LucideIcon } from 'lucide-react'
+import { Languages, SpellCheck, type LucideIcon } from 'lucide-react'
 import { pick, type Lang } from '../lib/i18n'
 import type { QuickActionId, QuickActionItem } from '../store'
 
@@ -7,8 +7,8 @@ export interface QuickActionMeta {
   name: string
   description: string
   icon: LucideIcon
-  /** Button text on the toolbar; may depend on the selected language (`null`: not known yet). */
-  label: (japanese: boolean | null) => string
+  /** Button text on the toolbar. */
+  label: string
   primary?: boolean
   title?: string
 }
@@ -20,12 +20,11 @@ export function quickActionMeta(lang: Lang): Record<QuickActionId, QuickActionMe
     translate: {
       name: t('Dịch', '翻訳'),
       description: t(
-        'Mở popup dịch; tự đổi thành "Dịch sang Việt" hoặc "Dịch sang Nhật" theo đoạn bôi đen.',
-        '翻訳ポップアップを開きます。選択した文に合わせて「日本語に翻訳」「ベトナム語に翻訳」に変わります。',
+        'Mở popup dịch; tự nhận ra ngôn ngữ của đoạn bôi đen (tiếng Nhật dịch sang Việt, tiếng Việt dịch sang Nhật).',
+        '翻訳ポップアップを開きます。選択した文の言語を自動で判別して翻訳します（日本語とベトナム語）。',
       ),
       icon: Languages,
-      label: (ja) =>
-        ja === null ? t('Dịch', '翻訳') : ja ? t('Dịch sang Việt', 'ベトナム語に翻訳') : t('Dịch sang Nhật', '日本語に翻訳'),
+      label: t('Dịch', '翻訳'),
       primary: true,
     },
     review: {
@@ -35,14 +34,7 @@ export function quickActionMeta(lang: Lang): Record<QuickActionId, QuickActionMe
         '書いた文を、その言語（日本語またはベトナム語）のままチェックし、修正案を出します。',
       ),
       icon: SpellCheck,
-      label: () => t('Kiểm tra', 'チェック'),
-    },
-    copyTranslation: {
-      name: t('Dịch và chép', '翻訳してコピー'),
-      description: t('Dịch rồi sao chép thẳng vào clipboard, không mở popup.', '翻訳結果をポップアップを開かずにクリップボードへコピーします。'),
-      icon: ClipboardCopy,
-      label: () => t('Dịch và chép', '翻訳してコピー'),
-      title: t('Dịch rồi sao chép luôn, không mở popup', 'ポップアップを開かずに翻訳してコピー'),
+      label: t('Kiểm tra', 'チェック'),
     },
   }
 }

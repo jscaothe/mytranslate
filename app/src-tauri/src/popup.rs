@@ -83,8 +83,6 @@ pub struct OpenPayload {
     /// one). The app files the translation there and reads the thread's latest messages as context.
     pub conversation_id: Option<i64>,
     pub thread_id: Option<i64>,
-    /// Copy the result to the clipboard as soon as it is ready (toolbar "translate and copy").
-    pub auto_copy: bool,
 }
 
 /// Threads untouched for this long are not considered.
@@ -266,13 +264,12 @@ pub fn on_hotkey(app: &AppHandle, action: Action) {
     capture::mask_menu_key();
     // ChatGPT or Gemini: connect now, while the text is being copied.
     crate::ai::prewarm(app);
-    run(app, action, None, false, None);
+    run(app, action, None, None);
 }
 
 /// Reads the selection, places the popup and tells its page what to do. `target` is the chat window when the
-/// quick toolbar already knows it (the user selected with the mouse); `auto_copy` copies the result as soon as
-/// it is ready.
-pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: bool, span: Option<Span>) {
+/// quick toolbar already knows it (the user selected with the mouse).
+pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Option<Span>) {
     let app = app.clone();
     // Copying blocks for up to ~1 s (waiting for keys to be released, for the clipboard); keep it off the UI thread.
     tauri::async_runtime::spawn_blocking(move || {
@@ -340,7 +337,6 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             error,
             conversation_id,
             thread_id,
-            auto_copy,
         };
         if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");

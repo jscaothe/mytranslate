@@ -751,21 +751,32 @@ async fn settings_set(app: AppHandle, window: tauri::WebviewWindow, value: Value
     Ok(SettingsSaved { failed_hotkeys })
 }
 
-/// Makes the Windows autostart entry match the setting, which is on unless the user turned it off.
+/// Makes the Windows autostart entry match the setting, which is on unless the user turned it off. Turning it on
+/// always rewrites the entry, so it starts this copy of the app even when another copy wrote it before.
 fn apply_autostart(app: &AppHandle, settings: &Value) {
     let enabled = settings.get("autostart").and_then(Value::as_bool).unwrap_or(true);
     let autolaunch = app.autolaunch();
-    if autolaunch.is_enabled().ok() == Some(enabled) {
-        return;
-    }
     let result = if enabled {
         autolaunch.enable()
-    } else {
+    } else if autolaunch.is_enabled().unwrap_or(false) {
         autolaunch.disable()
+    } else {
+        return;
     };
     if let Err(e) = result {
         log::warn!("could not change autostart: {e}");
     }
+}
+
+/// Whether this is the copy the installer put in place (a per-user install). Only that one registers itself at
+/// start-up: a build run from a project folder must not take over the entry Windows starts at sign-in.
+fn is_installed() -> bool {
+    let (Ok(exe), Some(local)) = (std::env::current_exe(), std::env::var_os("LOCALAPPDATA")) else {
+        return false;
+    };
+    let installed = std::path::Path::new(&local).join("MyTranslate");
+    exe.parent()
+        .is_some_and(|dir| dir.to_string_lossy().eq_ignore_ascii_case(&installed.to_string_lossy()))
 }
 
 #[tauri::command]
@@ -829,7 +840,9 @@ pub fn run() {
                 log::warn!("could not resume hotkeys: {e}");
             }
             // From the first start, so that after the next sign-in the app is there (in the tray, or with the guide).
-            apply_autostart(app.handle(), &store.get());
+            if is_installed() {
+                apply_autostart(app.handle(), &store.get());
+            }
             app.manage(store);
             app.manage(History::open(&app.path().app_local_data_dir()?.join("history.db"))?);
             let handle = app.handle().clone();
