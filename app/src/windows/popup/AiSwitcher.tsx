@@ -65,9 +65,12 @@ export function AiSwitcher({
   const shown = answeredBy && !sameChoice(answeredBy, current) ? answeredBy : current
   const fellBack = shown !== current
 
-  // Focus the ticked entry when the menu opens, so arrows and Enter work right away.
+  // Focus the ticked entry when the menu opens, so arrows and Enter work right away. The popup window is often
+  // shorter than the menu: it scrolls rather than running past the window's bottom edge.
   useEffect(() => {
     if (!open) return
+    const menu = menuRef.current
+    if (menu) menu.style.maxHeight = `${Math.max(120, window.innerHeight - menu.getBoundingClientRect().top - 8)}px`
     const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('button[data-choice]:not(:disabled)') ?? [])]
     ;(items.find((b) => b.dataset.current === 'true') ?? items[0])?.focus()
   }, [open])
@@ -121,7 +124,7 @@ export function AiSwitcher({
           role="menu"
           aria-label={t('Chọn AI dịch', '翻訳AIを選択')}
           onKeyDown={onMenuKey}
-          className="absolute top-full right-0 z-30 mt-1 w-64 overflow-hidden rounded-lg border border-line bg-surface py-1 shadow-popup"
+          className="absolute top-full right-0 z-30 mt-1 w-64 overflow-y-auto overscroll-contain rounded-lg border border-line bg-surface py-1 shadow-popup"
         >
           {groups.map((g) => (
             <div key={g.provider} className="py-0.5">

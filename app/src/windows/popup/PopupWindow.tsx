@@ -17,10 +17,7 @@ interface OpenPayload {
   error: string | null
   conversationId: number | null
   threadId: number | null
-  confidence: 'high' | 'low'
-  threads: { id: number; title: string; lastActive: number }[]
   autoCopy: boolean
-  keigo: string
 }
 
 interface GeometryInfo {
@@ -36,7 +33,7 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
   direction: p.direction,
   source: p.text,
   origin: p.origin,
-  conversationId: '',
+  conversation: p.conversation,
   app: p.app,
   window: {
     conversation: p.conversation,
@@ -44,10 +41,7 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
     error: p.error,
     conversationId: p.conversationId,
     threadId: p.threadId,
-    confidence: p.confidence,
-    threads: p.threads,
     autoCopy: p.autoCopy,
-    keigo: p.keigo === 'casual' || p.keigo === 'polite' || p.keigo === 'formal' ? p.keigo : '',
   },
   anchor: { x: 0, y: 0 },
   placement: 'below',

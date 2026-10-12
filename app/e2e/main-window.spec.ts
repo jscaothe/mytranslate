@@ -1,98 +1,69 @@
 import { expect, test, type Page } from '@playwright/test'
 
-// The main window: Threads, Contacts, Glossary and Settings, with the prototype's sample data.
+// The main window: Glossary (terms and people) and Settings, with the prototype's sample data.
 
 const openTab = async (page: Page, tab: string) => {
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   await page.getByRole('button', { name: tab, exact: true }).click()
 }
 
-const threadList = (page: Page) => page.locator('div.w-\\[280px\\]')
-const header = (page: Page) => page.locator('h2').first()
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
 })
 
-test('pinning a thread unpins the other thread of the same conversation', async ({ page }) => {
-  await openTab(page, 'Threads')
-  await threadList(page).getByRole('button', { name: /Lịch release tháng 11/ }).click()
-  await page.getByRole('button', { name: /^Ghim thread/ }).click()
-  await expect(page.getByRole('button', { name: 'Bỏ ghim thread' })).toBeVisible()
-  // The pinned thread moves to the top of its channel.
-  await expect(threadList(page).getByRole('group', { name: '#dev-qa' }).getByRole('button').first()).toContainText('Lịch release tháng 11')
-
-  await threadList(page).getByRole('button', { name: /Câu hỏi về API thanh toán/ }).click()
-  await page.getByRole('button', { name: /^Ghim thread/ }).click()
-  await expect(threadList(page).getByLabel('Đang ghim')).toHaveCount(1)
+test('the main window has the Glossary and Settings only: threads and contacts are kept out of sight', async ({ page }) => {
+  await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
+  const nav = page.getByRole('navigation', { name: 'Điều hướng' })
+  await expect(nav.getByRole('button')).toHaveText(['', ''])
+  await expect(nav.getByRole('button', { name: 'Glossary' })).toHaveAttribute('aria-current', 'page')
+  await expect(nav.getByRole('button', { name: 'Cài đặt' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Threads', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Người liên hệ', exact: true })).toHaveCount(0)
 })
 
-test('threads are grouped by app, workspace or team, and channel, and each level folds', async ({ page }) => {
-  await openTab(page, 'Threads')
-  const list = threadList(page)
-  await expect(list.getByRole('button', { name: 'Slack', exact: true })).toHaveAttribute('aria-expanded', 'true')
-  await expect(list.getByRole('button', { name: 'CustomerX', exact: true })).toBeVisible()
-  await expect(list.getByRole('button', { name: 'Dự án ABC', exact: true })).toBeVisible()
-  await expect(list.getByRole('group', { name: 'General' }).getByRole('button', { name: /Lịch UAT/ })).toBeVisible()
-  // Teams chats sit under Chat.
-  await expect(list.getByRole('button', { name: 'Chat', exact: true })).toBeVisible()
+test('glossary: a person is added with a prompt for the AI, filtered by kind and edited in place', async ({ page }) => {
+  await openTab(page, 'Glossary')
+  const add = page.getByRole('form', { name: 'Thêm vào glossary' })
+  await add.getByRole('radiogroup', { name: 'Loại' }).getByRole('radio', { name: 'Người' }).click()
+  await expect(add.getByText(/khi tên người này có trong tin nhắn/)).toBeVisible()
+  await add.getByRole('textbox', { name: 'Tên tiếng Nhật' }).fill('佐藤')
+  await add.getByRole('textbox', { name: 'Tên tiếng Việt' }).fill('Sato')
+  await add.getByRole('textbox', { name: 'Mô tả cho AI' }).fill('Trưởng nhóm phía khách, gọi là 佐藤さん.')
+  await add.getByRole('button', { name: 'Thêm' }).click()
 
-  await list.getByRole('button', { name: 'CustomerX', exact: true }).click()
-  await expect(list.getByRole('button', { name: /Lịch release tháng 11/ })).toHaveCount(0)
-  await expect(list.getByRole('button', { name: 'CustomerX', exact: true })).toContainText('4')
-  // A search shows every match, folded or not.
-  await page.getByPlaceholder('Tìm trong tiếng Nhật và tiếng Việt').fill('release')
-  await expect(list.getByRole('button', { name: /Lịch release tháng 11/ })).toBeVisible()
-})
+  const row = page.getByRole('row').filter({ hasText: '佐藤' })
+  await expect(row.getByRole('img', { name: 'Người' })).toBeVisible()
+  await expect(row).toContainText('Trưởng nhóm phía khách')
 
-test('archiving hides a thread until it is restored', async ({ page }) => {
-  await openTab(page, 'Threads')
-  await threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ }).click()
-  await page.getByRole('button', { name: 'Thêm' }).click()
-  await page.getByRole('menuitem', { name: 'Lưu trữ' }).click()
-  await expect(threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ })).toHaveCount(0)
+  // People only: the sample people and the new one, no terms.
+  const kinds = page.getByRole('radiogroup', { name: 'Lọc loại' })
+  await kinds.getByRole('radio', { name: 'Người' }).click()
+  await expect(page.getByRole('row').filter({ hasText: '佐藤' })).toBeVisible()
+  await expect(page.getByRole('row').filter({ hasText: '田中' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: 'デプロイ' })).toHaveCount(0)
+  await kinds.getByRole('radio', { name: 'Thuật ngữ' }).click()
+  await expect(page.getByRole('row').filter({ hasText: '佐藤' })).toHaveCount(0)
+  await expect(page.getByRole('cell', { name: 'デプロイ' })).toBeVisible()
+  await kinds.getByRole('radio', { name: 'Tất cả' }).click()
 
-  await page.getByRole('button', { name: 'Đã lưu trữ (1)' }).click()
-  await threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ }).click()
-  await expect(page.getByText('Đã lưu trữ', { exact: true })).toBeVisible()
-  await page.getByRole('button', { name: 'Thêm' }).click()
-  await page.getByRole('menuitem', { name: 'Bỏ lưu trữ' }).click()
-  await page.getByRole('button', { name: 'Thread đang dùng' }).click()
-  await expect(threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ })).toBeVisible()
-})
+  // Edit the prompt: Enter saves, Escape leaves the row as it was.
+  await row.hover()
+  await row.getByRole('button', { name: 'Sửa' }).click()
+  // While edited, the row's text is in its fields.
+  const table = page.getByRole('table')
+  const prompt = table.getByRole('textbox', { name: 'Mô tả cho AI' })
+  await prompt.fill('Trưởng nhóm phía khách, gọi là 佐藤様, viết trang trọng.')
+  await prompt.press('Enter')
+  await expect(row).toContainText('gọi là 佐藤様, viết trang trọng')
+  await expect(table.getByRole('textbox')).toHaveCount(0)
 
-test('merging moves every message into the chosen thread', async ({ page }) => {
-  await openTab(page, 'Threads')
-  await threadList(page).getByRole('button', { name: /Câu hỏi về API thanh toán/ }).click()
-  await page.getByRole('button', { name: 'Thêm' }).click()
-  await page.getByRole('menuitem', { name: 'Gộp vào thread khác' }).click()
-  await page.getByRole('menu', { name: 'Gộp vào' }).getByRole('menuitem', { name: /Lỗi đăng nhập màn hình A/ }).click()
-
-  await expect(threadList(page).getByRole('button', { name: /Câu hỏi về API thanh toán/ })).toHaveCount(0)
-  await expect(header(page)).toContainText('Lỗi đăng nhập màn hình A')
-  await expect(page.getByText('決済APIのタイムアウトは何秒に設定されていますか。')).toBeVisible()
-})
-
-test('a thread can be renamed and summarized again', async ({ page }) => {
-  await openTab(page, 'Threads')
-  await page.getByRole('button', { name: 'Đổi tên' }).click()
-  const input = page.getByRole('textbox', { name: 'Tên thread' })
-  await input.fill('Lỗi đăng nhập sau deploy')
-  await input.press('Enter')
-  await expect(header(page)).toContainText('Lỗi đăng nhập sau deploy')
-
-  await page.getByRole('button', { name: 'Cập nhật', exact: true }).click()
-  await expect(page.getByText('Đang tóm tắt…')).toBeVisible()
-  await expect(page.getByText(/^Tóm tắt mô phỏng/)).toBeVisible()
-})
-
-test('the keigo level is set per conversation', async ({ page }) => {
-  await openTab(page, 'Người liên hệ')
-  const general = page.getByRole('radiogroup', { name: 'Mức kính ngữ với #general' })
-  await general.getByRole('radio', { name: 'Thân mật' }).click()
-  await expect(general.getByRole('radio', { name: 'Thân mật' })).toHaveAttribute('aria-checked', 'true')
-  await general.getByRole('radio', { name: /Mặc định/ }).click()
-  await expect(general.getByRole('radio', { name: /Mặc định/ })).toHaveAttribute('aria-checked', 'true')
+  await row.hover()
+  await row.getByRole('button', { name: 'Sửa' }).click()
+  await table.getByRole('textbox', { name: 'Tên tiếng Việt' }).fill('Không lưu')
+  await table.getByRole('textbox', { name: 'Tên tiếng Việt' }).press('Escape')
+  await expect(row).toContainText('Sato')
+  await expect(row).not.toContainText('Không lưu')
 })
 
 test('glossary: add a personal term and filter by scope', async ({ page }) => {
@@ -105,36 +76,6 @@ test('glossary: add a personal term and filter by scope', async ({ page }) => {
   await page.getByRole('radiogroup', { name: 'Lọc phạm vi' }).getByRole('radio', { name: 'Dự án' }).click()
   await expect(page.getByRole('cell', { name: '本番環境' })).toHaveCount(0)
   await expect(page.getByRole('cell', { name: '受入テスト' })).toBeVisible()
-})
-
-test('a thread is deleted only after confirming', async ({ page }) => {
-  await openTab(page, 'Threads')
-  await threadList(page).getByRole('button', { name: /Lịch release tháng 11/ }).click()
-  await page.getByRole('button', { name: 'Thêm' }).click()
-  await page.getByRole('menuitem', { name: 'Xóa thread' }).click()
-  const confirm = page.getByRole('alertdialog', { name: 'Xóa thread' })
-  await expect(confirm).toContainText('không thể hoàn tác')
-  await confirm.getByRole('button', { name: 'Hủy' }).click()
-  await expect(threadList(page).getByRole('button', { name: /Lịch release tháng 11/ })).toBeVisible()
-
-  await page.getByRole('button', { name: 'Thêm' }).click()
-  await page.getByRole('menuitem', { name: 'Xóa thread' }).click()
-  await confirm.getByRole('button', { name: 'Xóa thread' }).click()
-  await expect(threadList(page).getByRole('button', { name: /Lịch release tháng 11/ })).toHaveCount(0)
-  // Another thread opens in its place.
-  await expect(header(page)).not.toHaveText('Lịch release tháng 11')
-})
-
-test('deleting a contact removes its threads too', async ({ page }) => {
-  await openTab(page, 'Người liên hệ')
-  await page.getByRole('button', { name: 'Xóa general' }).click()
-  const confirm = page.getByRole('alertdialog', { name: 'Xóa general' })
-  await expect(confirm).toContainText('1 thread')
-  await confirm.getByRole('button', { name: 'Xóa' }).click()
-  await expect(page.getByRole('radiogroup', { name: 'Mức kính ngữ với #general' })).toHaveCount(0)
-
-  await page.getByRole('button', { name: 'Threads', exact: true }).click()
-  await expect(threadList(page).getByRole('button', { name: /Họp định kỳ hằng tuần/ })).toHaveCount(0)
 })
 
 test('glossary: the team file is chosen and dropped from the Glossary tab', async ({ page }) => {
@@ -176,7 +117,7 @@ test('settings: checking finds a new version and installing shows progress', asy
   await expect(page.getByText('Đang cài, app sẽ tự mở lại…')).toBeVisible()
 
   // Other tabs show the waiting update as a banner, which can be put off.
-  await page.getByRole('button', { name: 'Threads', exact: true }).click()
+  await page.getByRole('button', { name: 'Glossary', exact: true }).click()
   await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
 })
 

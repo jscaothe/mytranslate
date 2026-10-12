@@ -87,6 +87,20 @@ test('Tab changes the keigo level and translates again', async ({ page }) => {
   await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
 })
 
+test('the popup names the chat it reads from, with no thread to pick', async ({ page }) => {
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+  const header = popup(page).locator('header')
+  await expect(header).toContainText('#dev-qa')
+  await expect(header.getByRole('button', { name: /thread/i })).toHaveCount(0)
+  // Ctrl+T used to open the thread picker; now it does nothing in the popup.
+  await popup(page).press('Control+t')
+  await expect(popup(page).getByRole('dialog')).toHaveCount(0)
+  await expect(popup(page).getByRole('listbox')).toHaveCount(0)
+  await expect(popup(page).getByPlaceholder(/thread/i)).toHaveCount(0)
+})
+
 test('Escape closes the popup and leaves the composer alone', async ({ page }) => {
   await composer(page).fill('Xin chào')
   await page.keyboard.press('Control+Alt+T')
@@ -126,4 +140,30 @@ test('the AI can be switched from the popup, which translates again with it', as
   await expect(menu).toBeHidden()
   await expect(popup(page).getByRole('button', { name: /^AI dịch: Claude Haiku/ })).toBeVisible()
   await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+})
+
+test('the AI menu stays on top of the popup window and inside it', async ({ page }) => {
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+  // The prototype draws the popup inside the page: give it the popup window's entrance, whose parts animate apart.
+  await popup(page).evaluate((el) => el.classList.replace('anim-popup', 'anim-reveal'))
+  await page.setViewportSize({ width: 1400, height: 560 })
+  await popup(page).getByRole('button', { name: /^AI dịch/ }).click()
+
+  const menu = popup(page).getByRole('menu', { name: 'Chọn AI dịch' })
+  const item = (await menu.getByRole('menuitemradio', { name: 'Haiku' }).boundingBox())!
+  const hit = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[role=menu]'), [item.x + 20, item.y + item.height / 2])
+  expect(hit).toBe(true)
+  const box = (await menu.boundingBox())!
+  expect(box.y + box.height).toBeLessThanOrEqual(560)
+
+  // Pressing in the menu, such as on its scrollbar or a group name, does not move the popup.
+  const before = (await popup(page).boundingBox())!
+  const label = (await menu.getByText('Claude').first().boundingBox())!
+  await page.mouse.move(label.x + 10, label.y + label.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(label.x + 10, label.y + 120, { steps: 5 })
+  await page.mouse.up()
+  expect(await popup(page).boundingBox()).toEqual(before)
 })

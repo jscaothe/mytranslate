@@ -1,7 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
 import {
   AlertTriangle,
-  ChevronDown,
   CircleAlert,
   Copy,
   GripVertical,
@@ -23,18 +22,16 @@ import { cx } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { diffChars } from '../../lib/diff'
 import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role, type T } from '../../lib/i18n'
-import { relativeTime, setFeedback, suggestReplies, updateConversation, type Reply as SuggestedReply } from '../../lib/history'
-import { detectThread } from '../../lib/mockEngine'
+import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
 import { useStore } from '../../store'
 import { defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
 import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
-import type { Confidence, Direction, Keigo, ReviewResult, Thread } from '../../types'
+import type { Direction, Keigo, ReviewResult } from '../../types'
 import { AiSwitcher } from './AiSwitcher'
-import { ThreadPicker } from './ThreadPicker'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
-import { useFloatingFrame } from './useFloatingFrame'
+import { dragsFrom, useFloatingFrame } from './useFloatingFrame'
 import { useTranslation } from './useTranslation'
 
 const LONG_TEXT_LIMIT = 4000
@@ -59,7 +56,7 @@ export interface PopupProps {
 
 export function Popup({ request, container, onClose, onApply, onPinnedChange, windowed }: PopupProps) {
   const store = useStore()
-  const { scenario, settings, threads, showToast } = store
+  const { scenario, settings, showToast } = store
   const lang = useLang()
   const t = useT()
   // A first-time tip about the keys, shown in the first real popup only (the guide's practice popup does not count).
@@ -68,11 +65,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const [direction, setDirection] = useState<Direction>(request.direction)
   const [source, setSource] = useState(request.source)
   const [origin, setOrigin] = useState<PopupOrigin>(request.origin)
-  // The keigo remembered for this chat, else the default; changing it here remembers it for the chat.
-  const [keigo, setKeigo] = useState<Keigo>(request.window?.keigo || settings.defaultKeigo)
+  // The user's default keigo until they change it here. Only a level they chose overrides a person's note in the Glossary.
+  const [keigo, setKeigo] = useState<Keigo>(settings.defaultKeigo)
+  const [keigoChosen, setKeigoChosen] = useState(false)
   const [runKey, setRunKey] = useState(0)
   const [pinned, setPinned] = useState(false)
-  const [pickerOpen, setPickerOpen] = useState(false)
   // The AI switcher: a choice made here translates again with it (and becomes the default).
   const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [aiOverride, setAiOverride] = useState<AiChoice | null>(null)
@@ -87,14 +84,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const bodyRef = useRef<HTMLDivElement>(null)
   const footerRef = useRef<HTMLElement>(null)
   const notice = request.window?.error ?? null
-  // Real app: the thread comes from the history on this PC. `id: null` with a title is a new thread the user named.
+  // Real app: the Rust side filed the text under its chat and a thread, out of sight; replies use the same context.
   const conversationId = request.window?.conversationId ?? null
-  const [realChoice, setRealChoice] = useState<{ id: number | null; newTitle: string | null; confidence: 'high' | 'low' }>(() => ({
-    id: request.window?.threadId ?? null,
-    newTitle: null,
-    confidence: request.window?.confidence ?? 'high',
-  }))
-  const [filedIn, setFiledIn] = useState<{ threadId: number; title: string } | null>(null)
+  const chatName = windowed ? (request.window?.conversation ?? '') : request.conversation
+  // A reply typed in this popup goes into the thread its message was filed in, which may be one just started.
+  const [filedThread, setFiledThread] = useState<number | null>(request.window?.threadId ?? null)
   const frame = useFloatingFrame({
     request,
     container,
@@ -102,15 +96,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     onGeometry: store.setPopupGeometry,
     rootRef,
   })
-
-  const conversation = store.conversations.find((c) => c.id === request.conversationId)
-  const conversationThreads = threads.filter((t) => t.conversationId === request.conversationId)
-
-  const [threadPick, setThreadPick] = useState<{ id: string | null; confidence: Confidence }>(() => {
-    const d = detectThread(request.conversationId, request.source, threads, scenario === 'uncertain_thread')
-    return { id: d.threadId, confidence: d.confidence }
-  })
-  const thread = threads.find((t) => t.id === threadPick.id) ?? null
 
   const isReview = direction === 'review_ja'
   // Reading the other side, writing to them, or checking Japanese: the popup's actions follow from it.
@@ -120,10 +105,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     direction,
     text: source,
     keigo,
+    keigoChosen,
     runKey,
     enabled: longConfirmed && !notice,
     scenario,
-    thread: windowed ? { conversationId, threadId: realChoice.id, newThreadTitle: realChoice.newTitle } : undefined,
+    history: windowed ? { conversationId, threadId: filedThread } : undefined,
     ai: aiOverride,
   })
 
@@ -151,45 +137,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     void invoke('show_main_window').then(() => emit('ui:open-tab', 'settings'))
   }
 
-  // The translation was filed when it finished. If the user picked another thread (before or after that), move it.
   const saved = live.saved
-  useEffect(() => {
-    if (!windowed || !saved || conversationId === null) return
-    const current = filedIn?.threadId ?? saved.threadId
-    const wantsNew = realChoice.id === null && realChoice.newTitle !== null
-    if (!wantsNew && (realChoice.id === null || realChoice.id === current)) return
-    void invoke<{ threadId: number; threadTitle: string }>('history_move', {
-      messageId: saved.messageId,
-      conversationId,
-      fromThread: current,
-      toThread: realChoice.id,
-      newTitle: realChoice.newTitle,
-    }).then((r) => {
-      setFiledIn({ threadId: r.threadId, title: r.threadTitle })
-      setRealChoice({ id: r.threadId, newTitle: null, confidence: 'high' })
-    })
-  }, [windowed, saved, conversationId, filedIn, realChoice])
+  if (saved && saved.threadId !== filedThread) setFiledThread(saved.threadId)
 
-  const realThreads = useMemo(() => request.window?.threads ?? [], [request.window?.threads])
-  const realTitle =
-    realChoice.newTitle ??
-    (realChoice.id !== null && realChoice.id === filedIn?.threadId ? filedIn.title : null) ??
-    realThreads.find((t) => t.id === realChoice.id)?.title ??
-    (realChoice.id === null || realChoice.id === saved?.threadId ? saved?.threadTitle : undefined) ??
-    t('Thread mới', '新しいスレッド')
-  const pickerThreads = useMemo<Thread[]>(
-    () =>
-      realThreads.map((t) => ({
-        id: String(t.id),
-        conversationId: String(conversationId),
-        title: t.title,
-        summary: '',
-        lastActive: relativeTime(t.lastActive, lang),
-        pinned: false,
-        messages: [],
-      })),
-    [realThreads, conversationId, lang],
-  )
   const reviewResult = useMemo(
     () => (isReview && live.phase === 'done' ? toReview(source, live.sections, t) : null),
     [isReview, live.phase, live.sections, source, t],
@@ -250,30 +200,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const finalText = draft ?? resultText
 
-  /** Prototype only: records the exchange in its thread (the real app files it on the Rust side). */
-  const save = (finalResult?: string) => {
-    if (!resultReady) return
-    let threadId = threadPick.id
-    if (!threadId) threadId = store.createThread(request.conversationId, t('Thread mới', '新しいスレッド'))
-    const time = new Date().toLocaleTimeString(locale(lang), { hour: '2-digit', minute: '2-digit' })
-    const me = t('Tôi', '自分')
-    if (isReview) {
-      // A review is only recorded when the suggestion is used; keeping the original adds nothing to the thread.
-      if (reviewResult && finalResult !== undefined) {
-        store.addMessage(threadId, { author: 'me', name: me, time, ja: finalResult, vi: reviewResult.suggestionVi })
-      }
-      return
-    }
-    const result = finalResult ?? finalText
-    const [ja, vi] = direction === 'ja_vi' ? [source, result] : [result, source]
-    const author = role === 'read' ? 'other' : 'me'
-    store.addMessage(threadId, { author, name: author === 'me' ? me : t('Khách', '相手'), time, ja, vi })
-  }
-
-  const close = () => {
-    save()
-    onClose()
-  }
+  const close = onClose
 
   const copy = async (text: string, message: string) => {
     if (windowed) {
@@ -293,12 +220,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     if (role === 'read') return
     const text = finalText
     if (origin === 'composer' && onApply) {
-      save(text)
       onApply(text)
       onClose()
     } else {
       void copy(text, t('Đã sao chép, dán vào ô chat bằng Ctrl+V', 'コピーしました。Ctrl+V で入力欄に貼り付けてください'))
-      save(text)
       onClose()
     }
   }
@@ -309,8 +234,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const changeKeigo = (k: Keigo) => {
     setKeigo(k)
+    setKeigoChosen(true)
     setRunKey((r) => r + 1)
-    if (windowed && conversationId !== null) void updateConversation(String(conversationId), k)
   }
 
   const cycleKeigo = () => changeKeigo(keigoOrder[(keigoOrder.indexOf(keigo) + 1) % keigoOrder.length])
@@ -325,7 +250,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       window.setTimeout(() => done(MOCK_REPLIES[lang]), 700)
       return
     }
-    suggestReplies({ text: source, keigo, conversationId, threadId: saved?.threadId ?? realChoice.id })
+    suggestReplies({ text: source, keigo, conversationId, threadId: filedThread })
       .then(done)
       .catch((e) => setReplies({ state: 'error', items: [], error: String(e) }))
   }
@@ -337,7 +262,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const submitReply = () => {
     const text = replyText.trim()
     if (!text) return
-    save()
     setDirection(writeDirection(lang))
     setSource(text)
     setOrigin('popup')
@@ -357,8 +281,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       if (aiMenuOpen) {
         setAiMenuOpen(false)
         rootRef.current?.focus()
-      } else if (pickerOpen) setPickerOpen(false)
-      else if (replyMode) setReplyMode(false)
+      } else if (replyMode) setReplyMode(false)
       else close()
       return
     }
@@ -374,11 +297,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         e.preventDefault()
         submitReply()
       }
-      return
-    }
-    if (e.ctrlKey && e.key.toLowerCase() === 't') {
-      e.preventDefault()
-      setPickerOpen(true)
       return
     }
     if (e.ctrlKey && e.key.toLowerCase() === 'p') {
@@ -472,7 +390,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         ref={headerRef}
         onPointerDown={(e) => {
           if (!windowed) return frame.onHeaderPointerDown(e)
-          if (e.button === 0 && !(e.target as HTMLElement).closest('button')) windowed.startDrag()
+          if (e.button === 0 && dragsFrom(e.target)) windowed.startDrag()
         }}
         className={cx(
           'relative flex h-10 shrink-0 items-center gap-1 border-b border-line pr-1.5 pl-1 select-none',
@@ -480,45 +398,14 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         )}
       >
         {(container || windowed) && <GripVertical size={14} className="shrink-0 text-ink-3" aria-hidden />}
-        {windowed ? (
-          <button
-            type="button"
-            onClick={() => setPickerOpen((o) => !o)}
-            title={`${t('Đổi thread', 'スレッドを変更')} (Ctrl+T)${request.window?.workspace ? ` · ${request.window.workspace}` : ''}`}
-            className={cx(
-              'flex h-7 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-hover',
-              realChoice.confidence === 'low' && 'border border-dashed border-warn',
-            )}
-          >
-            <AppBadge app={request.app} />
-            <span className="max-w-[110px] shrink-0 truncate text-[12.5px] text-ink-2">
-              {request.window?.conversation || t('Ứng dụng khác', 'その他のアプリ')}
-            </span>
-            <span className="shrink-0 text-ink-3">›</span>
-            <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{realTitle}</span>
-            <ConfidenceMark confidence={realChoice.confidence} />
-            <ChevronDown size={13} className="shrink-0 text-ink-3" />
-          </button>
-        ) : (
-        <button
-          type="button"
-          onClick={() => setPickerOpen((o) => !o)}
-          title={`${t('Đổi thread', 'スレッドを変更')} (Ctrl+T)`}
-          className={cx(
-            'flex h-7 min-w-0 shrink cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-left hover:bg-hover',
-            threadPick.confidence === 'low' && 'border border-dashed border-warn',
-          )}
+        {/* Where the text came from. The thread it is filed under is picked automatically and not shown. */}
+        <div
+          title={[request.window?.workspace, chatName].filter(Boolean).join(' / ') || undefined}
+          className="flex h-7 min-w-0 shrink items-center gap-1.5 px-1.5"
         >
           <AppBadge app={request.app} />
-          <span className="max-w-[96px] shrink-0 truncate text-[12.5px] text-ink-2" title={conversation ? [conversation.org, conversation.workspace, conversation.name].filter(Boolean).join(' / ') : undefined}>
-            {conversation?.name ?? t('Khác', 'その他')}
-          </span>
-          <span className="shrink-0 text-ink-3">›</span>
-          <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{thread?.title ?? t('Thread mới', '新しいスレッド')}</span>
-          <ConfidenceMark confidence={threadPick.confidence} />
-          <ChevronDown size={13} className="shrink-0 text-ink-3" />
-        </button>
-        )}
+          <span className="min-w-0 truncate text-[12.5px] font-semibold text-ink">{chatName || t('Ứng dụng khác', 'その他のアプリ')}</span>
+        </div>
         <div className="h-full min-w-3 flex-1" />
         {isReview && <DirectionBadge direction={direction} verdict={resultReady ? reviewResult?.verdict : undefined} />}
         <AiSwitcher
@@ -545,48 +432,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         <IconButton label={t('Đóng (Esc)', '閉じる (Esc)')} onClick={close}>
           <X size={15} />
         </IconButton>
-        {pickerOpen && windowed && (
-          <ThreadPicker
-            threads={pickerThreads}
-            currentId={realChoice.id === null ? null : String(realChoice.id)}
-            onClose={() => {
-              setPickerOpen(false)
-              rootRef.current?.focus()
-            }}
-            onPick={(id) => {
-              setRealChoice({ id: Number(id), newTitle: null, confidence: 'high' })
-              setPickerOpen(false)
-              rootRef.current?.focus()
-            }}
-            onCreate={(title) => {
-              setRealChoice({ id: null, newTitle: title, confidence: 'high' })
-              setPickerOpen(false)
-              rootRef.current?.focus()
-            }}
-          />
-        )}
-        {pickerOpen && !windowed && (
-          <ThreadPicker
-            threads={conversationThreads}
-            currentId={threadPick.id}
-            onClose={() => {
-              setPickerOpen(false)
-              rootRef.current?.focus()
-            }}
-            onPick={(id) => {
-              setThreadPick({ id, confidence: 'high' })
-              setPickerOpen(false)
-              rootRef.current?.focus()
-              showToast(t('Đã chuyển sang thread khác, lần sau sẽ ưu tiên thread này', '別のスレッドに移動しました。次回からこのスレッドを優先します'))
-            }}
-            onCreate={(title) => {
-              const id = store.createThread(request.conversationId, title)
-              setThreadPick({ id, confidence: 'high' })
-              setPickerOpen(false)
-              rootRef.current?.focus()
-            }}
-          />
-        )}
       </header>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
@@ -853,26 +698,6 @@ function RepliesBlock({
 
 function Section({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cx('border-b border-line px-4 py-3 last:border-b-0', className)}>{children}</div>
-}
-
-function ConfidenceMark({ confidence }: { confidence: Confidence }) {
-  const t = useT()
-  if (confidence === 'low') {
-    return (
-      <span
-        title={t('App chưa chắc đây là đúng thread, bấm để chọn', 'このスレッドで合っているか不確かです。クリックして選択')}
-        className="shrink-0 text-[12px] font-bold text-warn"
-      >
-        ?
-      </span>
-    )
-  }
-  return (
-    <span
-      title={confidence === 'high' ? t('Độ tin cậy cao', '確度: 高') : t('Độ tin cậy trung bình', '確度: 中')}
-      className={cx('size-1.5 shrink-0 rounded-full', confidence === 'high' ? 'bg-good' : 'bg-warn')}
-    />
-  )
 }
 
 function DirectionBadge({ direction, verdict }: { direction: Direction; verdict?: 'ok' | 'suggest' | 'error' }) {

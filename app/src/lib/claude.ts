@@ -17,8 +17,6 @@ export interface Sections {
   issues: string
   suggestion: string
   suggestionVi: string
-  /** Only for a new thread: the short title Claude gave it. */
-  threadTitle: string
 }
 
 export const emptySections: Sections = {
@@ -29,7 +27,6 @@ export const emptySections: Sections = {
   issues: '',
   suggestion: '',
   suggestionVi: '',
-  threadTitle: '',
 }
 
 export interface Timing {
@@ -72,18 +69,19 @@ export type TranslateEvent =
   | { type: 'done'; sections: Sections; timing: Timing; rateLimit: RateLimit | null }
   | { type: 'error'; kind: ErrorKind; message: string; provider?: string | null }
   /** After `done`: where the result was filed in the history. */
-  | { type: 'saved'; messageId: number; threadId: number; threadTitle: string }
+  | { type: 'saved'; messageId: number; threadId: number }
 
 export interface TranslateRequest {
   /** `review_ja` checks Japanese the user wrote instead of translating it. */
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
   keigo: Keigo
+  /** The user picked `keigo` for this message; otherwise it is their default, which a person's note may override. */
+  keigoChosen?: boolean
   /** History: the chat window the text came from; the Rust side adds the thread's messages as context. */
   conversationId?: number | null
-  /** History: the chosen thread; null starts a new one. */
+  /** History: the thread the Rust side picked for the text; null starts a new one. */
   threadId?: number | null
-  newThreadTitle?: string | null
   /** Translate with this AI and model instead of the default (the popup's AI switcher). */
   ai?: { provider: string; model: string } | null
 }

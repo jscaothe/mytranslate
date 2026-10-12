@@ -14,7 +14,7 @@ export interface TranslationState {
   /** Plan usage reported by the CLI with the result, when it reported any. */
   rateLimit: RateLimit | null
   /** Where the result was filed in the history (real app only). */
-  saved: { messageId: number; threadId: number; threadTitle: string } | null
+  saved: { messageId: number; threadId: number } | null
 }
 
 const initial: TranslationState = {
@@ -41,20 +41,23 @@ export function useTranslation({
   direction,
   text,
   keigo,
+  keigoChosen = false,
   runKey,
   enabled,
   scenario,
-  thread,
+  history,
   ai,
 }: {
   direction: 'ja_vi' | 'vi_ja' | 'review_ja'
   text: string
   keigo: Keigo
+  /** The user picked `keigo` for this message, rather than it being their default. */
+  keigoChosen?: boolean
   runKey: number
   enabled: boolean
   scenario: Scenario
-  /** History filing, read when a run starts; changing it later does not restart the translation. */
-  thread?: { conversationId: number | null; threadId: number | null; newThreadTitle: string | null }
+  /** Where the text came from in the history, read when a run starts (real app only). */
+  history?: { conversationId: number | null; threadId: number | null }
   /** Translate with this AI and model; `null` uses the default. Changing it translates again. */
   ai?: { provider: string; model: string } | null
 }) {
@@ -77,7 +80,7 @@ export function useTranslation({
       return () => window.clearTimeout(t)
     }
 
-    void startTranslation({ direction, text, keigo, ...thread, ai: ai ?? null }, (e) => {
+    void startTranslation({ direction, text, keigo, keigoChosen, ...history, ai: ai ?? null }, (e) => {
       if (e.type === 'thinking') update({ phase: 'thinking' })
       if (e.type === 'delta') update({ phase: 'streaming', sections: e.sections })
       if (e.type === 'done')
@@ -87,7 +90,7 @@ export function useTranslation({
           rateLimit: e.rateLimit,
           answeredBy: { provider: e.timing.provider, model: e.timing.model, fallbackFrom: e.timing.fallbackFrom },
         })
-      if (e.type === 'saved') update({ saved: { messageId: e.messageId, threadId: e.threadId, threadTitle: e.threadTitle } })
+      if (e.type === 'saved') update({ saved: { messageId: e.messageId, threadId: e.threadId } })
       if (e.type === 'error' && e.kind !== 'cancelled')
         update({ phase: 'error', error: { kind: e.kind, message: e.message, provider: e.provider ?? 'claude' } })
     }, lang).then((c) => {
@@ -98,7 +101,7 @@ export function useTranslation({
       alive = false
       cancel?.()
     }
-    // `thread` is read when a run starts; editing it should not restart the current translation. `ai` is in `key`.
+    // `history` and `keigoChosen` are read when a run starts (a keigo change restarts it anyway). `ai` is in `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 

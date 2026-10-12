@@ -12,11 +12,11 @@ use tauri::{
 
 use crate::capture;
 use crate::context::{self, ChatApp, Context};
-use crate::history::{self, History, ThreadInfo};
+use crate::history::{self, History};
 use crate::lang::Lang;
 use crate::placement::{self, Anchor, Rect};
 use crate::settings::SettingsStore;
-use crate::threads::{self, Candidate, Confidence};
+use crate::threads::{self, Candidate};
 
 pub const LABEL: &str = "popup";
 const DEFAULT_WIDTH: f64 = 440.0;
@@ -78,31 +78,23 @@ pub struct OpenPayload {
     pub workspace: Option<String>,
     /// `no_selection` or `clipboard` when nothing could be read.
     pub error: Option<String>,
-    /// History: the chat window's conversation, and the thread the message most likely belongs to.
+    /// History: the chat window's conversation, and the thread the message most likely belongs to (`None`: a new
+    /// one). The app files the translation there and reads the thread's latest messages as context.
     pub conversation_id: Option<i64>,
     pub thread_id: Option<i64>,
-    pub confidence: Confidence,
-    /// Recent threads of this conversation, for the thread picker.
-    pub threads: Vec<ThreadInfo>,
     /// Copy the result to the clipboard as soon as it is ready (toolbar "translate and copy").
     pub auto_copy: bool,
-    /// The keigo level remembered for this conversation; empty means the default from the settings.
-    pub keigo: String,
 }
 
-/// Threads untouched for this long are not offered as candidates.
+/// Threads untouched for this long are not considered.
 const THREAD_HORIZON_MS: i64 = 14 * 24 * 60 * 60 * 1000;
 const MAX_CANDIDATES: usize = 8;
 /// Messages per thread compared with the new text.
 const CANDIDATE_MESSAGES: usize = 4;
 
-/// Files the text under its chat window's conversation and guesses the thread, all locally.
-fn detect_thread(
-    history: &History,
-    ctx: &Context,
-    text: &str,
-    lang: Lang,
-) -> (Option<i64>, Option<i64>, Confidence, Vec<ThreadInfo>) {
+/// Files the text under its chat window's conversation and picks its thread, all locally. A guess the detector is
+/// unsure of still goes to its best thread: a wrong one only costs some context, while a new thread loses it all.
+fn detect_thread(history: &History, ctx: &Context, text: &str, lang: Lang) -> (Option<i64>, Option<i64>) {
     let app = match ctx.app {
         ChatApp::Slack => "slack",
         ChatApp::Teams => "teams",
@@ -121,22 +113,13 @@ fn detect_thread(
         Ok(id) => id,
         Err(e) => {
             log::warn!("history unavailable: {e}");
-            return (None, None, Confidence::High, Vec::new());
+            return (None, None);
         }
     };
     let now = history::now_ms();
-    let mut threads = history
+    let threads = history
         .recent_threads(conversation, now - THREAD_HORIZON_MS, MAX_CANDIDATES)
         .unwrap_or_default();
-    // A pinned thread takes every new message of its conversation, however old it is.
-    if let Ok(Some(pinned)) = history.pinned_thread(conversation) {
-        log::info!("thread pinned {}", pinned.id);
-        let id = pinned.id;
-        if !threads.iter().any(|t| t.id == id) {
-            threads.insert(0, pinned);
-        }
-        return (Some(conversation), Some(id), Confidence::High, threads);
-    }
     let candidates: Vec<Candidate> = threads
         .iter()
         .map(|t| {
@@ -161,7 +144,7 @@ fn detect_thread(
         d.confidence,
         threads.len()
     );
-    (Some(conversation), d.thread_id, d.confidence, threads)
+    (Some(conversation), d.thread_id)
 }
 
 /// What the user chose by dragging, in logical pixels. `None` / `false` means the app decides
@@ -332,15 +315,11 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
         let (direction, origin) = route(action, &text, lang, in_message_box);
 
         let history = app.state::<History>();
-        let (conversation_id, thread_id, confidence, threads) = if error.is_none() {
+        let (conversation_id, thread_id) = if error.is_none() {
             detect_thread(&history, &ctx, &text, lang)
         } else {
-            (None, None, Confidence::High, Vec::new())
+            (None, None)
         };
-        let keigo = conversation_id
-            .and_then(|id| history.conversation(id).ok().flatten())
-            .map(|c| c.keigo)
-            .unwrap_or_default();
 
         let state = app.state::<PopupState>();
         let id = {
@@ -360,10 +339,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, auto_copy: 
             error,
             conversation_id,
             thread_id,
-            confidence,
-            threads,
             auto_copy,
-            keigo,
         };
         if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");

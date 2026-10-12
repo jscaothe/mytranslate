@@ -21,6 +21,7 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, oneshot};
 
 use super::stream_parser::{Sections, StreamParser};
+use crate::history::Tokens;
 use crate::prompt::{self, TranslateRequest};
 
 /// A spare older than this is replaced in the background, so a stale login or a stuck process never meets a user.
@@ -45,6 +46,7 @@ pub struct Timing {
     pub provider: String,
     /// Set when this provider answered because the chosen one failed.
     pub fallback_from: Option<String>,
+    pub tokens: Tokens,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -56,6 +58,9 @@ pub struct RateLimit {
     pub limit_type: Option<String>,
 }
 
+// `Done` is much larger than the other events, but each event lives only until it is sent: boxing it would only add
+// an allocation.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TranslateEvent {
@@ -81,7 +86,6 @@ pub enum TranslateEvent {
     Saved {
         message_id: i64,
         thread_id: i64,
-        thread_title: String,
     },
 }
 
@@ -303,6 +307,7 @@ impl ClaudeCli {
         let mut first_token_ms = None;
         let mut thought = false;
         let mut rate_limit = None;
+        let mut tokens = Tokens::default();
         let deadline = tokio::time::sleep(REQUEST_TIMEOUT);
         tokio::pin!(deadline);
 
@@ -348,6 +353,7 @@ impl ClaudeCli {
                         let text = msg["result"].as_str().unwrap_or("Claude returned an error").to_string();
                         break Err(classify_failure(&text));
                     }
+                    tokens = usage(&msg["usage"]);
                     // The final text is authoritative in case a delta was missed.
                     let full = msg["result"].as_str().unwrap_or(parser.raw()).to_string();
                     break Ok(super::stream_parser::parse(&full));
@@ -371,6 +377,7 @@ impl ClaudeCli {
                     prompt_version: prompt::PROMPT_VERSION,
                     provider: "claude".into(),
                     fallback_from: None,
+                    tokens,
                 },
                 rate_limit,
             }),
@@ -496,9 +503,40 @@ fn find_claude() -> PathBuf {
     PathBuf::from(name)
 }
 
+/// The token counts of a `result` message. Anthropic counts the cached part of the prompt apart from `input_tokens`.
+fn usage(u: &Value) -> Tokens {
+    if !u.is_object() {
+        return Tokens::default();
+    }
+    let n = |key: &str| u[key].as_u64().unwrap_or(0);
+    let cached = n("cache_read_input_tokens");
+    Tokens {
+        input: Some(n("input_tokens") + n("cache_creation_input_tokens") + cached),
+        cached: Some(cached),
+        output: u["output_tokens"].as_u64(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usage_counts_the_cached_prompt_as_input() {
+        let u: Value = serde_json::from_str(
+            r#"{"input_tokens":12,"cache_creation_input_tokens":0,"cache_read_input_tokens":1400,"output_tokens":75}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            usage(&u),
+            Tokens {
+                input: Some(1412),
+                cached: Some(1400),
+                output: Some(75)
+            }
+        );
+        assert_eq!(usage(&Value::Null), Tokens::default());
+    }
 
     #[test]
     fn a_request_cancelled_before_it_starts_never_runs() {

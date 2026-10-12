@@ -290,8 +290,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           hint={
             isTauri
               ? t(
-                  'Lịch sử dịch, thread và glossary nằm trên máy này, trong %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db.',
-                  '翻訳履歴、スレッド、用語集はこのPCの %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db にあります。',
+                  'Lịch sử dịch và glossary (thuật ngữ, người) nằm trên máy này, trong %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db.',
+                  '翻訳履歴と用語集（用語・人物）はこのPCの %LOCALAPPDATA%\\com.mytranslate.desktop\\history.db にあります。',
                 )
               : t('Toàn bộ lịch sử dịch nằm trên máy này.', '翻訳履歴はすべてこのPCにあります。')
           }
@@ -302,8 +302,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           <Row
             label={t('Giữ lịch sử', '履歴の保存期間')}
             hint={t(
-              'Tin cũ hơn thời hạn này được tự xóa, thread không còn tin nào cũng bị xóa.',
-              '期間より古いメッセージは自動で削除され、空になったスレッドも削除されます。',
+              'Tin đã dịch cũ hơn thời hạn này được tự xóa. App dùng các tin gần đây làm ngữ cảnh khi dịch.',
+              '期間より古い翻訳済みメッセージは自動で削除されます。最近のやり取りは翻訳の文脈に使われます。',
             )}
           >
             <Segmented
@@ -320,7 +320,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           </Row>
           <Row
             label={t('Sao lưu', 'バックアップ')}
-            hint={t('Một file .db chứa toàn bộ lịch sử, thread, người liên hệ và glossary cá nhân.', '履歴、スレッド、連絡先、個人用語集をすべて含む .db ファイルです。')}
+            hint={t('Một file .db chứa toàn bộ lịch sử dịch và glossary cá nhân (thuật ngữ, người).', '翻訳履歴と個人用語集（用語・人物）をすべて含む .db ファイルです。')}
           >
             <Button onClick={backup}>{t('Sao lưu...', 'バックアップ…')}</Button>
           </Row>
@@ -339,8 +339,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
           <Row
             label={t('Xóa toàn bộ dữ liệu', 'すべてのデータを削除')}
             hint={t(
-              'Xóa lịch sử, thread, người liên hệ và glossary cá nhân. Cài đặt được giữ lại. Không thể hoàn tác.',
-              '履歴、スレッド、連絡先、個人用語集を削除します。設定は残ります。元に戻せません。',
+              'Xóa lịch sử dịch và glossary cá nhân (thuật ngữ, người). Cài đặt được giữ lại. Không thể hoàn tác.',
+              '翻訳履歴と個人用語集（用語・人物）を削除します。設定は残ります。元に戻せません。',
             )}
           >
             {confirm === 'wipe' ? (

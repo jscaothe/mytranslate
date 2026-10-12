@@ -130,13 +130,14 @@ export function Playground() {
         direction,
         source: got.text,
         origin,
-        conversationId: channel.conversationId,
+        // What the real app reads from the chat window's title: a channel with its #, a DM by the person's name.
+        conversation: channel.kind === 'channel' ? `#${channel.label}` : channel.label,
         app,
         anchor: got.anchor,
         placement: got.placement,
       })
     },
-    [app, capture, channel.conversationId, settings.hotkeysPaused, showToast, t, lang],
+    [app, capture, channel.kind, channel.label, settings.hotkeysPaused, showToast, t, lang],
   )
 
   // Mouse users get a small toolbar after selecting text, so they never have to reach for the keyboard.
@@ -339,8 +340,8 @@ export function Playground() {
                   入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.auto} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
                   <Hotkey combo="Enter" /> でベトナム語訳を入力欄に貼り付けます。
                 </Step>
-                <Step n={3} title="スレッドを変更">
-                  ポップアップでスレッド名をクリックするか、<Hotkey combo="Ctrl+T" /> を押します。
+                <Step n={3} title="相手のことを AI に伝える">
+                  用語集に種類「人物」で相手を追加し、役割や呼び方を書きます。名前が会話に出ると、AI に一緒に送られます。
                 </Step>
                 <Step n={4} title="ポップアップの移動とサイズ変更">
                   タイトルバーをドラッグして移動、左右・下の端や下の角をドラッグしてサイズを変更できます。次のポップアップもアプリを終了するまで同じ位置とサイズで開きます。
@@ -359,8 +360,8 @@ export function Playground() {
                 <Step n={3} title="Kiểm tra câu tiếng Nhật">
                   Viết tiếng Nhật vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.review} />.
                 </Step>
-                <Step n={4} title="Đổi thread">
-                  Trong popup, bấm tên thread hoặc nhấn <Hotkey combo="Ctrl+T" />.
+                <Step n={4} title="Cho AI biết bạn đang nói với ai">
+                  Thêm người vào Glossary với loại "Người", ghi vai trò và cách xưng hô. Khi tên họ có trong cuộc chat, app gửi kèm cho AI.
                 </Step>
                 <Step n={5} title="Di chuyển và đổi kích thước popup">
                   Kéo thanh tiêu đề để di chuyển; kéo mép trái, phải, dưới hoặc góc dưới để đổi kích thước. Popup sau sẽ mở đúng như vậy cho

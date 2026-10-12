@@ -28,9 +28,6 @@ struct Case {
     /// The user's language: `ja` for a Japanese user chatting with Vietnamese colleagues.
     #[serde(default)]
     user: Lang,
-    /// Ask for a thread title too, as for the first message of a new thread.
-    #[serde(default)]
-    new_thread: bool,
 }
 
 fn formal() -> Keigo {
@@ -76,7 +73,6 @@ fn main() {
         for case in &cases.cases {
             let mut req = TranslateRequest::task(case.direction, &case.text, case.keigo);
             req.user_lang = case.user;
-            req.ask_title = case.new_thread;
             let done: Arc<Mutex<Option<TranslateEvent>>> = Arc::default();
             let out = done.clone();
             router
@@ -113,7 +109,6 @@ fn main() {
             Direction::ViJa => format!("VI→JA ({:?})", case.keigo).to_lowercase(),
             Direction::ReviewJa => format!("Kiểm tra ({:?})", case.keigo).to_lowercase(),
             Direction::Reply => format!("Gợi ý trả lời ({:?})", case.keigo).to_lowercase(),
-            Direction::Summarize => "?".into(),
         };
         let direction = match case.user {
             Lang::Vi => direction,
@@ -129,12 +124,7 @@ fn main() {
                     first(&timing),
                 ),
                 Direction::Reply => (s.replies, String::new(), first(&timing)),
-                _ if s.thread_title.is_empty() => (s.translation, s.back_translation, first(&timing)),
-                _ => (
-                    s.translation,
-                    format!("{}<br>Thread: {}", s.back_translation, s.thread_title),
-                    first(&timing),
-                ),
+                _ => (s.translation, s.back_translation, first(&timing)),
             },
             Some(TranslateEvent::Error { message, .. }) => (format!("LỖI: {message}"), String::new(), None),
             _ => ("LỖI: không có kết quả".into(), String::new(), None),

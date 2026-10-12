@@ -23,7 +23,6 @@ const screens = (t: T): { value: Screen; label: string }[] => [
 
 const scenarios = (t: T): { value: Scenario; label: string }[] => [
   { value: 'normal', label: t('Bình thường', '通常') },
-  { value: 'uncertain_thread', label: t('Không chắc thread', 'スレッドが不確か') },
   { value: 'no_claude', label: t('Chưa cài Claude Code', 'Claude Code 未インストール') },
   { value: 'not_logged_in', label: t('Claude chưa đăng nhập', 'Claude 未ログイン') },
   { value: 'quota', label: t('Hết hạn mức', '利用枠の上限') },
@@ -34,7 +33,7 @@ export default function App() {
   if (isTauri) {
     const windowLabel = getCurrentWindow().label
     return (
-      <StoreProvider initialScreen="main" initialMainTab="threads">
+      <StoreProvider initialScreen="main" initialMainTab="glossary">
         {windowLabel === 'popup' ? <PopupShell /> : windowLabel === 'quickbar' ? <QuickbarShell /> : <TauriShell />}
       </StoreProvider>
     )
@@ -249,7 +248,7 @@ function Taskbar() {
     }
   }, [trayOpen])
 
-  const claudeOk = scenario === 'normal' || scenario === 'uncertain_thread'
+  const claudeOk = scenario === 'normal'
   const claudeLabel = claudeOk
     ? t('Đã kết nối', '接続済み')
     : scenario === 'no_claude'
@@ -306,7 +305,7 @@ function Taskbar() {
           </button>
           {trayOpen && (
             <div className="anim-popup absolute right-0 bottom-11 z-50 w-64 rounded-lg border border-line bg-window p-1 shadow-popup">
-              {item(t('Mở MyTranslate', 'MyTranslate を開く'), () => openMain('threads'), <Hotkey combo={settings.hotkeys.main} />)}
+              {item(t('Mở MyTranslate', 'MyTranslate を開く'), () => openMain('glossary'), <Hotkey combo={settings.hotkeys.main} />)}
               <div className="my-1 h-px bg-line" />
               {item(settings.hotkeysPaused ? t('Bật lại phím tắt', 'ショートカットを再開') : t('Tạm dừng phím tắt', 'ショートカットを一時停止'), () =>
                 updateSettings({ hotkeysPaused: !settings.hotkeysPaused }),
