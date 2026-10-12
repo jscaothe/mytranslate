@@ -147,8 +147,43 @@ body {
   }
 }
 
+/* Content coming into focus: rises a little out of a blur. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.985);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+}
+
+/* A piece of streamed text settling in. */
+@keyframes ink-in {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+}
+
 .anim-popup {
   animation: popup-in 110ms ease-out;
+}
+
+/* The popup window's content: the header first, the rest right after. Short, so it never holds up reading. */
+.anim-reveal > * {
+  animation: reveal-in 220ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+.anim-reveal > header ~ * {
+  animation-delay: 40ms;
+}
+
+.ink-in {
+  animation: ink-in 200ms ease-out both;
 }
 
 .skeleton {
@@ -171,6 +206,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .anim-popup,
+  .anim-reveal > *,
+  .ink-in,
   .skeleton,
   .stream-caret::after {
     animation: none;

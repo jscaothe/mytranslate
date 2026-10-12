@@ -425,7 +425,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         // A real window gets its border, corners and shadow from Windows.
         windowed ? 'h-screen w-screen' : 'rounded-lg border border-line shadow-popup',
         !windowed && (container ? 'absolute z-40' : 'relative w-[440px]'),
-        !frame.dragging && 'anim-popup',
+        // A real window is on screen at once; its content then comes into focus. The in-page popup grows in.
+        !frame.dragging && (windowed ? 'anim-reveal' : 'anim-popup'),
         frame.dragging && 'select-none',
       )}
     >
@@ -905,6 +906,25 @@ function PendingBlock({ label }: { label: string }) {
   )
 }
 
+/**
+ * Streamed text where each piece that arrives settles in from a light blur instead of popping in. Every piece keeps
+ * its own span, so a piece already shown never animates again; text that gets shorter starts over.
+ */
+function InkText({ text }: { text: string }) {
+  const [cuts, setCuts] = useState<number[]>([])
+  const last = cuts.at(-1) ?? 0
+  if (text.length < last) setCuts([])
+  else if (text.length > last) setCuts([...cuts, text.length])
+  return cuts.map((end, i) => {
+    const start = i === 0 ? 0 : cuts[i - 1]
+    return (
+      <span key={start} className="ink-in">
+        {text.slice(start, end)}
+      </span>
+    )
+  })
+}
+
 function TranslationBody({
   direction,
   role,
@@ -939,7 +959,7 @@ function TranslationBody({
           />
         ) : (
           <p lang={lang} className={cx('text-[15px] leading-relaxed whitespace-pre-wrap', !stream.done && 'stream-caret')}>
-            {stream.text}
+            <InkText text={stream.text} />
           </p>
         )}
       </Section>
