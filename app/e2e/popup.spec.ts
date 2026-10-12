@@ -82,7 +82,8 @@ test('Vietnamese the user wrote is checked as Vietnamese, not translated into Ja
   await composer(page).fill('e đã check lại rồi, ko thấy lỗi nữa ạ')
   await page.keyboard.press('Control+Alt+C')
   await expect(popup(page)).toHaveAttribute('data-direction', 'review_vi')
-  await expect(popup(page).getByText('Kiểm tra VI')).toBeVisible()
+  // "Kiểm tra VI" only shows while the review loads, which a fast run can miss; the verdict is what stays.
+  await expect(popup(page).getByText('Nên sửa', { exact: true })).toBeVisible()
   const issues = popup(page).locator('[data-issue]')
   await expect(issues).toHaveCount(3)
   await expect(popup(page).locator('[data-issue=spelling]')).toContainText('Chính tả')
