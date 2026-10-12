@@ -1,5 +1,5 @@
 import { listen } from '@tauri-apps/api/event'
-import { Archive, ArchiveRestore, ChevronLeft, Download, Loader2, Merge, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronLeft, ChevronRight, Download, Loader2, Merge, MoreHorizontal, Pencil, Pin, RefreshCw, Search, Sparkles, Trash2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton } from '../../components/ui'
@@ -7,6 +7,7 @@ import { cx } from '../../components/styles'
 import { isTauri } from '../../lib/claude'
 import { deleteThread as removeThread, exportThread, loadMessages, mergeThreads, renameThread, searchThreads, setArchived, setPinned, summarizeThread } from '../../lib/history'
 import { locale, useLang, useT, type T } from '../../lib/i18n'
+import { threadTree, type ChannelNode } from '../../lib/threadTree'
 import { useStore } from '../../store'
 import type { Conversation, Thread, ThreadMessage } from '../../types'
 import { GettingStarted } from './GettingStarted'
@@ -16,7 +17,6 @@ const appName = (c: Conversation, t: T) => (c.app === 'slack' ? 'Slack' : c.app 
 export function ThreadsView() {
   const { conversations, threads, selectedThreadId, selectThread } = useStore()
   const t = useT()
-  const lang = useLang()
   const [query, setQuery] = useState('')
   const [showArchived, setShowArchived] = useState(false)
 
@@ -48,13 +48,14 @@ export function ThreadsView() {
     [threads, q, showArchived, found],
   )
 
-  const groups = conversations
-    .map((c) => ({ conversation: c, threads: visible.filter((t) => t.conversationId === c.id) }))
-    // Pinned thread first in its conversation, then most recent.
-    .map((g) => ({ ...g, threads: [...g.threads.filter((t) => t.pinned), ...g.threads.filter((t) => !t.pinned)] }))
-    .filter((g) => g.threads.length > 0)
+  const tree = useMemo(() => threadTree(conversations, visible), [conversations, visible])
+  const [collapsed, toggle] = useCollapsed()
+  // While searching every match shows, whatever is folded.
+  const open = (key: string) => Boolean(q) || !collapsed.has(key)
+  const count = (channels: ChannelNode[]) => channels.reduce((n, c) => n + c.threads.length, 0)
 
-  const thread = threads.find((t) => t.id === selectedThreadId && Boolean(t.archived) === showArchived) ?? groups[0]?.threads[0]
+  const thread =
+    threads.find((t) => t.id === selectedThreadId && Boolean(t.archived) === showArchived) ?? tree[0]?.spaces[0]?.channels[0]?.threads[0]
 
   if (threads.length === 0) return <GettingStarted />
 
@@ -85,43 +86,59 @@ export function ThreadsView() {
           </label>
         </div>
         <div className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          {groups.length === 0 && (
+          {tree.length === 0 && (
             <p className="px-2 py-6 text-center text-[13px] text-ink-3">
               {q ? t('Không tìm thấy thread nào', '該当するスレッドはありません') : t('Không có thread nào', 'スレッドはありません')}
             </p>
           )}
-          {groups.map((g) => (
-            <div key={g.conversation.id} className="mb-2">
-              <div className="flex items-center gap-1.5 px-2 pt-2 pb-1 text-[11.5px] font-semibold text-ink-3">
-                <AppBadge app={g.conversation.app} className="size-3.5 text-[8px]" />
-                <span className="truncate">{[g.conversation.workspace, g.conversation.name].filter(Boolean).join(' · ')}</span>
+          {tree.map((app) => {
+            const all = app.spaces.flatMap((s) => s.channels)
+            const name = appName(all[0].conversation, t)
+            return (
+              <div key={app.key} className="mb-1.5">
+                <TreeRow depth={0} open={open(app.key)} count={count(all)} onToggle={() => toggle(app.key)} label={name}>
+                  <AppBadge app={app.app} />
+                  <span className="truncate text-[12.5px] font-semibold text-ink">{name}</span>
+                </TreeRow>
+                {open(app.key) &&
+                  app.spaces.map((space) => {
+                    // Apps other than Slack and Teams have no workspace: their windows sit right under the app.
+                    const flat = !space.name && !space.chats
+                    const spaceName = space.chats ? t('Chat', 'チャット') : space.name
+                    const channels = (flat || open(space.key) ? space.channels : []).map((ch) => (
+                      <div key={ch.key}>
+                        <TreeRow
+                          depth={flat ? 1 : 2}
+                          open={open(ch.key)}
+                          count={ch.threads.length}
+                          onToggle={() => toggle(ch.key)}
+                          label={ch.conversation.name}
+                        >
+                          <span className="truncate text-[12.5px] font-medium text-ink-2">{ch.conversation.name}</span>
+                        </TreeRow>
+                        {open(ch.key) && (
+                          <div role="group" aria-label={ch.conversation.name} style={{ paddingLeft: labelInset(flat ? 1 : 2) - THREAD_PAD }}>
+                            {ch.threads.map((th) => (
+                              <ThreadRow key={th.id} thread={th} selected={th.id === thread?.id} onSelect={() => selectThread(th.id)} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))
+                    if (flat) return <div key={space.key}>{channels}</div>
+                    return (
+                      <div key={space.key}>
+                        <TreeRow depth={1} open={open(space.key)} count={count(space.channels)} onToggle={() => toggle(space.key)} label={spaceName}>
+                          <span className="truncate text-[12.5px] font-semibold text-ink-2">{spaceName}</span>
+                          {space.org && <span className="shrink-0 truncate text-[11.5px] text-ink-3">{space.org}</span>}
+                        </TreeRow>
+                        {channels}
+                      </div>
+                    )
+                  })}
               </div>
-              {g.threads.map((th) => {
-                // The last message in the user's language, else the summary (also in their language).
-                const last = th.messages.at(-1)
-                const preview = (last && (lang === 'ja' ? last.ja : last.vi)) || th.summary
-                return (
-                  <button
-                    key={th.id}
-                    type="button"
-                    onClick={() => selectThread(th.id)}
-                    className={cx('flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left', th.id === thread?.id ? 'bg-selected' : 'hover:bg-hover')}
-                  >
-                    <span className="flex items-center gap-1.5">
-                      {th.pinned && <Pin size={12} className="shrink-0 text-accent" aria-label={t('Đang ghim', 'ピン留め中')} />}
-                      <span className="flex-1 truncate text-[13.5px] font-semibold text-ink">{th.title}</span>
-                      <span className="shrink-0 text-[11.5px] text-ink-3">{th.lastActive}</span>
-                    </span>
-                    {preview && (
-                      <span lang={lang} className="truncate text-[12.5px] text-ink-2">
-                        {preview}
-                      </span>
-                    )}
-                  </button>
-                )
-              })}
-            </div>
-          ))}
+            )
+          })}
         </div>
         {!showArchived && archivedCount > 0 && (
           <button
@@ -140,6 +157,99 @@ export function ThreadsView() {
         <div className="flex flex-1 items-center justify-center text-[13px] text-ink-3">{t('Chọn một thread', 'スレッドを選択してください')}</div>
       )}
     </div>
+  )
+}
+
+const COLLAPSED_KEY = 'threads.collapsed'
+
+/** Folded apps, workspaces, teams and channels of the thread list, remembered across restarts. */
+function useCollapsed(): [Set<string>, (key: string) => void] {
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]') as string[])
+    } catch {
+      return new Set()
+    }
+  })
+  const toggle = (key: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (!next.delete(key)) next.add(key)
+      try {
+        localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...next]))
+      } catch {
+        // Not remembered; the list still folds.
+      }
+      return next
+    })
+  return [collapsed, toggle]
+}
+
+const ROW_PAD = 4
+const INDENT = 12
+const CHEVRON = 13
+const GAP = 6
+/** Left padding of a thread row (`px-2.5`). */
+const THREAD_PAD = 10
+/** Where the label of a row at `depth` starts, so the threads under a channel line up with its name. */
+const labelInset = (depth: number) => ROW_PAD + depth * INDENT + CHEVRON + GAP
+
+/** A foldable level of the thread list: the app, a workspace or team, or a channel. */
+function TreeRow({
+  depth,
+  open,
+  count,
+  label,
+  onToggle,
+  children,
+}: {
+  depth: 0 | 1 | 2
+  open: boolean
+  count: number
+  label: string
+  onToggle: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label={label}
+      onClick={onToggle}
+      style={{ paddingLeft: ROW_PAD + depth * INDENT }}
+      className="flex h-7 w-full items-center gap-1.5 rounded-md pr-2 text-left hover:bg-hover"
+    >
+      <ChevronRight size={CHEVRON} className={cx('shrink-0 text-ink-3 transition-transform duration-150', open && 'rotate-90')} />
+      {children}
+      <span className="flex-1" />
+      {!open && <span className="shrink-0 text-[11.5px] text-ink-3 tabular-nums">{count}</span>}
+    </button>
+  )
+}
+
+function ThreadRow({ thread, selected, onSelect }: { thread: Thread; selected: boolean; onSelect: () => void }) {
+  const t = useT()
+  const lang = useLang()
+  // The last message in the user's language, else the summary (also in their language).
+  const last = thread.messages.at(-1)
+  const preview = (last && (lang === 'ja' ? last.ja : last.vi)) || thread.summary
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={cx('flex w-full flex-col gap-0.5 rounded-md px-2.5 py-2 text-left', selected ? 'bg-selected' : 'hover:bg-hover')}
+    >
+      <span className="flex items-center gap-1.5">
+        {thread.pinned && <Pin size={12} className="shrink-0 text-accent" aria-label={t('Đang ghim', 'ピン留め中')} />}
+        <span className="flex-1 truncate text-[13.5px] font-semibold text-ink">{thread.title}</span>
+        <span className="shrink-0 text-[11.5px] text-ink-3">{thread.lastActive}</span>
+      </span>
+      {preview && (
+        <span lang={lang} className="truncate text-[12.5px] text-ink-2">
+          {preview}
+        </span>
+      )}
+    </button>
   )
 }
 
@@ -297,7 +407,7 @@ function ThreadDetail({ thread }: { thread: Thread }) {
           )}
           <div className="flex items-center gap-1.5 text-[12px] text-ink-3">
             {conversation && <AppBadge app={conversation.app} className="size-3.5 text-[8px]" />}
-            {conversation ? [appName(conversation, t), conversation.workspace, conversation.name].filter(Boolean).join(' / ') : t('Khác', 'その他')}
+            {conversation ? [appName(conversation, t), conversation.org, conversation.workspace, conversation.name].filter(Boolean).join(' / ') : t('Khác', 'その他')}
           </div>
         </div>
         <IconButton label={t('Đổi tên', '名前を変更')} onClick={() => setEditingTitle(true)}>

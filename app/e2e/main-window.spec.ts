@@ -19,13 +19,30 @@ test('pinning a thread unpins the other thread of the same conversation', async 
   await threadList(page).getByRole('button', { name: /Lịch release tháng 11/ }).click()
   await page.getByRole('button', { name: /^Ghim thread/ }).click()
   await expect(page.getByRole('button', { name: 'Bỏ ghim thread' })).toBeVisible()
-  // The pinned thread moves to the top of its conversation.
-  await expect(threadList(page).getByRole('button').filter({ hasText: 'CustomerX' }).first()).toHaveCount(0)
-  await expect(threadList(page).locator('button').nth(0)).toContainText('Lịch release tháng 11')
+  // The pinned thread moves to the top of its channel.
+  await expect(threadList(page).getByRole('group', { name: '#dev-qa' }).getByRole('button').first()).toContainText('Lịch release tháng 11')
 
   await threadList(page).getByRole('button', { name: /Câu hỏi về API thanh toán/ }).click()
   await page.getByRole('button', { name: /^Ghim thread/ }).click()
   await expect(threadList(page).getByLabel('Đang ghim')).toHaveCount(1)
+})
+
+test('threads are grouped by app, workspace or team, and channel, and each level folds', async ({ page }) => {
+  await openTab(page, 'Threads')
+  const list = threadList(page)
+  await expect(list.getByRole('button', { name: 'Slack', exact: true })).toHaveAttribute('aria-expanded', 'true')
+  await expect(list.getByRole('button', { name: 'CustomerX', exact: true })).toBeVisible()
+  await expect(list.getByRole('button', { name: 'Dự án ABC', exact: true })).toBeVisible()
+  await expect(list.getByRole('group', { name: 'General' }).getByRole('button', { name: /Lịch UAT/ })).toBeVisible()
+  // Teams chats sit under Chat.
+  await expect(list.getByRole('button', { name: 'Chat', exact: true })).toBeVisible()
+
+  await list.getByRole('button', { name: 'CustomerX', exact: true }).click()
+  await expect(list.getByRole('button', { name: /Lịch release tháng 11/ })).toHaveCount(0)
+  await expect(list.getByRole('button', { name: 'CustomerX', exact: true })).toContainText('4')
+  // A search shows every match, folded or not.
+  await page.getByPlaceholder('Tìm trong tiếng Nhật và tiếng Việt').fill('release')
+  await expect(list.getByRole('button', { name: /Lịch release tháng 11/ })).toBeVisible()
 })
 
 test('archiving hides a thread until it is restored', async ({ page }) => {

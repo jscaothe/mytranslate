@@ -19,9 +19,10 @@ const vietnamese: MockData = {
   me: 'Nguyễn Văn A',
   directMessages: ['Tanaka', 'Suzuki'],
   conversations: [
-    { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', name: '#dev-qa', keigo: '', note: 'Tanaka là PM, Suzuki là tester phía khách.' },
-    { id: 'c-general', app: 'slack', workspace: 'CustomerX', name: '#general', keigo: 'polite', note: '' },
-    { id: 'c-tanaka', app: 'teams', workspace: 'CustomerX', name: 'Tanaka Taro', keigo: 'formal', note: 'PM phía khách, gọi là 田中様.' },
+    { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', org: '', name: '#dev-qa', keigo: '', note: 'Tanaka là PM, Suzuki là tester phía khách.' },
+    { id: 'c-general', app: 'slack', workspace: 'CustomerX', org: '', name: '#general', keigo: 'polite', note: '' },
+    { id: 'c-abc', app: 'teams', workspace: 'Dự án ABC', org: 'CustomerX', name: 'General', keigo: 'formal', note: '' },
+    { id: 'c-tanaka', app: 'teams', workspace: '', org: 'CustomerX', name: 'Tanaka Taro', keigo: 'formal', note: 'PM phía khách, gọi là 田中様.' },
   ],
   threads: [
     {
@@ -110,6 +111,24 @@ const vietnamese: MockData = {
           time: '06/10 09:01',
           ja: '本日15時から定例会議を行います。',
           vi: 'Hôm nay họp định kỳ từ 15 giờ.',
+        },
+      ],
+    },
+    {
+      id: 't-uat',
+      conversationId: 'c-abc',
+      title: 'Lịch UAT',
+      summary: '',
+      lastActive: '4 ngày',
+      pinned: false,
+      messages: [
+        {
+          id: 'm8',
+          author: 'other',
+          name: 'Sato',
+          time: '05/10 14:30',
+          ja: 'UATは来週月曜から開始する予定です。',
+          vi: 'Dự kiến UAT bắt đầu từ thứ Hai tuần sau.',
         },
       ],
     },
@@ -225,9 +244,10 @@ const japanese: MockData = {
   me: 'Tanaka Taro',
   directMessages: ['Nguyễn Văn A', 'Trần Minh'],
   conversations: [
-    { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', name: '#dev-qa', keigo: '', note: 'グエンさんは開発リーダー、チャンさんはテスター。' },
-    { id: 'c-general', app: 'slack', workspace: 'CustomerX', name: '#general', keigo: 'polite', note: '' },
-    { id: 'c-nguyen', app: 'teams', workspace: 'CustomerX', name: 'Nguyễn Văn A', keigo: 'polite', note: 'ベトナム側の開発リーダー。「anh」と呼ぶ。' },
+    { id: 'c-devqa', app: 'slack', workspace: 'CustomerX', org: '', name: '#dev-qa', keigo: '', note: 'グエンさんは開発リーダー、チャンさんはテスター。' },
+    { id: 'c-general', app: 'slack', workspace: 'CustomerX', org: '', name: '#general', keigo: 'polite', note: '' },
+    { id: 'c-abc', app: 'teams', workspace: 'ABCプロジェクト', org: 'CustomerX', name: 'General', keigo: 'polite', note: '' },
+    { id: 'c-nguyen', app: 'teams', workspace: '', org: 'CustomerX', name: 'Nguyễn Văn A', keigo: 'polite', note: 'ベトナム側の開発リーダー。「anh」と呼ぶ。' },
   ],
   threads: [
     {
@@ -315,6 +335,24 @@ const japanese: MockData = {
           time: '06/10 09:01',
           ja: '本日15時から定例会議です。',
           vi: 'Hôm nay họp định kỳ lúc 15 giờ ạ.',
+        },
+      ],
+    },
+    {
+      id: 't-uat',
+      conversationId: 'c-abc',
+      title: 'UATの日程',
+      summary: '',
+      lastActive: '4日前',
+      pinned: false,
+      messages: [
+        {
+          id: 'm8',
+          author: 'me',
+          name: 'Sato',
+          time: '05/10 14:30',
+          ja: 'UATは来週月曜から開始する予定です。',
+          vi: 'Dự kiến UAT bắt đầu từ thứ Hai tuần sau.',
         },
       ],
     },

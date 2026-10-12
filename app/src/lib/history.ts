@@ -8,6 +8,7 @@ interface ConversationRow {
   app: string
   name: string
   workspace: string
+  org: string
   lastActive: number
   keigo: string
   note: string
@@ -44,6 +45,7 @@ export async function loadHistory(lang: Lang): Promise<{ conversations: Conversa
       id: String(c.id),
       app: c.app === 'slack' || c.app === 'teams' ? c.app : 'other',
       workspace: c.workspace,
+      org: c.org,
       name: c.name,
       keigo: c.keigo === 'casual' || c.keigo === 'polite' || c.keigo === 'formal' ? c.keigo : '',
       note: c.note,

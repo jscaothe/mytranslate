@@ -112,7 +112,12 @@ fn detect_thread(
         "" => lang.pick("Khác", "その他"),
         n => n,
     };
-    let conversation = match history.upsert_conversation(app, name, ctx.workspace.as_deref().unwrap_or("")) {
+    let conversation = match history.upsert_conversation(
+        app,
+        ctx.org.as_deref().unwrap_or(""),
+        ctx.workspace.as_deref().unwrap_or(""),
+        name,
+    ) {
         Ok(id) => id,
         Err(e) => {
             log::warn!("history unavailable: {e}");

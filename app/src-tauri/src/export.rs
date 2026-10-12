@@ -18,7 +18,7 @@ pub fn thread_markdown(
             "teams" => "Microsoft Teams",
             _ => t("Ứng dụng khác", "その他のアプリ"),
         };
-        let place: Vec<&str> = [app, c.workspace.as_str(), c.name.as_str()]
+        let place: Vec<&str> = [app, c.org.as_str(), c.workspace.as_str(), c.name.as_str()]
             .into_iter()
             .filter(|s| !s.is_empty())
             .collect();
@@ -155,6 +155,7 @@ mod tests {
             app: "slack".into(),
             name: "dev-qa".into(),
             workspace: "CustomerX".into(),
+            org: String::new(),
             last_active: 0,
             keigo: String::new(),
             note: String::new(),

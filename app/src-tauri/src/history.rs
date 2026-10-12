@@ -81,6 +81,32 @@ const MIGRATIONS: &[&str] = &[
     ALTER TABLE messages ADD COLUMN mine INTEGER NOT NULL DEFAULT 1;
     UPDATE messages SET mine = 0 WHERE direction = 'ja_vi';
 "#,
+    r#"
+    -- Conversations get their place in the chat app: Slack workspace > channel, Teams organisation > team >
+    -- channel. Until now a Teams conversation was named after its team and its workspace was the organisation,
+    -- with the channel lost; such rows keep their name as a chat of the organisation and are marked `legacy`, so
+    -- the first channel of that team the user translates in takes them over.
+    CREATE TABLE conversations_new (
+        id          INTEGER PRIMARY KEY,
+        app         TEXT NOT NULL,
+        org         TEXT NOT NULL DEFAULT '',
+        workspace   TEXT NOT NULL DEFAULT '',
+        name        TEXT NOT NULL,
+        last_active INTEGER NOT NULL,
+        keigo       TEXT NOT NULL DEFAULT '',
+        note        TEXT NOT NULL DEFAULT '',
+        legacy      INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (app, org, workspace, name)
+    );
+    INSERT INTO conversations_new (id, app, org, workspace, name, last_active, keigo, note, legacy)
+        SELECT id, app,
+               CASE WHEN app = 'teams' THEN workspace ELSE '' END,
+               CASE WHEN app = 'teams' THEN '' ELSE workspace END,
+               name, last_active, keigo, note, app = 'teams'
+        FROM conversations;
+    DROP TABLE conversations;
+    ALTER TABLE conversations_new RENAME TO conversations;
+"#,
 ];
 
 /// Every table holding user data, children first (for wiping).
@@ -96,7 +122,7 @@ const DATA_TABLES: [&str; 5] = [
 const THREAD_COLUMNS: &str = "id, conversation_id, title, pinned, last_active, archived, summary, summary_messages,
      (SELECT COUNT(*) FROM messages WHERE thread_id = threads.id)";
 /// Columns of `ConversationInfo`, in `conversation_row` order.
-const CONVERSATION_COLUMNS: &str = "id, app, name, workspace, last_active, keigo, note";
+const CONVERSATION_COLUMNS: &str = "id, app, name, workspace, org, last_active, keigo, note";
 
 pub struct History {
     conn: Mutex<Connection>,
@@ -158,8 +184,12 @@ impl MessageInfo {
 pub struct ConversationInfo {
     pub id: i64,
     pub app: String,
+    /// The channel or chat.
     pub name: String,
+    /// What it belongs to: a Slack workspace or a Teams team; empty for a Teams chat.
     pub workspace: String,
+    /// The Teams organisation; empty for Slack.
+    pub org: String,
     pub last_active: i64,
     /// casual, polite or formal; empty means the default from the settings.
     pub keigo: String,
@@ -314,15 +344,59 @@ impl History {
         Ok(())
     }
 
-    pub fn upsert_conversation(&self, app: &str, name: &str, workspace: &str) -> rusqlite::Result<i64> {
-        let conn = self.conn.lock().unwrap();
-        conn.query_row(
-            "INSERT INTO conversations (app, name, workspace, last_active) VALUES (?1, ?2, ?3, ?4)
-             ON CONFLICT (app, name, workspace) DO UPDATE SET last_active = excluded.last_active
-             RETURNING id",
-            params![app, name, workspace, now_ms()],
-            |r| r.get(0),
-        )
+    /// The conversation at this place, created on first use. A Teams channel takes over the conversation an
+    /// older version filed its team's messages under (see the migration), keeping its threads, keigo and note.
+    pub fn upsert_conversation(&self, app: &str, org: &str, workspace: &str, name: &str) -> rusqlite::Result<i64> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+        let now = now_ms();
+        let existing: Option<i64> = tx
+            .query_row(
+                "SELECT id FROM conversations WHERE app = ?1 AND org = ?2 AND workspace = ?3 AND name = ?4",
+                params![app, org, workspace, name],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let id = match existing {
+            // Seen as itself, so a legacy row really is this chat.
+            Some(id) => {
+                tx.execute(
+                    "UPDATE conversations SET last_active = ?2, legacy = 0 WHERE id = ?1",
+                    params![id, now],
+                )?;
+                id
+            }
+            None => {
+                let legacy: Option<i64> = if app == "teams" && !workspace.is_empty() {
+                    tx.query_row(
+                        "SELECT id FROM conversations
+                         WHERE app = 'teams' AND org = ?1 AND workspace = '' AND name = ?2 AND legacy = 1",
+                        params![org, workspace],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                } else {
+                    None
+                };
+                match legacy {
+                    Some(id) => {
+                        tx.execute(
+                            "UPDATE conversations SET workspace = ?2, name = ?3, last_active = ?4, legacy = 0 WHERE id = ?1",
+                            params![id, workspace, name, now],
+                        )?;
+                        id
+                    }
+                    None => tx.query_row(
+                        "INSERT INTO conversations (app, org, workspace, name, last_active) VALUES (?1, ?2, ?3, ?4, ?5)
+                         RETURNING id",
+                        params![app, org, workspace, name, now],
+                        |r| r.get(0),
+                    )?,
+                }
+            }
+        };
+        tx.commit()?;
+        Ok(id)
     }
 
     /// Threads of a conversation active since `since_ms`, most recent first.
@@ -623,13 +697,27 @@ impl History {
 
 fn migrate(conn: &mut Connection) -> rusqlite::Result<()> {
     let version: usize = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-    for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
-        let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
-        tx.pragma_update(None, "user_version", i + 1)?;
-        tx.commit()?;
+    if version >= MIGRATIONS.len() {
+        return Ok(());
     }
-    Ok(())
+    // A migration may rebuild a table others refer to; with foreign keys on, dropping the old one would delete
+    // every row that refers to it. They are checked once all migrations ran.
+    conn.pragma_update(None, "foreign_keys", "OFF")?;
+    let result = (|| {
+        for (i, sql) in MIGRATIONS.iter().enumerate().skip(version) {
+            let tx = conn.transaction()?;
+            tx.execute_batch(sql)?;
+            tx.pragma_update(None, "user_version", i + 1)?;
+            tx.commit()?;
+        }
+        let broken: i64 = conn.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |r| r.get(0))?;
+        if broken > 0 {
+            log::warn!("history: {broken} rows refer to missing rows after migrating");
+        }
+        Ok(())
+    })();
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    result
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -672,9 +760,10 @@ fn conversation_row(r: &rusqlite::Row) -> rusqlite::Result<ConversationInfo> {
         app: r.get(1)?,
         name: r.get(2)?,
         workspace: r.get(3)?,
-        last_active: r.get(4)?,
-        keigo: r.get(5)?,
-        note: r.get(6)?,
+        org: r.get(4)?,
+        last_active: r.get(5)?,
+        keigo: r.get(6)?,
+        note: r.get(7)?,
     })
 }
 
@@ -712,17 +801,105 @@ mod tests {
     #[test]
     fn conversation_is_reused_by_app_name_and_workspace() {
         let h = History::in_memory();
-        let a = h.upsert_conversation("slack", "dev-qa", "CustomerX").unwrap();
-        let b = h.upsert_conversation("slack", "dev-qa", "CustomerX").unwrap();
-        let c = h.upsert_conversation("teams", "dev-qa", "CustomerX").unwrap();
+        let a = h.upsert_conversation("slack", "", "CustomerX", "dev-qa").unwrap();
+        let b = h.upsert_conversation("slack", "", "CustomerX", "dev-qa").unwrap();
+        let c = h.upsert_conversation("teams", "", "CustomerX", "dev-qa").unwrap();
         assert_eq!(a, b);
         assert_ne!(a, c);
     }
 
     #[test]
+    fn teams_conversations_are_told_apart_by_organisation_and_team() {
+        let h = History::in_memory();
+        let a = h
+            .upsert_conversation("teams", "acme.example", "ALPHA", "General")
+            .unwrap();
+        let b = h
+            .upsert_conversation("teams", "ACMECLIENT", "ALPHA", "General")
+            .unwrap();
+        let c = h
+            .upsert_conversation("teams", "acme.example", "BOOK", "General")
+            .unwrap();
+        assert_eq!(
+            a,
+            h.upsert_conversation("teams", "acme.example", "ALPHA", "General")
+                .unwrap()
+        );
+        assert_ne!(a, b);
+        assert_ne!(a, c);
+        let info = h.conversation(a).unwrap().unwrap();
+        assert_eq!(
+            (info.org.as_str(), info.workspace.as_str(), info.name.as_str()),
+            ("acme.example", "ALPHA", "General")
+        );
+    }
+
+    /// The history of an older version: Teams conversations named after the team, the channel lost.
+    fn history_before_places(path: &Path) {
+        let conn = Connection::open(path).unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for sql in &MIGRATIONS[..5] {
+            tx.execute_batch(sql).unwrap();
+        }
+        tx.pragma_update(None, "user_version", 5).unwrap();
+        tx.execute_batch(
+            "INSERT INTO conversations (id, app, name, workspace, last_active, keigo, note)
+                VALUES (1, 'teams', 'ALPHA', 'acme.example', 1, 'formal', 'Anh Sato là PM'),
+                       (2, 'slack', 'dev-qa', 'CustomerX', 1, '', ''),
+                       (3, 'teams', 'Tanaka', 'ACMECLIENT', 1, '', '');
+             INSERT INTO threads (id, conversation_id, title, created_at, last_active)
+                VALUES (1, 1, 'Phát hành', 1, 1), (2, 2, 'Lỗi đăng nhập', 1, 1), (3, 3, 'Họp', 1, 1);",
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn older_history_keeps_every_thread_and_a_team_channel_takes_over_its_team() {
+        let path = std::env::temp_dir().join(format!("mytranslate-places-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        history_before_places(&path);
+        let h = History::open(&path).unwrap();
+        assert_eq!(h.all_threads().unwrap().len(), 3);
+        let slack = h.conversation(2).unwrap().unwrap();
+        assert_eq!(
+            (slack.org.as_str(), slack.workspace.as_str(), slack.name.as_str()),
+            ("", "CustomerX", "dev-qa")
+        );
+
+        // The team's first channel gets the old conversation, with its threads, keigo and note.
+        let channel = h
+            .upsert_conversation("teams", "acme.example", "ALPHA", "General")
+            .unwrap();
+        assert_eq!(channel, 1);
+        let info = h.conversation(1).unwrap().unwrap();
+        assert_eq!(
+            (info.workspace.as_str(), info.name.as_str(), info.keigo.as_str()),
+            ("ALPHA", "General", "formal")
+        );
+        // Its other channels are new conversations.
+        assert_ne!(
+            h.upsert_conversation("teams", "acme.example", "ALPHA", "Random")
+                .unwrap(),
+            1
+        );
+        // An old chat seen again stays itself, and no team can take it over afterwards.
+        assert_eq!(h.upsert_conversation("teams", "ACMECLIENT", "", "Tanaka").unwrap(), 3);
+        assert_ne!(
+            h.upsert_conversation("teams", "ACMECLIENT", "Tanaka", "General")
+                .unwrap(),
+            3
+        );
+        drop(h);
+        for ext in ["", "-wal", "-shm"] {
+            let _ = std::fs::remove_file(format!("{}{ext}", path.display()));
+        }
+    }
+
+    #[test]
     fn stores_messages_and_returns_the_latest_in_order() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dev-qa").unwrap();
         let t = h.create_thread(conv, "Lỗi đăng nhập").unwrap();
         for i in 0..8 {
             h.add_message(t, &msg("ja_vi", &format!("原文{i}"), &format!("bản dịch {i}")))
@@ -739,7 +916,7 @@ mod tests {
     #[test]
     fn japanese_side_depends_on_direction() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dm", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dm").unwrap();
         let t = h.create_thread(conv, "x").unwrap();
         h.add_message(t, &msg("ja_vi", "確認しました", "Đã xác nhận")).unwrap();
         h.add_message(t, &msg("vi_ja", "Cảm ơn", "ありがとうございます"))
@@ -792,7 +969,7 @@ mod tests {
     #[test]
     fn moving_the_only_message_removes_the_empty_thread() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
         let wrong = h.create_thread(conv, "Đoán sai").unwrap();
         let right = h.create_thread(conv, "Đúng").unwrap();
         let m = h.add_message(wrong, &msg("ja_vi", "a", "b")).unwrap();
@@ -821,8 +998,8 @@ mod tests {
     #[test]
     fn pinning_is_exclusive_per_conversation_and_archiving_hides() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
-        let other = h.upsert_conversation("slack", "general", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dev-qa").unwrap();
+        let other = h.upsert_conversation("slack", "", "", "general").unwrap();
         let a = h.create_thread(conv, "A").unwrap();
         let b = h.create_thread(conv, "B").unwrap();
         let c = h.create_thread(other, "C").unwrap();
@@ -844,7 +1021,7 @@ mod tests {
     #[test]
     fn merging_moves_messages_and_removes_the_source() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
         let from = h.create_thread(conv, "Trùng").unwrap();
         let into = h.create_thread(conv, "Chính").unwrap();
         h.add_message(from, &msg("ja_vi", "a", "b")).unwrap();
@@ -856,7 +1033,7 @@ mod tests {
         let t = h.thread(into).unwrap().unwrap();
         assert_eq!(t.message_count, 3);
         assert!(t.pinned);
-        let other = h.upsert_conversation("teams", "Suzuki", "").unwrap();
+        let other = h.upsert_conversation("teams", "", "", "Suzuki").unwrap();
         let elsewhere = h.create_thread(other, "Khác").unwrap();
         assert!(h.merge_threads(into, elsewhere).is_err());
     }
@@ -864,7 +1041,7 @@ mod tests {
     #[test]
     fn deleting_a_thread_removes_its_messages_only() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dev-qa").unwrap();
         let gone = h.create_thread(conv, "Xóa").unwrap();
         let kept = h.create_thread(conv, "Giữ").unwrap();
         h.add_message(gone, &msg("ja_vi", "a", "b")).unwrap();
@@ -886,8 +1063,8 @@ mod tests {
     #[test]
     fn deleting_a_conversation_removes_everything_in_it() {
         let h = History::in_memory();
-        let gone = h.upsert_conversation("teams", "Spam", "").unwrap();
-        let kept = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let gone = h.upsert_conversation("teams", "", "", "Spam").unwrap();
+        let kept = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
         let t = h.create_thread(gone, "x").unwrap();
         h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
         let k = h.create_thread(kept, "y").unwrap();
@@ -902,7 +1079,7 @@ mod tests {
     #[test]
     fn summary_becomes_stale_with_new_messages() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dm", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dm").unwrap();
         let t = h.create_thread(conv, "x").unwrap();
         h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
         h.set_summary(t, " Khách hỏi lịch release. ").unwrap();
@@ -916,7 +1093,7 @@ mod tests {
     #[test]
     fn conversation_keeps_keigo_and_note() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("teams", "Tanaka Taro", "").unwrap();
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka Taro").unwrap();
         h.update_conversation(conv, "formal", " PM phía khách ").unwrap();
         let c = h.conversation(conv).unwrap().unwrap();
         assert_eq!((c.keigo.as_str(), c.note.as_str()), ("formal", "PM phía khách"));
@@ -925,7 +1102,7 @@ mod tests {
     #[test]
     fn search_finds_titles_and_message_text_ignoring_case() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dev-qa", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dev-qa").unwrap();
         let a = h.create_thread(conv, "Lỗi đăng nhập").unwrap();
         let b = h.create_thread(conv, "Lịch release").unwrap();
         h.add_message(b, &msg("ja_vi", "決済APIのタイムアウト", "Timeout 100% của API"))
@@ -941,7 +1118,7 @@ mod tests {
     #[test]
     fn retention_deletes_old_messages_and_empty_threads() {
         let h = History::in_memory();
-        let conv = h.upsert_conversation("slack", "dm", "").unwrap();
+        let conv = h.upsert_conversation("slack", "", "", "dm").unwrap();
         let old = h.create_thread(conv, "Cũ").unwrap();
         let mixed = h.create_thread(conv, "Lẫn").unwrap();
         h.add_message(old, &msg("ja_vi", "a", "b")).unwrap();
@@ -967,7 +1144,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let backup = dir.join("backup.db");
         let h = History::in_memory();
-        let conv = h.upsert_conversation("teams", "Tanaka", "").unwrap();
+        let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
         let t = h.create_thread(conv, "Spec").unwrap();
         let m = h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
         h.set_feedback(m, true).unwrap();
@@ -1003,7 +1180,7 @@ mod tests {
         let path = std::env::temp_dir().join(format!("mytranslate-history-{}.db", std::process::id()));
         {
             let h = History::open(&path).unwrap();
-            let conv = h.upsert_conversation("slack", "general", "").unwrap();
+            let conv = h.upsert_conversation("slack", "", "", "general").unwrap();
             h.create_thread(conv, "Họp").unwrap();
         }
         let h = History::open(&path).unwrap();

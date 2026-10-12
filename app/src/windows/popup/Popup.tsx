@@ -510,7 +510,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
           )}
         >
           <AppBadge app={request.app} />
-          <span className="max-w-[96px] shrink-0 truncate text-[12.5px] text-ink-2" title={conversation ? `${conversation.workspace} ${conversation.name}` : undefined}>
+          <span className="max-w-[96px] shrink-0 truncate text-[12.5px] text-ink-2" title={conversation ? [conversation.org, conversation.workspace, conversation.name].filter(Boolean).join(' / ') : undefined}>
             {conversation?.name ?? t('Khác', 'その他')}
           </span>
           <span className="shrink-0 text-ink-3">›</span>
