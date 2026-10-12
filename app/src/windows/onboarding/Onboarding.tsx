@@ -66,7 +66,7 @@ export function Onboarding({ chromeless = false }: { chromeless?: boolean }) {
               </Button>
             ) : (
               <Button variant="primary" onClick={finish}>
-                {chromeless ? t('Hoàn tất', '完了') : t('Hoàn tất, thu nhỏ về khay', '完了してトレイに最小化')}
+                {t('Hoàn tất, thu nhỏ về khay', '完了してトレイに最小化')}
               </Button>
             )}
           </div>

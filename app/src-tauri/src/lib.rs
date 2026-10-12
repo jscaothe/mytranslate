@@ -805,14 +805,24 @@ async fn settings_set(app: AppHandle, window: tauri::WebviewWindow, value: Value
     // The window that made the change already shows it; echoing it back would overwrite what the user typed
     // since (a stale value arriving after the next keystroke breaks fast typing and Vietnamese input methods).
     settings::broadcast(&app, &value, window.label());
+    // The guide is done: the app goes to the tray, where it waits for the hotkeys. After the broadcast, so that
+    // the flag the notice saves reaches every window last.
+    if changed("onboarded") && store.flag("onboarded") {
+        if let Some(main) = app.get_webview_window("main") {
+            let _ = main.hide();
+        }
+        tray::notice_setup_done(&app);
+    }
     Ok(SettingsSaved { failed_hotkeys })
 }
 
+/// Makes the Windows autostart entry match the setting, which is on unless the user turned it off.
 fn apply_autostart(app: &AppHandle, settings: &Value) {
-    let Some(enabled) = settings.get("autostart").and_then(Value::as_bool) else {
-        return;
-    };
+    let enabled = settings.get("autostart").and_then(Value::as_bool).unwrap_or(true);
     let autolaunch = app.autolaunch();
+    if autolaunch.is_enabled().ok() == Some(enabled) {
+        return;
+    }
     let result = if enabled {
         autolaunch.enable()
     } else {
@@ -833,7 +843,7 @@ pub fn run() {
     tauri::Builder::default()
         // Must be first: a second launch (Start menu, autostart) just brings the running app forward.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
-            if !args.iter().any(|a| a == BACKGROUND_ARG) {
+            if !args.iter().any(|a| a == BACKGROUND_ARG) || !app.state::<SettingsStore>().flag("onboarded") {
                 tray::show_main(app);
             }
         }))
@@ -872,10 +882,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
-            let settings_path = app.path().app_config_dir()?.join("settings.json");
-            // No settings yet: the installer just started the app for the first time on this PC.
-            let first_start = !settings_path.exists();
-            let store = SettingsStore::load(settings_path);
+            let store = SettingsStore::load(app.path().app_config_dir()?.join("settings.json"));
+            // Until the guide is done (an AI connected), the app shows it on every start, even from autostart:
+            // a new user would not know that it needs setting up.
+            let onboarded = store.flag("onboarded");
             let model = store.model().unwrap_or_else(|| DEFAULT_MODEL.to_string());
             // Pausing is for the current session only: a restart must never leave the hotkeys silently off.
             if store.hotkeys_paused()
@@ -883,6 +893,8 @@ pub fn run() {
             {
                 log::warn!("could not resume hotkeys: {e}");
             }
+            // From the first start, so that after the next sign-in the app is there (in the tray, or with the guide).
+            apply_autostart(app.handle(), &store.get());
             app.manage(store);
             app.manage(History::open(&app.path().app_local_data_dir()?.join("history.db"))?);
             let handle = app.handle().clone();
@@ -918,10 +930,8 @@ pub fn run() {
                         tray::notice_still_running(window.app_handle());
                     }
                 });
-                // The first start stays in the tray and says so, rather than opening a window over the installer.
-                if first_start {
-                    tray::notice_first_start(app.handle());
-                } else if !std::env::args().any(|a| a == BACKGROUND_ARG) {
+                // Started by Windows at sign-in: straight to the tray, once set up.
+                if !onboarded || !std::env::args().any(|a| a == BACKGROUND_ARG) {
                     main.show()?;
                 }
             }

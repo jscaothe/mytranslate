@@ -16,10 +16,12 @@ App hiện tiếng Nhật khi Windows dùng tiếng Nhật; đổi ở Cài đ�
 ## Cài đặt
 
 1. Chạy file `MyTranslate_<phiên bản>_x64-setup.exe` (cài cho riêng bạn, không cần quyền admin) hoặc `MyTranslate_<phiên bản>_x64_en-US.msi` (dùng khi IT cài hàng loạt).
-2. Cài xong, app tự chạy và thu nhỏ xuống **khay hệ thống** (góc dưới bên phải, có thể nằm trong mũi tên ^); Windows hiện thông báo app đang chạy ngầm.
-   Bấm icon MyTranslate ở khay (hoặc nhấn `Ctrl+Alt+M`) để mở **Hướng dẫn ban đầu**: kiểm tra Claude Code và dịch thử một câu.
-3. Xong hướng dẫn, trang **Bắt đầu dùng MyTranslate** nhắc lại ba cách dùng chính và có nút mở Teams / Slack.
-4. Đóng cửa sổ: app vẫn chạy ở **khay hệ thống** (góc dưới bên phải) và phím tắt luôn sẵn sàng.
+2. Cài xong, app tự mở **Hướng dẫn ban đầu**: kết nối AI (Claude Code, hoặc API key ChatGPT / Gemini) và dịch thử một câu.
+   Chưa xong hướng dẫn thì mỗi lần app khởi động, kể cả khi mở máy, hướng dẫn lại hiện ra.
+3. Bấm **Hoàn tất, thu nhỏ về khay**: app thu nhỏ xuống **khay hệ thống** (góc dưới bên phải, có thể nằm trong mũi tên ^) và Windows hiện thông báo cách dùng.
+   Bấm icon MyTranslate ở khay (hoặc nhấn `Ctrl+Alt+M`) để mở lại; trang **Bắt đầu dùng MyTranslate** nhắc lại ba cách dùng chính và có nút mở Teams / Slack.
+4. Từ đó, mỗi lần mở máy app tự chạy, thu nhỏ ở khay, và phím tắt luôn sẵn sàng (tắt được trong Cài đặt > Khởi động cùng Windows).
+   Đóng cửa sổ chính thì app vẫn chạy ở khay.
 
 ### Nếu Windows chặn file cài đặt
 
