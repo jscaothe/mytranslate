@@ -65,30 +65,70 @@ fn route_for(settings: &Value, id: &str, model: Option<&str>) -> Route {
                 api,
                 model,
                 key: credentials::get(&credential_name(api)),
+                more_models: false,
             }
         }
     }
 }
 
-/// The chosen provider first; with fallback on, then the others that are set up (Claude always is; ChatGPT and
-/// Gemini once they have a key).
+/// Other models of the same provider to try first when `model` cannot answer: Claude's other model; for ChatGPT
+/// and Gemini the default model in Settings, the favourites ticked there, then the recommended model. The router
+/// then tries every other model the key can use.
+fn backup_models(settings: &Value, id: &str, model: &str) -> Vec<String> {
+    let mut models: Vec<String> = match api(id) {
+        None => vec![if model == "haiku" { "sonnet" } else { "haiku" }.to_string()],
+        Some(api) => std::iter::once(default_model(settings, id))
+            .chain(
+                settings["aiQuickModels"][id]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|m| !m.is_empty())
+                    .map(str::to_string),
+            )
+            .chain([api.default_model().to_string()])
+            .collect(),
+    };
+    let mut seen = std::collections::HashSet::from([model.to_string()]);
+    models.retain(|m| seen.insert(m.clone()));
+    models
+}
+
+/// The chosen provider and model first, then that provider's other models; with fallback on, then the other
+/// providers that are set up (Claude always is; ChatGPT and Gemini once they have a key).
 pub fn routes(app: &AppHandle) -> Vec<Route> {
     routes_for(app, None)
 }
 
 /// Like `routes`, but starting with `choice` (the popup's AI switcher) when given.
 pub fn routes_for(app: &AppHandle, choice: Option<&AiChoice>) -> Vec<Route> {
-    let settings = app.state::<SettingsStore>().get();
+    routes_from(&app.state::<SettingsStore>().get(), choice)
+}
+
+fn routes_from(settings: &Value, choice: Option<&AiChoice>) -> Vec<Route> {
     let primary = choice
         .map(|c| c.provider.as_str())
         .or_else(|| settings.get("aiProvider").and_then(Value::as_str))
         .filter(|p| ORDER.contains(p))
         .unwrap_or("claude");
-    let model = choice.and_then(|c| c.model.as_deref()).filter(|m| !m.trim().is_empty());
-    let mut routes = vec![route_for(&settings, primary, model)];
+    let model = choice
+        .and_then(|c| c.model.as_deref())
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+        .map(str::to_string)
+        .unwrap_or_else(|| default_model(settings, primary));
+    let mut routes = vec![route_for(settings, primary, Some(&model))];
+    for backup in backup_models(settings, primary, &model) {
+        routes.push(route_for(settings, primary, Some(&backup)));
+    }
+    if let Some(Route::Api { more_models, .. }) = routes.last_mut() {
+        *more_models = true;
+    }
     if settings.get("aiFallback").and_then(Value::as_bool).unwrap_or(false) {
         for id in ORDER.iter().filter(|id| **id != primary) {
-            let route = route_for(&settings, id, None);
+            let route = route_for(settings, id, None);
             if !matches!(route, Route::Api { key: None, .. }) {
                 routes.push(route);
             }
@@ -357,6 +397,75 @@ mod tests {
         );
         assert_eq!(c[1].label, "Claude Haiku");
         assert_eq!(c[5].label, "Gemini · gemini-b");
+    }
+
+    fn plan(settings: &Value, choice: Option<&AiChoice>) -> Vec<(String, String)> {
+        routes_from(settings, choice)
+            .iter()
+            .map(|r| match r {
+                Route::Claude { model } => ("claude".into(), model.clone().unwrap_or_default()),
+                Route::Api { api, model, .. } => (api.id().into(), model.clone()),
+            })
+            .collect()
+    }
+
+    fn pairs(list: &[(&str, &str)]) -> Vec<(String, String)> {
+        list.iter().map(|(p, m)| (p.to_string(), m.to_string())).collect()
+    }
+
+    #[test]
+    fn other_models_of_the_chosen_ai_come_next() {
+        let settings = serde_json::json!({
+            "aiProvider": "gemini",
+            "geminiModel": "gemini-a",
+            "aiQuickModels": { "gemini": ["gemini-b", "gemini-a", " ", "gemini-3.6-flash"], "openai": ["gpt-x"] }
+        });
+        assert_eq!(
+            plan(&settings, None),
+            pairs(&[
+                ("gemini", "gemini-a"),
+                ("gemini", "gemini-b"),
+                ("gemini", "gemini-3.6-flash")
+            ])
+        );
+
+        // The popup's switcher picks the first model; the default model is then one of the backups.
+        let choice = AiChoice {
+            provider: "gemini".into(),
+            model: Some("gemini-b".into()),
+        };
+        assert_eq!(
+            plan(&settings, Some(&choice)),
+            pairs(&[
+                ("gemini", "gemini-b"),
+                ("gemini", "gemini-a"),
+                ("gemini", "gemini-3.6-flash")
+            ])
+        );
+
+        // Only the last planned route asks the router for the rest of the key's models.
+        let flags: Vec<bool> = routes_from(&settings, None)
+            .iter()
+            .map(|r| matches!(r, Route::Api { more_models: true, .. }))
+            .collect();
+        assert_eq!(flags, [false, false, true]);
+
+        let claude = serde_json::json!({ "aiProvider": "claude", "model": "haiku" });
+        assert_eq!(plan(&claude, None), pairs(&[("claude", "haiku"), ("claude", "sonnet")]));
+        assert_eq!(
+            plan(&serde_json::json!({}), None),
+            pairs(&[("claude", "sonnet"), ("claude", "haiku")])
+        );
+    }
+
+    #[test]
+    fn another_ai_only_when_fallback_is_on() {
+        let off = serde_json::json!({ "aiProvider": "claude", "model": "sonnet", "aiFallback": false });
+        assert!(plan(&off, None).iter().all(|(p, _)| p == "claude"));
+        let on = serde_json::json!({ "aiProvider": "claude", "model": "sonnet", "aiFallback": true });
+        let providers: Vec<String> = plan(&on, None).into_iter().map(|(p, _)| p).collect();
+        // ChatGPT and Gemini follow only when their key is saved on this machine.
+        assert_eq!(providers[..2], ["claude", "claude"]);
     }
 
     #[test]
