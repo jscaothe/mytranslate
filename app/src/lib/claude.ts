@@ -61,6 +61,8 @@ export type ErrorKind =
   /** The vendor rejected the API key. */
   | 'bad_key'
   | 'network'
+  /** The vendor refuses MyTranslate's use of Claude Code or Codex; the account itself is fine. */
+  | 'blocked'
 
 export type TranslateEvent =
   | { type: 'started'; warm: boolean }

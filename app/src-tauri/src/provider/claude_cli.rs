@@ -107,6 +107,9 @@ pub enum ErrorKind {
     BadKey,
     /// Could not reach the vendor.
     Network,
+    /// The vendor refuses MyTranslate's use of its tool (Claude Code, Codex) with the user's plan; the account
+    /// itself is fine.
+    Blocked,
 }
 
 struct Process {
@@ -477,6 +480,14 @@ fn parse_rate_limit(v: &Value) -> RateLimit {
     }
 }
 
+/// Whether the vendor's answer says this use of its tool is not allowed (as opposed to a signed-out account). The
+/// exact wording is not documented; these are the phrases such refusals have used.
+pub fn refused_by_vendor(lower: &str) -> bool {
+    ["third-party", "third party", "not permitted", "only authorized for use", "not allowed to use", "unauthorized client"]
+        .iter()
+        .any(|p| lower.contains(p))
+}
+
 /// Claude Code retries a request it could not send for minutes, silently. When the server stays out of reach (no
 /// HTTP answer at all, or a proxy asking for credentials) for a few attempts, the network is the problem: say so
 /// now instead of after the request timeout. Server errors (overloaded, 5xx) are left to Claude Code's retries.
@@ -497,7 +508,9 @@ fn unreachable(msg: &Value) -> Option<String> {
 
 fn classify_failure(text: &str) -> (ErrorKind, String) {
     let lower = text.to_lowercase();
-    let kind = if lower.contains("login")
+    let kind = if refused_by_vendor(&lower) {
+        ErrorKind::Blocked
+    } else if lower.contains("login")
         || lower.contains("log in")
         || lower.contains("authenticat")
         || lower.contains("oauth")
@@ -608,6 +621,10 @@ mod tests {
             ErrorKind::RateLimited
         );
         assert_eq!(classify_failure("").0, ErrorKind::Cli);
+        assert_eq!(
+            classify_failure("This credential is only authorized for use with Claude Code and cannot be used for other API requests.").0,
+            ErrorKind::Blocked
+        );
     }
 
     #[test]

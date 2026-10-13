@@ -31,6 +31,7 @@ const simulatedError: Partial<Record<Scenario, ErrorKind>> = {
   not_logged_in: 'not_logged_in',
   quota: 'rate_limited',
   network: 'cli',
+  blocked: 'blocked',
 }
 
 /**
@@ -74,7 +75,8 @@ export function useTranslation({
       if (alive) setState((s) => ({ key, value: { ...(s.key === key ? s.value : initial), ...patch } }))
     }
 
-    const fake = !isTauri ? simulatedError[scenario] : undefined
+    // The simulated failures are Claude's; another AI picked in the popup translates normally.
+    const fake = !isTauri && (ai?.provider ?? 'claude') === 'claude' ? simulatedError[scenario] : undefined
     if (fake) {
       const t = window.setTimeout(() => update({ phase: 'error', error: { kind: fake, message: 'Simulated error (prototype)', provider: 'claude' } }), 600)
       return () => window.clearTimeout(t)

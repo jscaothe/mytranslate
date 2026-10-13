@@ -25,7 +25,8 @@ import { diffChars, diffWords } from '../../lib/diff'
 import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
 import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
 import { useStore } from '../../store'
-import { AI_NAMES, AI_ORDER, defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
+import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, modelField, useQuickChoices, type AiChoice, type QuickChoice } from '../../lib/ai'
+import { loginAccount, type Account } from '../../lib/accounts'
 import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
@@ -468,6 +469,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             message={live.error.message}
             onRetry={() => setRunKey((r) => r + 1)}
             onAction={(t) => showToast(t)}
+            alternatives={aiChoices.filter((c) => c.available && c.provider !== live.error?.provider)}
+            onPick={pickAi}
+            onSettings={manageAi}
           />
         ) : isReview ? (
           <ReviewBody result={reviewResult} streaming={live.sections.suggestion} textLang={direction === 'review_ja' ? 'ja' : 'vi'} />
@@ -970,21 +974,36 @@ function aiName(id: string): string {
   return (AI_ORDER as readonly string[]).includes(id) ? AI_NAMES[id as AiChoice['provider']] : 'Claude'
 }
 
+/** The tool behind an account provider, for the messages about it. */
+const ACCOUNT_TOOLS: Record<Account, { tool: string; maker: string }> = {
+  claude: { tool: 'Claude Code', maker: 'Anthropic' },
+  codex: { tool: 'Codex', maker: 'OpenAI' },
+}
+
 function ErrorBanner({
   kind,
   provider,
   message,
   onRetry,
   onAction,
+  alternatives,
+  onPick,
+  onSettings,
 }: {
   kind: ClaudeErrorKind
   provider: string
   message: string
   onRetry: () => void
   onAction: (toast: string) => void
+  /** Other AIs ready to use, offered when this one cannot translate at all. */
+  alternatives: QuickChoice[]
+  onPick: (c: AiChoice) => void
+  onSettings: () => void
 }) {
   const t = useT()
   const name = aiName(provider)
+  const account = provider === 'claude' || provider === 'codex' ? (provider as Account) : null
+  const [signingIn, setSigningIn] = useState<'idle' | 'waiting' | 'failed'>('idle')
   const retryButton = (variant?: 'primary') => (
     <Button size="sm" variant={variant} onClick={onRetry}>
       {t('Thử lại', '再試行')}
@@ -1023,7 +1042,7 @@ function ErrorBanner({
       </Banner>
     )
   }
-  if (kind === 'rate_limited' && provider !== 'claude') {
+  if (kind === 'rate_limited' && !account) {
     return (
       <Banner tone="warn" icon={<AlertTriangle size={16} />} title={t(`Hết hạn mức ${name}`, `${name} の利用枠を使い切りました`)}>
         {t(
@@ -1034,28 +1053,78 @@ function ErrorBanner({
       </Banner>
     )
   }
-  if (kind === 'not_logged_in') {
+  // One button per other AI ready to use; picking one translates this text with it right away.
+  const otherWays = (
+    <div className="mt-2 flex flex-wrap gap-1.5">
+      {alternatives
+        .filter((c, i, all) => all.findIndex((x) => x.provider === c.provider) === i)
+        .slice(0, 3)
+        .map((c) => (
+          <Button key={`${c.provider}:${c.model}`} size="sm" variant="secondary" onClick={() => onPick(c)}>
+            {choiceLabel(c)}
+          </Button>
+        ))}
+      <Button size="sm" variant={alternatives.length === 0 ? 'primary' : 'ghost'} onClick={onSettings}>
+        {t('Mở Cài đặt', '設定を開く')}
+      </Button>
+    </div>
+  )
+  if (kind === 'blocked' && account) {
+    const { tool, maker } = ACCOUNT_TOOLS[account]
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t('Claude Code chưa đăng nhập', 'Claude Code にログインしていません')}>
-        {t('Mở terminal và chạy lệnh', 'ターミナルを開いて')} <code className="rounded bg-surface px-1 text-[12px]">claude</code>{' '}
-        {t('để đăng nhập bằng tài khoản Claude của bạn.', 'を実行し、ご自身の Claude アカウントでログインしてください。')}
-        {retry}
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`${name} từ chối yêu cầu từ MyTranslate`, `${name} が MyTranslate からの要求を拒否しました`)}>
+        {t(
+          `Tài khoản ${name} của bạn vẫn bình thường, nhưng ${maker} hiện không cho app khác dùng ${tool} để dịch. Dịch đoạn này bằng cách khác:`,
+          `${name} アカウントは問題ありませんが、${maker} は現在、他のアプリが ${tool} で翻訳することを許可していません。別の方法で翻訳してください:`,
+        )}
+        {otherWays}
       </Banner>
     )
   }
-  if (kind === 'not_installed') {
+  if (kind === 'not_logged_in' && account) {
+    const signIn = () => {
+      setSigningIn('waiting')
+      loginAccount(account)
+        .then(() => {
+          setSigningIn('idle')
+          onRetry()
+        })
+        .catch(() => setSigningIn('failed'))
+    }
     return (
-      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t('Không tìm thấy Claude Code', 'Claude Code が見つかりません')}>
-        {t('Cài Claude Code và đăng nhập, rồi thử lại.', 'Claude Code をインストールしてログインしてから、もう一度お試しください。')}
-        {retry}
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`${name} chưa đăng nhập hoặc đăng nhập đã hết hạn`, `${name} にログインしていないか、ログインの期限が切れています`)}>
+        {signingIn === 'waiting'
+          ? t(`Mời bạn đăng nhập ${name} trên trang vừa mở. Xong là MyTranslate tự dịch lại.`, `開いたページで ${name} にログインしてください。完了すると自動で翻訳し直します。`)
+          : signingIn === 'failed'
+            ? t('Chưa đăng nhập được. Thử lại, hoặc dịch bằng cách khác.', 'ログインできませんでした。もう一度試すか、別の方法で翻訳してください。')
+            : t(`Đăng nhập lại tài khoản ${name} của bạn; trang đăng nhập sẽ mở ra.`, `ご自身の ${name} アカウントにもう一度ログインしてください。ログインページが開きます。`)}
+        <div className="mt-2 flex flex-wrap gap-1.5">
+          <Button size="sm" variant="primary" disabled={signingIn === 'waiting'} onClick={signIn}>
+            {signingIn === 'waiting' && <Loader2 size={13} className="animate-spin" />}
+            {t(`Đăng nhập ${name}`, `${name} にログイン`)}
+          </Button>
+          {retryButton()}
+        </div>
+      </Banner>
+    )
+  }
+  if (kind === 'not_installed' && account) {
+    const { tool } = ACCOUNT_TOOLS[account]
+    return (
+      <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`Máy chưa có ${tool}`, `${tool} がインストールされていません`)}>
+        {t(
+          `Mở Cài đặt > Kết nối AI để MyTranslate tự cài ${tool}, hoặc dịch đoạn này bằng cách khác:`,
+          `設定 > AI接続 を開くと MyTranslate が ${tool} をインストールします。または別の方法で翻訳してください:`,
+        )}
+        {otherWays}
       </Banner>
     )
   }
   if (kind === 'rate_limited') {
     return (
-      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={t('Đã hết hạn mức gói Claude', 'Claude プランの利用枠を使い切りました')}>
-        {t('Hãy thử lại sau khi hạn mức được làm mới.', '利用枠がリセットされてから、もう一度お試しください。')}
-        <div className="mt-2 flex gap-2">{retryButton()}</div>
+      <Banner tone="warn" icon={<AlertTriangle size={16} />} title={t(`Đã hết hạn mức gói ${name}`, `${name} プランの利用枠を使い切りました`)}>
+        {t('Thử lại sau khi hạn mức được làm mới, hoặc dịch đoạn này bằng cách khác:', '利用枠のリセット後にもう一度試すか、別の方法で翻訳してください:')}
+        {otherWays}
       </Banner>
     )
   }

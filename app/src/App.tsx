@@ -27,6 +27,7 @@ const scenarios = (t: T): { value: Scenario; label: string }[] => [
   { value: 'not_logged_in', label: t('Claude chưa đăng nhập', 'Claude 未ログイン') },
   { value: 'quota', label: t('Hết hạn mức', '利用枠の上限') },
   { value: 'network', label: t('Lỗi mạng', 'ネットワークエラー') },
+  { value: 'blocked', label: t('Hãng từ chối app', '提供元がアプリを拒否') },
 ]
 
 export default function App() {
@@ -257,7 +258,9 @@ function Taskbar() {
         ? t('Chưa đăng nhập', '未ログイン')
         : scenario === 'quota'
           ? t('Hết hạn mức', '利用枠の上限')
-          : t('Mất kết nối', '接続できません')
+          : scenario === 'blocked'
+            ? t('Bị từ chối', '拒否されました')
+            : t('Mất kết nối', '接続できません')
 
   const item = (label: string, onClick: () => void, right?: React.ReactNode) => (
     <button

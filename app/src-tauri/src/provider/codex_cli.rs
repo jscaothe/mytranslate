@@ -285,7 +285,9 @@ fn rejects_effort(message: &str) -> bool {
 /// Codex's error text to an error kind the popup explains.
 fn classify(message: &str) -> (ErrorKind, String) {
     let lower = message.to_lowercase();
-    let kind = if lower.contains("log in")
+    let kind = if super::claude_cli::refused_by_vendor(&lower) {
+        ErrorKind::Blocked
+    } else if lower.contains("log in")
         || lower.contains("login")
         || lower.contains("sign in")
         || lower.contains("access token")
@@ -423,6 +425,7 @@ mod tests {
         );
         assert_eq!(classify("You've hit your usage limit. Try again in 3 hours.").0, ErrorKind::RateLimited);
         assert_eq!(classify("stream disconnected before completion").0, ErrorKind::Network);
+        assert_eq!(classify("This client is not permitted to use ChatGPT plans").0, ErrorKind::Blocked);
         assert!(rejects_effort("Unsupported value: 'none' is not supported with this model for reasoning.effort"));
         assert!(!rejects_effort("You've hit your usage limit."));
     }
