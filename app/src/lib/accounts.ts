@@ -1,10 +1,17 @@
 // The user's own AI account (Claude through Claude Code, ChatGPT through Codex): is the tool installed and signed
 // in, install it, and run its sign-in. The prototype pretends, following the simulated scenario.
 import { Channel, invoke } from '@tauri-apps/api/core'
+import type { AiProvider } from '../store'
 import type { Scenario } from '../types'
 import { isTauri } from './claude'
 
 export type Account = 'claude' | 'codex'
+
+/** The vendor's tool behind each account, and the provider id it translates as. */
+export const ACCOUNT_TOOL: Record<Account, { tool: string; name: string; maker: string; provider: AiProvider }> = {
+  claude: { tool: 'Claude Code', name: 'Claude', maker: 'Anthropic', provider: 'claude' },
+  codex: { tool: 'Codex', name: 'ChatGPT', maker: 'OpenAI', provider: 'codex' },
+}
 
 export interface AccountStatus {
   installed: boolean

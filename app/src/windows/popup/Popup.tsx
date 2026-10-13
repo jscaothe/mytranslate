@@ -26,7 +26,7 @@ import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, t
 import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
 import { useStore } from '../../store'
 import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, modelField, useQuickChoices, type AiChoice, type QuickChoice } from '../../lib/ai'
-import { loginAccount, type Account } from '../../lib/accounts'
+import { ACCOUNT_TOOL, loginAccount, type Account } from '../../lib/accounts'
 import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
@@ -974,12 +974,6 @@ function aiName(id: string): string {
   return (AI_ORDER as readonly string[]).includes(id) ? AI_NAMES[id as AiChoice['provider']] : 'Claude'
 }
 
-/** The tool behind an account provider, for the messages about it. */
-const ACCOUNT_TOOLS: Record<Account, { tool: string; maker: string }> = {
-  claude: { tool: 'Claude Code', maker: 'Anthropic' },
-  codex: { tool: 'Codex', maker: 'OpenAI' },
-}
-
 function ErrorBanner({
   kind,
   provider,
@@ -1070,7 +1064,7 @@ function ErrorBanner({
     </div>
   )
   if (kind === 'blocked' && account) {
-    const { tool, maker } = ACCOUNT_TOOLS[account]
+    const { tool, maker } = ACCOUNT_TOOL[account]
     return (
       <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`${name} từ chối yêu cầu từ MyTranslate`, `${name} が MyTranslate からの要求を拒否しました`)}>
         {t(
@@ -1109,7 +1103,7 @@ function ErrorBanner({
     )
   }
   if (kind === 'not_installed' && account) {
-    const { tool } = ACCOUNT_TOOLS[account]
+    const { tool } = ACCOUNT_TOOL[account]
     return (
       <Banner tone="bad" icon={<CircleAlert size={16} />} title={t(`Máy chưa có ${tool}`, `${tool} がインストールされていません`)}>
         {t(
