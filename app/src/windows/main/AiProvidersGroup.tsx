@@ -82,6 +82,12 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         </ProviderCard>
       ))}
 
+      <div className="px-4 py-3 text-[12px] leading-relaxed text-ink-2">
+        {t(
+          'Khi model đang chọn không dùng được (hết hạn mức, quá tải, model không còn), MyTranslate tự dịch bằng model khác của cùng AI đó: Claude Sonnet và Haiku đổi cho nhau; ChatGPT và Gemini thử model yêu thích, model khuyến nghị, rồi các model khác mà API key dùng được.',
+          '選択中のモデルが使えないとき（利用枠の上限、混雑、提供終了）、同じAIの別のモデルで自動的に翻訳します。Claude は Sonnet と Haiku を切り替え、ChatGPT と Gemini はお気に入り、推奨モデル、APIキーで使えるその他のモデルの順に試します。',
+        )}
+      </div>
       <div className="flex items-center gap-4 px-4 py-3">
         <div className="min-w-0 flex-1">
           <div className="text-[13.5px] text-ink">{t('Tự chuyển sang AI khác khi lỗi', 'エラー時に別のAIに切り替える')}</div>

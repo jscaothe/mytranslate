@@ -118,8 +118,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const aiChoices = useQuickChoices(settings)
   const currentAi = aiOverride ?? defaultChoice(settings)
   const answeredAi: AiChoice | null =
-    // Only a fallback differs from what was asked for.
-    live.answeredBy?.fallbackFrom && ['claude', 'openai', 'gemini'].includes(live.answeredBy.provider)
+    // Differs from what was asked for when the chosen model or AI could not answer.
+    live.answeredBy && ['claude', 'openai', 'gemini'].includes(live.answeredBy.provider)
       ? { provider: live.answeredBy.provider as AiChoice['provider'], model: live.answeredBy.model }
       : null
   const pickAi = (c: AiChoice) => {

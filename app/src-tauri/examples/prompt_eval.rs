@@ -58,6 +58,8 @@ fn main() {
             api,
             model: model.clone(),
             key: std::env::var(format!("{}_API_KEY", api.id().to_uppercase())).ok(),
+            // Measures exactly this model.
+            more_models: false,
         },
     };
 

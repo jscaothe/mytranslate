@@ -137,7 +137,17 @@ function mockStream(request: TranslateRequest, onEvent: (e: TranslateEvent) => v
     onEvent({
       type: 'done',
       sections: final,
-      timing: { firstTokenMs: Math.round(first), totalMs: Math.round(performance.now() - start), thought: false, warm: true, model: 'mock', promptVersion: 0, provider: 'claude', fallbackFrom: null },
+      timing: {
+        firstTokenMs: Math.round(first),
+        totalMs: Math.round(performance.now() - start),
+        thought: false,
+        warm: true,
+        // Answers as the AI asked for, like the real app when that model works.
+        model: request.ai?.model ?? 'sonnet',
+        promptVersion: 0,
+        provider: request.ai?.provider ?? 'claude',
+        fallbackFrom: null,
+      },
       rateLimit: null,
     })
   }

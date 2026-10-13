@@ -44,7 +44,8 @@ pub struct Timing {
     pub prompt_version: u32,
     /// claude, openai or gemini.
     pub provider: String,
-    /// Set when this provider answered because the chosen one failed.
+    /// Set when this provider answered because the chosen one failed. Another model of the same provider answers
+    /// silently.
     pub fallback_from: Option<String>,
     pub tokens: Tokens,
 }

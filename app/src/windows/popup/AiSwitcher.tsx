@@ -42,7 +42,7 @@ export function AiSwitcher({
   choices: QuickChoice[]
   /** The AI this popup asked for. */
   current: AiChoice
-  /** The AI that actually answered, when it was a fallback. */
+  /** The AI and model that actually answered. */
   answeredBy: AiChoice | null
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -63,7 +63,8 @@ export function AiSwitcher({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open, onOpenChange])
   const shown = answeredBy && !sameChoice(answeredBy, current) ? answeredBy : current
-  const fellBack = shown !== current
+  // Another model of the same AI answers quietly: only the model name changes. Another AI is pointed out.
+  const fellBack = shown.provider !== current.provider
 
   // Focus the ticked entry when the menu opens, so arrows and Enter work right away. The popup window is often
   // shorter than the menu: it scrolls rather than running past the window's bottom edge.
