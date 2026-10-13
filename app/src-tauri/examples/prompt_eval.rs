@@ -41,18 +41,23 @@ fn main() {
         std::process::exit(2);
     };
     let cases: Cases = serde_json::from_str(&std::fs::read_to_string(input).expect("read cases")).expect("parse cases");
-    // PROVIDER=claude (default, Claude Code), openai or gemini (key in OPENAI_API_KEY / GEMINI_API_KEY).
+    // PROVIDER=claude (default, Claude Code), codex (Codex signed in with ChatGPT), anthropic, openai or gemini
+    // (key in ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY).
     let provider = std::env::var("PROVIDER").unwrap_or_else(|_| "claude".into());
+    let codex = provider == "codex";
     let api = match provider.as_str() {
+        "anthropic" => Some(Api::Anthropic),
         "openai" => Some(Api::OpenAi),
         "gemini" => Some(Api::Gemini),
         _ => None,
     };
     let model = std::env::var("MODEL").unwrap_or_else(|_| match api {
         Some(api) => api.default_model().to_string(),
+        None if codex => mytranslate_lib::provider::codex_cli::DEFAULT_MODEL.into(),
         None => "sonnet".into(),
     });
     let route = match api {
+        None if codex => Route::Codex { model: model.clone() },
         None => Route::Claude { model: None },
         Some(api) => Route::Api {
             api,
@@ -67,10 +72,10 @@ fn main() {
     let rows = runtime.block_on(async {
         let workdir = std::env::temp_dir().join("mytranslate-prompt-eval");
         let cli = ClaudeCli::new(workdir, &model);
-        if api.is_none() {
+        if api.is_none() && !codex {
             cli.refill();
         }
-        let router = Router::new(cli);
+        let router = Router::new(cli, std::env::temp_dir().join("mytranslate-prompt-eval-codex"));
         let mut rows = Vec::new();
         for case in &cases.cases {
             let mut req = TranslateRequest::task(case.direction, &case.text, case.keigo);

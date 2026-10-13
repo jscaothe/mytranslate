@@ -6,10 +6,13 @@ export type Screen = 'playground' | 'main' | 'onboarding'
 export type MainTab = 'glossary' | 'writing' | 'settings'
 export type ThemePref = 'system' | 'light' | 'dark'
 
-/** `claude` is Claude Code (the user's Claude account); `anthropic` is Claude with an API key. */
-export type AiProvider = 'claude' | 'anthropic' | 'openai' | 'gemini'
+/**
+ * `claude` is Claude Code (the user's Claude account) and `codex` is ChatGPT through Codex (their ChatGPT account);
+ * `anthropic`, `openai` and `gemini` use an API key.
+ */
+export type AiProvider = 'claude' | 'codex' | 'anthropic' | 'openai' | 'gemini'
 /** The AIs used with an API key. */
-export type ApiProvider = Exclude<AiProvider, 'claude'>
+export type ApiProvider = Exclude<AiProvider, 'claude' | 'codex'>
 
 /** One key translates either way (the text's language decides), one checks Japanese, one opens the main window. */
 export interface HotkeyMap {
@@ -28,6 +31,7 @@ export interface Settings {
   /** Which AI translates. Claude goes through Claude Code; ChatGPT and Gemini through their APIs. */
   aiProvider: AiProvider
   /** Model ids for the API providers; empty uses the recommended one. */
+  codexModel: string
   anthropicModel: string
   openaiModel: string
   geminiModel: string

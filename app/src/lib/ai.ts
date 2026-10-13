@@ -20,15 +20,24 @@ export interface QuickChoice extends AiChoice {
   current: boolean
 }
 
-export const AI_NAMES: Record<AiProvider, string> = { claude: 'Claude', anthropic: 'Claude API', openai: 'ChatGPT', gemini: 'Gemini' }
+export const AI_NAMES: Record<AiProvider, string> = {
+  claude: 'Claude',
+  codex: 'ChatGPT',
+  anthropic: 'Claude API',
+  openai: 'ChatGPT API',
+  gemini: 'Gemini',
+}
 
 /** The vendor's name, for where it is already clear an API key is meant ("API key Claude"). */
 export function vendorName(provider: AiProvider): string {
-  return provider === 'anthropic' ? 'Claude' : AI_NAMES[provider]
+  return provider === 'anthropic' ? 'Claude' : provider === 'openai' ? 'ChatGPT' : AI_NAMES[provider]
 }
 
 /** Every provider, in the order menus and Settings list them. */
-export const AI_ORDER: readonly AiProvider[] = ['claude', 'anthropic', 'openai', 'gemini']
+export const AI_ORDER: readonly AiProvider[] = ['claude', 'codex', 'anthropic', 'openai', 'gemini']
+
+/** ChatGPT through Codex: the fastest model the ChatGPT plans offer there (2026-10), until S1 measures it. */
+export const CODEX_MODEL = 'gpt-5.6-luna'
 
 /** The providers used with an API key, in the same order. */
 export const API_PROVIDERS: readonly ApiProvider[] = ['anthropic', 'openai', 'gemini']
@@ -67,11 +76,15 @@ export function testFailure(errorKind: string | null, t: T): string {
       ? t('Hết hạn mức hoặc chưa nạp tiền', '利用枠の上限、または残高がありません')
       : errorKind === 'network'
         ? t('Không kết nối được', '接続できません')
-        : t('Không dịch được', '翻訳できませんでした')
+        : errorKind === 'not_logged_in'
+          ? t('Chưa đăng nhập hoặc đăng nhập đã hết hạn', '未ログイン、またはログインの期限切れです')
+          : errorKind === 'not_installed'
+            ? t('Chưa cài công cụ của hãng', '提供元のツールが未インストールです')
+            : t('Không dịch được', '翻訳できませんでした')
 }
 
 /** The settings field holding a provider's default model. */
-export function modelField(provider: AiProvider): 'model' | 'anthropicModel' | 'openaiModel' | 'geminiModel' {
+export function modelField(provider: AiProvider): 'model' | 'codexModel' | 'anthropicModel' | 'openaiModel' | 'geminiModel' {
   return provider === 'claude' ? 'model' : `${provider}Model`
 }
 
@@ -79,6 +92,7 @@ export function modelField(provider: AiProvider): 'model' | 'anthropicModel' | '
 export function defaultChoice(settings: Settings): AiChoice {
   const provider = settings.aiProvider
   if (provider === 'claude') return { provider, model: settings.model }
+  if (provider === 'codex') return { provider, model: settings.codexModel || CODEX_MODEL }
   return { provider, model: settings[modelField(provider)] || RECOMMENDED_MODELS[provider] }
 }
 
@@ -92,7 +106,7 @@ export function modelName(provider: AiProvider, model: string): string {
     const digits = version.filter((w) => /^\d{1,2}$/.test(w))
     return [capitalize(family), digits.join('.')].filter(Boolean).join(' ')
   }
-  if (provider === 'openai' && words[0]?.toLowerCase() === 'gpt') {
+  if ((provider === 'openai' || provider === 'codex') && words[0]?.toLowerCase() === 'gpt') {
     const [, version, ...rest] = words
     return [`GPT-${version ?? ''}`.replace(/-$/, ''), ...rest.map(capitalize)].join(' ')
   }
@@ -120,6 +134,7 @@ function choicesFromSettings(settings: Settings): QuickChoice[] {
     for (const model of [...new Set(models)]) out.push({ provider, model, available, current: sameChoice(current, { provider, model }) })
   }
   push('claude', ['sonnet', 'haiku'], true)
+  push('codex', [settings.codexModel || CODEX_MODEL], false)
   push('anthropic', [settings.anthropicModel || RECOMMENDED_MODELS.anthropic, ...settings.aiQuickModels.anthropic], false)
   push('openai', [settings.openaiModel || RECOMMENDED_MODELS.openai, ...settings.aiQuickModels.openai], true)
   push('gemini', [settings.geminiModel || RECOMMENDED_MODELS.gemini, ...settings.aiQuickModels.gemini], false)

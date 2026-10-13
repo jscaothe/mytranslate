@@ -1,11 +1,12 @@
-import { Check, ChevronLeft, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, ShieldAlert, Terminal } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Check, ChevronLeft, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, RotateCw, ShieldAlert } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { invoke } from '@tauri-apps/api/core'
 import { API_PROVIDERS, KEY_HELP, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
-import { claudeStatus, isTauri, startTranslation, type ErrorKind } from '../../lib/claude'
+import { accountStatus, cancelLogin, installAccount, loginAccount, type Account } from '../../lib/accounts'
+import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { otherLang, readDirection, useLang, useT, type Lang, type T } from '../../lib/i18n'
 import { useStore, type AiProvider, type ApiProvider, type QuickActionId } from '../../store'
@@ -141,10 +142,10 @@ function openHelp(page: HelpPage, showToast: (m: string) => void, t: T) {
 }
 
 /** Where step 2 is: the three ways side by side, one account path, or the API keys under "Advanced". */
-type Route = 'choose' | 'claude' | 'apikey'
+type Route = 'choose' | Account | 'apikey'
 
 /** What this PC already has, for the "Ready on this PC" badge; `null` while looking. */
-type Detected = { claude: boolean } | null
+type Detected = Record<Account, boolean> | null
 
 /**
  * Step 2. The ways to use an AI are shown side by side in a fixed order: the user's Claude account, their ChatGPT
@@ -159,17 +160,13 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
 
   useEffect(() => {
     let alive = true
-    let timer = 0
-    if (isTauri) {
-      void claudeStatus()
-        .then((s) => alive && setDetected({ claude: Boolean(s.version) && s.loggedIn === true }))
-        .catch(() => alive && setDetected({ claude: false }))
-    } else {
-      timer = window.setTimeout(() => setDetected({ claude: scenario !== 'no_claude' && scenario !== 'not_logged_in' }), 400)
-    }
+    const ready = (a: Account) =>
+      accountStatus(a, scenario)
+        .then((s) => s.installed && s.loggedIn === true)
+        .catch(() => false)
+    void Promise.all([ready('claude'), ready('codex')]).then(([claude, codex]) => alive && setDetected({ claude, codex }))
     return () => {
       alive = false
-      window.clearTimeout(timer)
     }
   }, [scenario])
 
@@ -183,17 +180,27 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
     </button>
   )
 
-  if (route === 'claude') {
+  if (route === 'claude' || route === 'codex') {
+    const { tool, name, maker } = ACCOUNT_TOOL[route]
     return (
       <div className="flex flex-col gap-4">
         <StepHeading
-          title={t('Dùng tài khoản Claude', 'Claude アカウントを使う')}
+          title={t(`Dùng tài khoản ${name}`, `${name} アカウントを使う`)}
           detail={t(
-            'MyTranslate dùng Claude Code, công cụ chính hãng của Anthropic, với tài khoản Claude của bạn. Lượt dịch tính vào gói Claude bạn đang trả; MyTranslate không đọc và không lưu thông tin đăng nhập.',
-            'MyTranslate は Anthropic 公式ツールの Claude Code を、お使いの Claude アカウントで利用します。翻訳はご契約中の Claude プランの利用枠で行われ、ログイン情報を読み取ったり保存したりはしません。',
+            `MyTranslate tự cài ${tool} (công cụ chính hãng của ${maker}) và tự kiểm tra; bạn chỉ cần đăng nhập ${name} khi trang đăng nhập mở ra. Lượt dịch tính vào gói ${name} bạn đang trả; MyTranslate không đọc và không lưu thông tin đăng nhập.`,
+            `MyTranslate が ${maker} 公式の ${tool} をインストールして確認します。ログインページが開いたら ${name} にログインするだけです。翻訳はご契約中の ${name} プランの利用枠で行われ、ログイン情報を読み取ったり保存したりはしません。`,
           )}
         />
-        <ClaudeCheck onReady={onReady} />
+        <AccountCheck key={route} account={route} onReady={onReady} />
+        {route === 'codex' && (
+          <p className="flex gap-2 rounded-lg bg-accent-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-accent">
+            <CircleAlert size={15} className="mt-0.5 shrink-0" />
+            {t(
+              'Gói ChatGPT miễn phí không dùng được Codex. Nếu chưa có gói trả phí, chọn "Tôi chưa có tài khoản AI".',
+              '無料の ChatGPT プランでは Codex を使えません。有料プランがない場合は「AIのアカウントを持っていない」を選んでください。',
+            )}
+          </p>
+        )}
         {back}
       </div>
     )
@@ -233,7 +240,8 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
           provider="openai"
           title={t('Tài khoản ChatGPT', 'ChatGPT アカウント')}
           detail={t('Dùng gói Plus, Pro, Business bạn đang trả, không tốn thêm tiền.', 'ご契約中の Plus、Pro、Business プランで。追加料金なし。')}
-          badge={{ kind: 'soon', text: t('Sắp có', '近日対応') }}
+          badge={detected?.codex ? { kind: 'ready', text: t('Sẵn sàng trên máy này', 'このPCで使えます') } : undefined}
+          onClick={() => go('codex')}
         />
         <div className="col-span-2 flex items-center gap-2.5 text-[12px] text-ink-3 before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
           {t('hoặc', 'または')}
@@ -477,172 +485,227 @@ function ApiKeySetup({ provider, onReady }: { provider: ApiProvider; onReady: (r
   )
 }
 
-/** Claude Code is installed: is it signed in, and does one short translation work. */
-function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
-  const { scenario, showToast, updateSettings } = useStore()
-  const t = useT()
-  const [attempt, setAttempt] = useState(0)
-  const failAt = scenario === 'no_claude' ? 0 : scenario === 'not_logged_in' ? 1 : scenario === 'network' || scenario === 'quota' ? 2 : -1
-  // Each check run is keyed so a retry or a scenario change starts over without resetting state in an effect.
-  const runKey = `${attempt}:${failAt}`
-  const [progress, setProgress] = useState<{ key: string; states: CheckState[]; details?: Record<number, string> } | null>(null)
-  const states: CheckState[] = progress?.key === runKey ? progress.states : ['running', 'idle', 'idle']
-  const details = progress?.key === runKey ? (progress.details ?? {}) : {}
+/** One line of the account check: its state, what it says, and a button only when something went wrong. */
+interface CheckRow {
+  state: CheckState
+  text: string
+  /** 0-100 while a download can be measured. */
+  percent?: number | null
+  /** The sign-in is waiting for the user on the vendor's page. */
+  waiting?: boolean
+  retry?: boolean
+}
 
-  // Real app: is claude installed, then one short translation proves the login works and shows the speed.
+type CheckRows = [CheckRow, CheckRow, CheckRow]
+
+/** Before anything is known: looking for the tool. */
+function initialRows(account: Account, t: T): CheckRows {
+  const { tool } = ACCOUNT_TOOL[account]
+  return [
+    { state: 'running', text: t(`Đang tìm ${tool}…`, `${tool} を探しています…`) },
+    { state: 'idle', text: t('Chờ bước trên', '前の手順を待っています') },
+    { state: 'idle', text: t('Tự chạy sau khi đăng nhập', 'ログイン後に自動で実行します') },
+  ]
+}
+
+const ACCOUNT_TOOL: Record<Account, { tool: string; name: string; maker: string; provider: AiProvider }> = {
+  claude: { tool: 'Claude Code', name: 'Claude', maker: 'Anthropic', provider: 'claude' },
+  codex: { tool: 'Codex', name: 'ChatGPT', maker: 'OpenAI', provider: 'codex' },
+}
+
+/**
+ * The user's own Claude or ChatGPT account, set up without asking anything: find the vendor's tool, install it
+ * when missing, start its sign-in when needed, then translate one sentence. The only thing the user does is sign in
+ * on the vendor's page; buttons appear only when a step fails.
+ */
+function AccountCheck({ account, onReady }: { account: Account; onReady: (ready: boolean) => void }) {
+  const { scenario, updateSettings } = useStore()
+  const t = useT()
+  const lang = useLang()
+  const { tool, name } = ACCOUNT_TOOL[account]
+  const [attempt, setAttempt] = useState(0)
+  const runKey = `${account}:${attempt}:${scenario}`
+  const [progress, setProgress] = useState<{ key: string; rows: CheckRows } | null>(null)
+  const rows = progress?.key === runKey ? progress.rows : initialRows(account, t)
+
   useEffect(() => {
-    if (!isTauri) return
+    const { tool, name, maker, provider } = ACCOUNT_TOOL[account]
+    const idle = (text: string): CheckRow => ({ state: 'idle', text })
     let alive = true
-    let cancel: (() => void) | null = null
-    const set = (s: CheckState[], d: Record<number, string> = {}) => alive && setProgress({ key: runKey, states: s, details: d })
-    void (async () => {
-      const status = await claudeStatus().catch((e) => ({ version: null, error: String(e), loggedIn: null }))
+    let current = initialRows(account, t)
+    const set = (i: 0 | 1 | 2, row: CheckRow) => {
       if (!alive) return
-      if (!status.version) {
-        set(['fail', 'idle', 'idle'], { 0: status.error ?? t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません') })
-        onReady(false)
-        return
+      current = [...current] as CheckRows
+      current[i] = row
+      setProgress({ key: runKey, rows: current })
+    }
+    const seconds = (ms: number) => (lang === 'ja' ? (ms / 1000).toFixed(1) : (ms / 1000).toFixed(1).replace('.', ','))
+    const failed = (i: 0 | 1 | 2, text: string) => {
+      set(i, { state: 'fail', text, retry: true })
+      onReady(false)
+    }
+
+    const signIn = async (): Promise<boolean> => {
+      set(1, { state: 'running', text: t(`Chưa đăng nhập. Đang mở trang đăng nhập ${name}…`, `未ログインです。${name} のログインページを開いています…`) })
+      const opened = window.setTimeout(
+        () => set(1, { state: 'running', waiting: true, text: t(`Mời bạn đăng nhập ${name} trên trình duyệt vừa mở.`, `開いたブラウザで ${name} にログインしてください。`) }),
+        900,
+      )
+      try {
+        await loginAccount(account)
+        set(1, { state: 'ok', text: t(`Đã đăng nhập bằng tài khoản ${name} của bạn`, `ご自身の ${name} アカウントでログインしています`) })
+        return true
+      } catch (e) {
+        if (alive && String(e) !== 'cancelled') failed(1, t(`Chưa đăng nhập được: ${String(e)}`, `ログインできませんでした: ${String(e)}`))
+        return false
+      } finally {
+        window.clearTimeout(opened)
       }
-      const found = { 0: t(`Tìm thấy ${status.version}`, `${status.version} が見つかりました`) }
-      set(['ok', 'running', 'idle'], found)
-      cancel = await startTranslation({ direction: 'ja_vi', text: 'ありがとうございます。', keigo: 'polite' }, (e) => {
-        if (e.type === 'done') {
-          const seconds = e.timing.firstTokenMs === null ? null : e.timing.firstTokenMs / 1000
-          const ok =
-            seconds === null
-              ? t('Dịch thử thành công', 'テスト翻訳に成功しました')
-              : t(
-                  `Dịch thử thành công, chữ đầu tiên sau ${seconds.toFixed(1).replace('.', ',')} giây`,
-                  `テスト翻訳に成功しました（最初の文字まで ${seconds.toFixed(1)} 秒）`,
-                )
-          set(['ok', 'ok', 'ok'], { ...found, 2: ok })
-          updateSettings({ aiProvider: 'claude' })
-          onReady(true)
+    }
+
+    const tryTranslation = async (): Promise<TestResult> => {
+      if (!isTauri) {
+        await new Promise((r) => window.setTimeout(r, 800))
+        if (scenario === 'quota' || scenario === 'network')
+          return { ok: false, model: '', firstTokenMs: null, totalMs: 0, translation: '', error: scenario, errorKind: scenario === 'quota' ? 'rate_limited' : 'network' }
+        return { ok: true, model: '', firstTokenMs: account === 'claude' ? 900 : 1900, totalMs: 2000, translation: '', error: null, errorKind: null }
+      }
+      return invoke<TestResult>('ai_test', { provider, model: null }).catch((e) => ({
+        ok: false,
+        model: '',
+        firstTokenMs: null,
+        totalMs: 0,
+        translation: '',
+        error: String(e),
+        errorKind: null,
+      }))
+    }
+
+    void (async () => {
+      let status = await accountStatus(account, scenario).catch(() => ({ installed: false, version: null, loggedIn: null }))
+      if (!alive) return
+      let installedNow = false
+      if (!status.installed) {
+        set(0, { state: 'running', percent: null, text: t(`Máy chưa có ${tool}, đang tự tải và cài bản chính hãng…`, `${tool} がないため、公式版をダウンロードしてインストールしています…`) })
+        try {
+          await installAccount(account, (percent) =>
+            set(0, { state: 'running', percent, text: t(`Máy chưa có ${tool}, đang tự tải và cài bản chính hãng…`, `${tool} がないため、公式版をダウンロードしてインストールしています…`) }),
+          )
+        } catch (e) {
+          return failed(0, t(`Không cài được ${tool}: ${String(e)}`, `${tool} をインストールできませんでした: ${String(e)}`))
         }
-        if (e.type === 'error' && e.kind !== 'cancelled') {
-          if (e.kind === 'not_logged_in') set(['ok', 'fail', 'idle'], found)
-          else set(['ok', 'ok', 'fail'], { ...found, 2: claudeFailure(e.kind, e.message, t) })
-          onReady(false)
-        }
+        installedNow = true
+        status = isTauri ? await accountStatus(account, scenario) : { installed: true, version: '0.162.1', loggedIn: false }
+        if (!alive) return
+        if (!status.installed) return failed(0, t(`Đã cài nhưng chưa chạy được ${tool}.`, `${tool} をインストールしましたが、起動できません。`))
+      }
+      const version = status.version ?? ''
+      set(0, {
+        state: 'ok',
+        text: installedNow
+          ? t(`Đã cài ${tool} ${version}, bản chính hãng của ${maker}`, `${maker} 公式の ${tool} ${version} をインストールしました`)
+          : t(`Đã có ${tool} ${version} trên máy`, `このPCに ${tool} ${version} があります`),
       })
+
+      let signedIn = false
+      if (status.loggedIn !== true) {
+        if (!(await signIn())) return
+        signedIn = true
+      } else {
+        set(1, { state: 'running', text: t('Đang kiểm tra đăng nhập…', 'ログインを確認しています…') })
+      }
+
+      for (;;) {
+        set(2, { state: 'running', text: t('Đang tự dịch thử một câu…', 'テスト翻訳をしています…') })
+        const result = await tryTranslation()
+        if (!alive) return
+        if (result.ok) {
+          set(1, { state: 'ok', text: t(`Đã đăng nhập bằng tài khoản ${name} của bạn`, `ご自身の ${name} アカウントでログインしています`) })
+          const ms = result.firstTokenMs ?? result.totalMs
+          set(2, {
+            state: 'ok',
+            text: t(`Dịch thử thành công, chữ đầu tiên sau ${seconds(ms)} giây. Bạn đã sẵn sàng.`, `テスト翻訳に成功しました（最初の文字まで ${seconds(ms)} 秒）。準備完了です。`),
+          })
+          updateSettings({ aiProvider: provider })
+          onReady(true)
+          return
+        }
+        // The tool said it was signed in but the sign-in had expired: sign in once, then try again.
+        if (result.errorKind === 'not_logged_in' && !signedIn) {
+          set(2, idle(t('Tự chạy sau khi đăng nhập', 'ログイン後に自動で実行します')))
+          if (!(await signIn())) return
+          signedIn = true
+          continue
+        }
+        set(1, { state: 'ok', text: t(`Đã đăng nhập bằng tài khoản ${name} của bạn`, `ご自身の ${name} アカウントでログインしています`) })
+        return failed(2, accountFailure(result, name, t))
+      }
     })()
+
     return () => {
       alive = false
-      cancel?.()
+      cancelLogin()
     }
-  }, [runKey, onReady, updateSettings, t])
-
-  useEffect(() => {
-    if (isTauri) return
-    const timers: number[] = []
-    let current: CheckState[] = ['running', 'idle', 'idle']
-    for (let i = 0; i < 3; i++) {
-      timers.push(
-        window.setTimeout(() => {
-          current = [...current]
-          if (i === failAt) {
-            current[i] = 'fail'
-          } else {
-            current[i] = 'ok'
-            if (i < 2) current[i + 1] = 'running'
-          }
-          setProgress({ key: runKey, states: current })
-          onReady(i === 2 && failAt === -1)
-        }, 700 * (i + 1)),
-      )
-      if (i === failAt) break
-    }
-    return () => timers.forEach(window.clearTimeout)
-  }, [runKey, failAt, onReady])
+  }, [runKey, account, scenario, lang, t, onReady, updateSettings])
 
   const retry = () => {
     onReady(false)
     setAttempt((n) => n + 1)
   }
-
-  const items: { title: string; detail: string; fail: string; action?: ReactNode }[] = [
-    {
-      title: t('Claude Code trên máy', 'このPCの Claude Code'),
-      detail: t('Tìm thấy claude 2.x trong PATH', 'PATH に claude 2.x が見つかりました'),
-      fail: t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません'),
-      action: (
-        <Button size="sm" onClick={() => openHelp('claude_code', showToast, t)}>
-          <ExternalLink size={13} /> {t('Mở hướng dẫn cài đặt', 'インストール手順を開く')}
-        </Button>
-      ),
-    },
-    {
-      title: t('Tài khoản Claude', 'Claude アカウント'),
-      detail: t('Đã đăng nhập bằng tài khoản Claude của bạn', 'ご自身の Claude アカウントでログインしています'),
-      fail: t('Chưa đăng nhập. Mở terminal và chạy lệnh claude để đăng nhập.', 'ログインしていません。ターミナルで claude を実行してログインしてください。'),
-      action: (
-        <Button
-          size="sm"
-          onClick={() =>
-            isTauri
-              ? void invoke('open_claude_login').catch((e) => showToast(`${t('Không mở được terminal', 'ターミナルを開けません')}: ${String(e)}`))
-              : showToast(t('Mô phỏng: mở terminal chạy "claude"', 'シミュレーション: ターミナルで「claude」を実行'))
-          }
-        >
-          <Terminal size={13} /> {t('Mở terminal để đăng nhập', 'ターミナルを開いてログイン')}
-        </Button>
-      ),
-    },
-    {
-      title: t('Dịch thử', 'テスト翻訳'),
-      detail: t('Chữ đầu tiên sau 1,8 giây', '最初の文字まで 1.8 秒'),
-      fail:
-        scenario === 'quota'
-          ? t('Đã hết hạn mức gói Claude, làm mới lúc 15:00.', 'Claude プランの利用枠を使い切りました。15:00 にリセットされます。')
-          : t('Không kết nối được tới Claude (network timeout).', 'Claude に接続できません（network timeout）。'),
-    },
-  ]
+  const titles = [t(`${tool} trên máy`, `このPCの ${tool}`), t(`Tài khoản ${name}`, `${name} アカウント`), t('Dịch thử', 'テスト翻訳')]
 
   return (
-    <div className="flex flex-col gap-4">
-      <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
-        {items.map((item, i) => (
-          <li key={item.title} className="flex items-start gap-3 px-4 py-3">
-            <StatusIcon state={states[i]} />
-            <div className="min-w-0 flex-1">
-              <div className={cx('text-[13.5px] font-medium', states[i] === 'idle' ? 'text-ink-3' : 'text-ink')}>{item.title}</div>
-              {states[i] === 'ok' && <div className="text-[12.5px] text-ink-3">{details[i] ?? item.detail}</div>}
-              {states[i] === 'fail' && (
-                <div className="mt-0.5 flex flex-col items-start gap-2">
-                  <span className="text-[12.5px] break-all text-bad">{details[i] ?? item.fail}</span>
-                  {item.action}
-                </div>
-              )}
+    <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
+      {rows.map((row, i) => (
+        <li key={titles[i]} className="flex items-start gap-3 px-4 py-3">
+          <StatusIcon state={row.state} />
+          <div className="min-w-0 flex-1">
+            <div className={cx('text-[13.5px] font-medium', row.state === 'idle' ? 'text-ink-3' : 'text-ink')}>{titles[i]}</div>
+            <div className={cx('text-[12.5px] leading-relaxed break-words', row.state === 'fail' ? 'text-bad' : row.waiting ? 'font-semibold text-accent' : 'text-ink-3')}>
+              {row.text}
+              {row.percent != null && ` ${row.percent}%`}
             </div>
-          </li>
-        ))}
-      </ul>
-      {states.includes('fail') && (
-        <div className="flex items-center gap-3">
-          <Button onClick={retry}>{t('Kiểm tra lại', 'もう一度確認')}</Button>
-          {!isTauri && (
-            <span className="text-[12.5px] text-ink-3">
-              {t('Mẹo: đổi "Trạng thái giả lập" về "Bình thường" rồi kiểm tra lại.', 'ヒント: 「シミュレーション」を「通常」に戻してから確認してください。')}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
+            {row.state === 'running' && row.percent !== undefined && (
+              <div className="mt-2 h-1 w-64 overflow-hidden rounded-full bg-hover" role="progressbar" aria-valuenow={row.percent ?? undefined}>
+                <div
+                  className={cx('h-full rounded-full bg-accent transition-[width]', row.percent == null && 'w-1/3 animate-pulse')}
+                  style={row.percent == null ? undefined : { width: `${row.percent}%` }}
+                />
+              </div>
+            )}
+            {row.waiting && (
+              <button type="button" onClick={retry} className="mt-1 text-[12.5px] text-accent hover:underline">
+                {t('Không thấy trang đăng nhập? Mở lại', 'ログインページが見つからない場合は、もう一度開く')}
+              </button>
+            )}
+            {row.retry && (
+              <Button size="sm" className="mt-2" onClick={retry}>
+                <RotateCw size={13} /> {t('Thử lại', '再試行')}
+              </Button>
+            )}
+          </div>
+        </li>
+      ))}
+    </ul>
   )
 }
 
-/** Why the test translation through Claude Code failed, in the user's words; other failures keep Claude's text. */
-function claudeFailure(kind: ErrorKind, message: string, t: T): string {
-  if (kind === 'network')
-    return t(
-      'Không kết nối được tới máy chủ Claude. Kiểm tra mạng, VPN hoặc proxy của công ty rồi bấm Kiểm tra lại.',
-      'Claude のサーバーに接続できません。ネットワーク、VPN、社内プロキシを確認してから「もう一度確認」を押してください。',
-    )
-  if (kind === 'timeout')
-    return t('Claude không trả lời. Kiểm tra mạng rồi bấm Kiểm tra lại.', 'Claude から応答がありません。ネットワークを確認してから「もう一度確認」を押してください。')
-  if (kind === 'rate_limited')
-    return t('Đã hết hạn mức gói Claude. Thử lại sau khi hạn mức được làm mới.', 'Claude プランの利用枠を使い切りました。リセット後にもう一度お試しください。')
-  return message
+/** Why the test translation with the user's account failed, and what to do. */
+function accountFailure(result: TestResult, name: string, t: T): string {
+  switch (result.errorKind) {
+    case 'rate_limited':
+      return t(`Đã hết hạn mức gói ${name}. Thử lại sau khi hạn mức được làm mới.`, `${name} プランの利用枠を使い切りました。リセット後にもう一度お試しください。`)
+    case 'network':
+      return t('Không kết nối được. Kiểm tra mạng, VPN hoặc proxy của công ty.', '接続できません。ネットワーク、VPN、社内プロキシを確認してください。')
+    case 'timeout':
+      return t(`${name} không trả lời. Kiểm tra mạng rồi thử lại.`, `${name} から応答がありません。ネットワークを確認してから、もう一度お試しください。`)
+    case 'not_logged_in':
+      return t(`Tài khoản ${name} chưa dùng được. Gói miễn phí có thể không dùng được ở đây; cần gói trả phí.`, `${name} アカウントが使えません。無料プランでは使えない場合があり、有料プランが必要です。`)
+    case 'not_installed':
+      return t('Không chạy được công cụ của hãng.', '提供元のツールを起動できません。')
+    default:
+      return result.error ?? t('Không dịch được', '翻訳できませんでした')
+  }
 }
 
 function StatusIcon({ state }: { state: CheckState }) {

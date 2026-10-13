@@ -8,7 +8,7 @@
 //! - `--effort low` with Sonnet avoids most of the model's "thinking" before it writes.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -119,7 +119,8 @@ struct Process {
 }
 
 pub struct ClaudeCli {
-    exe: PathBuf,
+    /// Found again after MyTranslate installs Claude Code.
+    exe: std::sync::RwLock<PathBuf>,
     workdir: PathBuf,
     model: std::sync::Mutex<String>,
     spare: Mutex<Option<Process>>,
@@ -134,7 +135,7 @@ impl ClaudeCli {
     pub fn new(workdir: PathBuf, model: &str) -> Arc<Self> {
         let _ = std::fs::create_dir_all(&workdir);
         Arc::new(Self {
-            exe: find_claude(),
+            exe: std::sync::RwLock::new(find_claude()),
             workdir,
             model: std::sync::Mutex::new(model.to_string()),
             spare: Mutex::new(None),
@@ -144,8 +145,14 @@ impl ClaudeCli {
         })
     }
 
-    pub fn exe(&self) -> &Path {
-        &self.exe
+    pub fn exe(&self) -> PathBuf {
+        self.exe.read().unwrap().clone()
+    }
+
+    /// Looks for `claude` again (it was just installed) and boots a spare with it.
+    pub fn relocate(self: &Arc<Self>) {
+        *self.exe.write().unwrap() = find_claude();
+        self.refill();
     }
 
     fn current_model(&self) -> String {
@@ -398,7 +405,7 @@ impl ClaudeCli {
     }
 
     fn spawn_process(&self, model: &str) -> std::io::Result<Process> {
-        let mut cmd = Command::new(&self.exe);
+        let mut cmd = Command::new(self.exe());
         cmd.args([
             "-p",
             "--safe-mode",
@@ -510,7 +517,7 @@ fn classify_failure(text: &str) -> (ErrorKind, String) {
 }
 
 /// Finds `claude.exe` on PATH, falling back to the default per-user install location.
-fn find_claude() -> PathBuf {
+pub fn find_claude() -> PathBuf {
     let name = if cfg!(windows) { "claude.exe" } else { "claude" };
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {

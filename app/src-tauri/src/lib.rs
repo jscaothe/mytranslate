@@ -1,3 +1,4 @@
+mod accounts;
 mod ai;
 mod capture;
 mod chat_apps;
@@ -641,7 +642,7 @@ struct ClaudeStatus {
 /// yes/no is kept; the account details it prints stay with Claude Code.
 #[tauri::command]
 async fn claude_status(cli: State<'_, Arc<ClaudeCli>>) -> Result<ClaudeStatus, String> {
-    let path = cli.exe().to_path_buf();
+    let path = cli.exe();
     let (version, error) = match run_quietly(&path, &["--version"]).await {
         Ok(out) => (Some(out), None),
         Err(e) => (None, Some(e)),
@@ -661,6 +662,12 @@ async fn claude_status(cli: State<'_, Arc<ClaudeCli>>) -> Result<ClaudeStatus, S
         error,
         logged_in,
     })
+}
+
+/// Is Codex installed, and is it signed in with a ChatGPT account.
+#[tauri::command]
+async fn codex_status() -> provider::codex_cli::CodexStatus {
+    provider::codex_cli::status().await
 }
 
 /// Runs a short CLI command without a console window; its trimmed stdout, or why it failed.
@@ -833,6 +840,7 @@ pub fn run() {
         .manage(quickbar::QuickbarState::default())
         .manage(TeamGlossaryCache::default())
         .manage(updates::UpdateState::default())
+        .manage(accounts::LoginState::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_notification::init())
@@ -889,7 +897,8 @@ pub fn run() {
             let cli = ClaudeCli::new(workdir, &model);
             cli.refill();
             cli.keep_fresh();
-            app.manage(Router::new(cli.clone()));
+            let codex_workdir = app.path().app_local_data_dir()?.join("codex-workdir");
+            app.manage(Router::new(cli.clone(), codex_workdir));
             app.manage(cli);
 
             popup::create(app.handle())?;
@@ -921,6 +930,11 @@ pub fn run() {
             cancel_translation,
             next_request_id,
             claude_status,
+            codex_status,
+            accounts::account_status,
+            accounts::account_install,
+            accounts::account_login,
+            accounts::account_login_cancel,
             open_claude_login,
             chat_apps_installed,
             open_chat_app,

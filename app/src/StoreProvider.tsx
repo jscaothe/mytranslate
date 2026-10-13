@@ -16,6 +16,7 @@ const defaultSettings: Settings = {
   defaultKeigo: 'formal',
   model: 'sonnet',
   aiProvider: 'claude',
+  codexModel: '',
   anthropicModel: '',
   openaiModel: '',
   geminiModel: '',

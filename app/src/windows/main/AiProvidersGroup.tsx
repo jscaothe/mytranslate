@@ -4,7 +4,8 @@ import { AlertCircle, Check, CheckCircle2, ChevronDown, KeyRound, Loader2, Searc
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
-import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, KEY_HELP, modelField, modelName, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
+import { AI_NAMES, AI_ORDER, choiceLabel, CODEX_MODEL, defaultChoice, KEY_HELP, modelField, modelName, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
+import { accountStatus, type AccountStatus } from '../../lib/accounts'
 import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
 import { useT } from '../../lib/i18n'
 import { useStore, type AiProvider, type ApiProvider } from '../../store'
@@ -16,7 +17,8 @@ const PROTOTYPE_MODELS: Record<ApiProvider, string[]> = {
   gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'],
 }
 
-type Keys = Record<ApiProvider, boolean>
+/** Saved API keys, and (`codex`) whether Codex is installed. */
+type Keys = Record<ApiProvider | 'codex', boolean>
 
 /**
  * Settings > Kết nối AI. One card per AI, each usable to set up that AI without making it the default: its status,
@@ -26,7 +28,7 @@ type Keys = Record<ApiProvider, boolean>
 export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row: RowComponent }) {
   const { settings, updateSettings } = useStore()
   const t = useT()
-  const [keys, setKeys] = useState<Keys>({ anthropic: false, openai: !isTauri, gemini: false })
+  const [keys, setKeys] = useState<Keys>({ codex: false, anthropic: false, openai: !isTauri, gemini: false })
   const current = defaultChoice(settings)
   const [expanded, setExpanded] = useState<AiProvider | null>(current.provider)
 
@@ -77,6 +79,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         >
           {p === 'claude' ? (
             <ClaudeBody />
+          ) : p === 'codex' ? (
+            <CodexBody />
           ) : (
             <ApiBody provider={p} hasKey={keys[p]} onKeySaved={(saved) => setKeys((k) => ({ ...k, [p]: saved }))} />
           )}
@@ -142,7 +146,11 @@ function ProviderCard({
   const status =
     provider === 'claude'
       ? t('Claude Code trên máy này', 'このPCの Claude Code')
-      : ready
+      : provider === 'codex'
+        ? ready
+          ? t('Tài khoản ChatGPT qua Codex', 'Codex 経由の ChatGPT アカウント')
+          : t('Chưa thiết lập', '未設定')
+        : ready
         ? t('Đã có API key', 'APIキー設定済み')
         : t('Chưa có API key', 'APIキー未設定')
   return (
@@ -233,6 +241,62 @@ function ClaudeBody() {
             </Button>
           </span>
         )}
+      </Field>
+    </>
+  )
+}
+
+/** ChatGPT through Codex: is it installed and signed in, and does a translation work. */
+function CodexBody() {
+  const { scenario } = useStore()
+  const t = useT()
+  const [status, setStatus] = useState<AccountStatus | null>(null)
+  const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
+  useEffect(() => {
+    let alive = true
+    void accountStatus('codex', scenario)
+      .then((s) => alive && setStatus(s))
+      .catch(() => alive && setStatus({ installed: false, version: null, loggedIn: null }))
+    return () => {
+      alive = false
+    }
+  }, [scenario])
+  const runTest = () => {
+    setTest({ state: 'running' })
+    if (!isTauri) {
+      window.setTimeout(() => setTest({ state: 'done', result: { ok: true, model: CODEX_MODEL, firstTokenMs: 1900, totalMs: 2400, translation: '', error: null, errorKind: null } }), 700)
+      return
+    }
+    invoke<TestResult>('ai_test', { provider: 'codex', model: null })
+      .then((result) => setTest({ state: 'done', result }))
+      .catch((e) => setTest({ state: 'done', result: { ok: false, model: '', firstTokenMs: null, totalMs: 0, translation: '', error: String(e), errorKind: null } }))
+  }
+  return (
+    <>
+      <Field label="Codex">
+        {!status ? (
+          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-ink-2">
+            <Loader2 size={15} className="animate-spin" /> {t('Đang kiểm tra…', '確認中…')}
+          </span>
+        ) : status.installed ? (
+          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-good">
+            <CheckCircle2 size={15} /> {status.version}
+            {status.loggedIn === false && <span className="text-warn">· {t('chưa đăng nhập', '未ログイン')}</span>}
+          </span>
+        ) : (
+          <span className="pt-1 text-[13px] text-ink-2">
+            {t('Chưa cài. Chọn "Tài khoản ChatGPT" trong hướng dẫn để MyTranslate tự cài và đăng nhập.', '未インストールです。ガイドで「ChatGPT アカウント」を選ぶと、MyTranslate がインストールとログインを行います。')}
+          </span>
+        )}
+      </Field>
+      <Field label={t('Kiểm tra', 'テスト')} hint={t('Dịch thử một câu ngắn bằng tài khoản ChatGPT.', 'ChatGPT アカウントで短い文を試しに翻訳します。')}>
+        <span className="flex items-center gap-3">
+          <Button disabled={!status?.installed || test.state === 'running'} onClick={runTest}>
+            {test.state === 'running' && <Loader2 size={14} className="animate-spin" />}
+            {test.state === 'running' ? t('Đang dịch thử…', 'テスト翻訳中…') : t('Dịch thử', 'テスト翻訳')}
+          </Button>
+          {test.state === 'done' && <TestLine result={test.result} />}
+        </span>
       </Field>
     </>
   )

@@ -89,7 +89,7 @@ test('the ways to use an AI sit side by side; what the PC has only earns a badge
   await expect(page.getByRole('button', { name: 'Tiếp tục' })).toBeDisabled()
 })
 
-test('without Claude Code there is no badge, and an API key still works under Advanced', async ({ page }) => {
+test('without Claude Code the guide installs it, signs in and tries a translation by itself', async ({ page }) => {
   await page.goto('/')
   await page.locator('select').filter({ hasText: 'Bình thường' }).selectOption('no_claude')
   await page.getByRole('button', { name: 'Onboarding' }).click()
@@ -98,13 +98,47 @@ test('without Claude Code there is no badge, and an API key still works under Ad
   const claude = page.getByRole('button', { name: /Tài khoản Claude/ })
   await expect(claude).toBeVisible()
   await expect(page.getByText('Sẵn sàng trên máy này')).toHaveCount(0)
-  const next = page.getByRole('button', { name: 'Tiếp tục' })
-
-  // Claude needs installing first; the guide points there.
   await claude.click()
-  await expect(page.getByRole('button', { name: 'Mở hướng dẫn cài đặt' })).toBeVisible()
-  await expect(next).toBeDisabled()
-  await page.getByRole('button', { name: 'Chọn cách khác' }).click()
+
+  // Nothing to press: install, sign-in page, test translation follow one another.
+  await expect(page.getByText('Máy chưa có Claude Code, đang tự tải và cài bản chính hãng…')).toBeVisible()
+  await expect(page.getByText('Mời bạn đăng nhập Claude trên trình duyệt vừa mở.')).toBeVisible()
+  await expect(page.getByText(/Dịch thử thành công, chữ đầu tiên sau/)).toBeVisible()
+  await expect(page.getByText('Đã cài Claude Code')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Thử lại' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Tiếp tục' })).toBeEnabled()
+})
+
+test('a ChatGPT account is set up the same way, through Codex', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Onboarding' }).click()
+  await page.getByRole('button', { name: 'Tiếp tục' }).click()
+
+  await page.getByRole('button', { name: /Tài khoản ChatGPT/ }).click()
+  await expect(page.getByRole('heading', { name: 'Dùng tài khoản ChatGPT' })).toBeVisible()
+  await expect(page.getByRole('progressbar')).toBeVisible()
+  await expect(page.getByText(/Đã cài Codex .*, bản chính hãng của OpenAI/)).toBeVisible()
+  await expect(page.getByText('Đã đăng nhập bằng tài khoản ChatGPT của bạn')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Tiếp tục' })).toBeEnabled()
+})
+
+test('a failed test translation says why and offers to try again', async ({ page }) => {
+  await page.goto('/')
+  await page.locator('select').filter({ hasText: 'Bình thường' }).selectOption('quota')
+  await page.getByRole('button', { name: 'Onboarding' }).click()
+  await page.getByRole('button', { name: 'Tiếp tục' }).click()
+  await page.getByRole('button', { name: /Tài khoản Claude/ }).click()
+
+  await expect(page.getByText('Đã hết hạn mức gói Claude. Thử lại sau khi hạn mức được làm mới.')).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Thử lại' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Tiếp tục' })).toBeDisabled()
+})
+
+test('an API key still works under Advanced', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Onboarding' }).click()
+  await page.getByRole('button', { name: 'Tiếp tục' }).click()
+  const next = page.getByRole('button', { name: 'Tiếp tục' })
 
   await page.getByRole('button', { name: /Nâng cao: tôi có API key/ }).click()
   await expect(page.getByRole('heading', { name: 'Dùng API key' })).toBeVisible()

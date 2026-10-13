@@ -6,11 +6,12 @@ import { useT } from '../../lib/i18n'
 import type { AiProvider } from '../../store'
 
 /** Distinct at 16 px: Claude and ChatGPT share an initial. */
-const MARK_GLYPHS: Record<AiProvider, string> = { claude: 'C', anthropic: 'C', openai: 'G', gemini: '✦' }
+const MARK_GLYPHS: Record<AiProvider, string> = { claude: 'C', codex: 'G', anthropic: 'C', openai: 'G', gemini: '✦' }
 
 const MARK_COLORS: Record<AiProvider, string> = {
   claude: 'bg-[#d97757]',
   anthropic: 'bg-[#d97757]',
+  codex: 'bg-[#10a37f]',
   openai: 'bg-[#10a37f]',
   gemini: 'bg-[#4285f4]',
 }
@@ -133,7 +134,11 @@ export function AiSwitcher({
               <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-[11.5px] font-semibold text-ink-3">
                 <AiMark provider={g.provider} className="size-3.5 text-[8.5px]" />
                 {AI_NAMES[g.provider]}
-                {!g.items[0].available && <span className="font-normal">· {t('chưa có API key', 'APIキー未設定')}</span>}
+                {!g.items[0].available && (
+                  <span className="font-normal">
+                    · {g.provider === 'codex' ? t('chưa thiết lập', '未設定') : t('chưa có API key', 'APIキー未設定')}
+                  </span>
+                )}
               </div>
               {g.items.map((c) => {
                 const ticked = sameChoice(c, current)

@@ -1,9 +1,10 @@
-//! Talking to an AI: Claude through the Claude Code CLI (the user's Claude plan), ChatGPT and Gemini through
-//! their HTTP APIs with the user's API key. The router runs a request on the chosen model; if it fails before
-//! showing any text, on the other models of the same provider (quota, overloaded, unknown model) and, when the
-//! user allows it, on the next provider (also for a bad key or no network).
+//! Talking to an AI: Claude through Claude Code and ChatGPT through Codex (the user's own Claude or ChatGPT plan),
+//! or Claude, ChatGPT and Gemini through their HTTP APIs with the user's API key. The router runs a request on the
+//! chosen model; if it fails before showing any text, on the other models of the same provider (quota, overloaded,
+//! unknown model) and, when the user allows it, on the next provider (also for a bad key or no network).
 
 pub mod claude_cli;
+pub mod codex_cli;
 pub mod http_api;
 pub mod stream_parser;
 
@@ -13,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use tokio::sync::oneshot;
 
 use claude_cli::{ClaudeCli, ErrorKind, TranslateEvent};
+use codex_cli::CodexCli;
 use http_api::{Api, HttpApis};
 
 use crate::prompt::TranslateRequest;
@@ -22,6 +24,8 @@ use crate::prompt::TranslateRequest;
 pub enum Route {
     /// `model` overrides the Claude model chosen in Settings for this request.
     Claude { model: Option<String> },
+    /// ChatGPT through Codex, signed in with the user's ChatGPT account.
+    Codex { model: String },
     Api {
         api: Api,
         model: String,
@@ -35,6 +39,7 @@ impl Route {
     pub fn id(&self) -> &'static str {
         match self {
             Route::Claude { .. } => "claude",
+            Route::Codex { .. } => "codex",
             Route::Api { api, .. } => api.id(),
         }
     }
@@ -65,6 +70,7 @@ fn untried_models(available: &[String], tried: &HashSet<String>) -> Vec<String> 
 
 pub struct Router {
     pub cli: Arc<ClaudeCli>,
+    codex: CodexCli,
     http: HttpApis,
     cancels: Mutex<HashMap<u64, oneshot::Sender<()>>>,
     /// Cancelled before the HTTP attempt registered (see ClaudeCli::cancel for the same race).
@@ -74,9 +80,11 @@ pub struct Router {
 }
 
 impl Router {
-    pub fn new(cli: Arc<ClaudeCli>) -> Arc<Self> {
+    /// `codex_workdir`: an empty folder Codex runs in, like Claude Code's.
+    pub fn new(cli: Arc<ClaudeCli>, codex_workdir: std::path::PathBuf) -> Arc<Self> {
         Arc::new(Self {
             cli,
+            codex: CodexCli::new(codex_workdir),
             http: HttpApis::new(),
             cancels: Mutex::new(HashMap::new()),
             cancelled_early: Mutex::new(HashSet::new()),
@@ -194,6 +202,14 @@ impl Router {
                             .translate(request_id, req.clone(), model.as_deref(), &forward)
                             .await
                     }
+                    Route::Codex { model } => {
+                        let Some(rx) = self.register_cancel(request_id) else {
+                            emit(cancelled(route));
+                            return;
+                        };
+                        self.codex.translate(model, &req, rx, &forward).await;
+                        self.cancels.lock().unwrap().remove(&request_id);
+                    }
                     Route::Api { api, model, key, .. } => match key {
                         None => forward(TranslateEvent::Error {
                             kind: ErrorKind::MissingKey,
@@ -201,20 +217,10 @@ impl Router {
                             provider: None,
                         }),
                         Some(key) => {
-                            let (tx, rx) = oneshot::channel();
-                            {
-                                let mut cancels = self.cancels.lock().unwrap();
-                                if self.cancelled_early.lock().unwrap().remove(&request_id) {
-                                    drop(cancels);
-                                    emit(TranslateEvent::Error {
-                                        kind: ErrorKind::Cancelled,
-                                        message: "cancelled".into(),
-                                        provider: Some(route.id().to_string()),
-                                    });
-                                    return;
-                                }
-                                cancels.insert(request_id, tx);
-                            }
+                            let Some(rx) = self.register_cancel(request_id) else {
+                                emit(cancelled(route));
+                                return;
+                            };
                             self.http.translate(*api, model, key, &req, rx, &forward).await;
                             self.cancels.lock().unwrap().remove(&request_id);
                         }
@@ -277,16 +283,37 @@ impl Router {
     }
 }
 
+impl Router {
+    /// The receiver a cancel of `request_id` fires; `None` when it was already cancelled.
+    fn register_cancel(&self, request_id: u64) -> Option<oneshot::Receiver<()>> {
+        let (tx, rx) = oneshot::channel();
+        let mut cancels = self.cancels.lock().unwrap();
+        if self.cancelled_early.lock().unwrap().remove(&request_id) {
+            return None;
+        }
+        cancels.insert(request_id, tx);
+        Some(rx)
+    }
+}
+
+fn cancelled(route: &Route) -> TranslateEvent {
+    TranslateEvent::Error {
+        kind: ErrorKind::Cancelled,
+        message: "cancelled".into(),
+        provider: Some(route.id().to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::prompt::{Direction, Keigo};
 
     fn run(routes: &[Route]) -> Vec<TranslateEvent> {
-        let router = Router::new(ClaudeCli::new(
-            std::env::temp_dir().join("mytranslate-router-test"),
-            "sonnet",
-        ));
+        let router = Router::new(
+            ClaudeCli::new(std::env::temp_dir().join("mytranslate-router-test"), "sonnet"),
+            std::env::temp_dir().join("mytranslate-router-test-codex"),
+        );
         let events = Mutex::new(Vec::new());
         let req = TranslateRequest::task(Direction::JaVi, "確認しました", Keigo::Formal);
         tauri::async_runtime::block_on(router.translate(router.next_request_id(), req, routes, |e| {
@@ -367,10 +394,10 @@ mod tests {
 
     #[test]
     fn cancelling_before_the_request_starts_stops_it() {
-        let router = Router::new(ClaudeCli::new(
-            std::env::temp_dir().join("mytranslate-router-test"),
-            "sonnet",
-        ));
+        let router = Router::new(
+            ClaudeCli::new(std::env::temp_dir().join("mytranslate-router-test"), "sonnet"),
+            std::env::temp_dir().join("mytranslate-router-test-codex"),
+        );
         let id = router.next_request_id();
         router.cancel(id);
         let events = Mutex::new(Vec::new());
