@@ -4,18 +4,19 @@ import { AlertCircle, Check, CheckCircle2, ChevronDown, KeyRound, Loader2, Searc
 import { useEffect, useState, type ReactNode } from 'react'
 import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
-import { AI_NAMES, choiceLabel, defaultChoice, KEY_HELP, modelName, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
+import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, KEY_HELP, modelField, modelName, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
 import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
 import { useT } from '../../lib/i18n'
-import { useStore, type AiProvider } from '../../store'
+import { useStore, type AiProvider, type ApiProvider } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 
-const PROTOTYPE_MODELS = {
+const PROTOTYPE_MODELS: Record<ApiProvider, string[]> = {
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
   openai: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'],
 }
 
-type Keys = { openai: boolean; gemini: boolean }
+type Keys = Record<ApiProvider, boolean>
 
 /**
  * Settings > Kết nối AI. One card per AI, each usable to set up that AI without making it the default: its status,
@@ -25,7 +26,7 @@ type Keys = { openai: boolean; gemini: boolean }
 export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row: RowComponent }) {
   const { settings, updateSettings } = useStore()
   const t = useT()
-  const [keys, setKeys] = useState<Keys>({ openai: !isTauri, gemini: false })
+  const [keys, setKeys] = useState<Keys>({ anthropic: false, openai: !isTauri, gemini: false })
   const current = defaultChoice(settings)
   const [expanded, setExpanded] = useState<AiProvider | null>(current.provider)
 
@@ -64,7 +65,7 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         </span>
       </div>
 
-      {(['claude', 'openai', 'gemini'] as const).map((p) => (
+      {AI_ORDER.map((p) => (
         <ProviderCard
           key={p}
           provider={p}
@@ -93,8 +94,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
           <div className="text-[13.5px] text-ink">{t('Tự chuyển sang AI khác khi lỗi', 'エラー時に別のAIに切り替える')}</div>
           <div className="mt-0.5 text-[12px] text-ink-3">
             {t(
-              'Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini).',
-              '使用中のAIが利用枠の上限、キーの誤り、ネットワーク切断で応答できないとき、設定済みの別のAI（Claude、ChatGPT、Gemini の順）で翻訳します。',
+              'Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, Claude API, ChatGPT, rồi Gemini).',
+              '使用中のAIが利用枠の上限、キーの誤り、ネットワーク切断で応答できないとき、設定済みの別のAI（Claude、Claude API、ChatGPT、Gemini の順）で翻訳します。',
             )}
           </div>
         </div>
@@ -108,8 +109,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
         <span>
           {t(
-            'Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của OpenAI và Google mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.',
-            'メッセージの内容は選択したAIの提供元に送信されます。会社が許可する種類のアカウントを使ってください。OpenAI と Google の有料APIは既定でデータを学習に使いませんが、Gemini の無料枠は使う場合があるため、業務のメッセージには使わないでください。',
+            'Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của Anthropic, OpenAI và Google mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.',
+            'メッセージの内容は選択したAIの提供元に送信されます。会社が許可する種類のアカウントを使ってください。Anthropic、OpenAI、Google の有料APIは既定でデータを学習に使いませんが、Gemini の無料枠は使う場合があるため、業務のメッセージには使わないでください。',
           )}
         </span>
       </div>
@@ -237,15 +238,15 @@ function ClaudeBody() {
   )
 }
 
-function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemini'; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
+function ApiBody({ provider, hasKey, onKeySaved }: { provider: ApiProvider; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
   const { settings, updateSettings, showToast } = useStore()
   const t = useT()
   const [draft, setDraft] = useState('')
   const [fetched, setFetched] = useState<string[] | null>(null)
   const [filter, setFilter] = useState('')
   const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
-  const name = AI_NAMES[provider]
-  const field = provider === 'openai' ? 'openaiModel' : 'geminiModel'
+  const name = vendorName(provider)
+  const field = modelField(provider)
   const model = settings[field] || RECOMMENDED_MODELS[provider]
   const favourites = settings.aiQuickModels[provider]
 

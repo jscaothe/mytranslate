@@ -16,10 +16,11 @@ const defaultSettings: Settings = {
   defaultKeigo: 'formal',
   model: 'sonnet',
   aiProvider: 'claude',
+  anthropicModel: '',
   openaiModel: '',
   geminiModel: '',
   aiFallback: false,
-  aiQuickModels: { openai: [], gemini: [] },
+  aiQuickModels: { anthropic: [], openai: [], gemini: [] },
   hotkeys: DEFAULT_HOTKEYS,
   quickActions: {
     enabled: true,
@@ -124,6 +125,8 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
         ...rest,
         hotkeys: knownHotkeys(rest.hotkeys),
         quickActions: { ...quickActions, items: knownQuickActions(quickActions.items) },
+        // Settings saved before an AI was added lack its list.
+        aiQuickModels: { ...defaultSettings.aiQuickModels, ...rest.aiQuickModels },
       })
     }
     void invoke('settings_get')

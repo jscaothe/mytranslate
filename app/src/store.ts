@@ -6,7 +6,10 @@ export type Screen = 'playground' | 'main' | 'onboarding'
 export type MainTab = 'glossary' | 'writing' | 'settings'
 export type ThemePref = 'system' | 'light' | 'dark'
 
-export type AiProvider = 'claude' | 'openai' | 'gemini'
+/** `claude` is Claude Code (the user's Claude account); `anthropic` is Claude with an API key. */
+export type AiProvider = 'claude' | 'anthropic' | 'openai' | 'gemini'
+/** The AIs used with an API key. */
+export type ApiProvider = Exclude<AiProvider, 'claude'>
 
 /** One key translates either way (the text's language decides), one checks Japanese, one opens the main window. */
 export interface HotkeyMap {
@@ -25,12 +28,13 @@ export interface Settings {
   /** Which AI translates. Claude goes through Claude Code; ChatGPT and Gemini through their APIs. */
   aiProvider: AiProvider
   /** Model ids for the API providers; empty uses the recommended one. */
+  anthropicModel: string
   openaiModel: string
   geminiModel: string
   /** When the chosen AI fails before answering, try the others that are set up. */
   aiFallback: boolean
   /** Extra models of ChatGPT and Gemini offered in the quick switcher, besides the default one. */
-  aiQuickModels: { openai: string[]; gemini: string[] }
+  aiQuickModels: Record<ApiProvider, string[]>
   hotkeys: HotkeyMap
   /** Mini toolbar shown when text is selected with the mouse. */
   quickActions: QuickActionSettings

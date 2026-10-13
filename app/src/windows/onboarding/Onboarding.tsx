@@ -4,11 +4,11 @@ import { QuickActionBar } from '../../components/QuickActionBar'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { invoke } from '@tauri-apps/api/core'
-import { AI_NAMES, KEY_HELP, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
+import { API_PROVIDERS, KEY_HELP, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
 import { claudeStatus, isTauri, startTranslation, type ErrorKind } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { otherLang, readDirection, useLang, useT, type Lang, type T } from '../../lib/i18n'
-import { useStore, type AiProvider, type QuickActionId } from '../../store'
+import { useStore, type AiProvider, type ApiProvider, type QuickActionId } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 import { Popup } from '../popup/Popup'
 import type { PopupRequest } from '../popup/types'
@@ -127,7 +127,7 @@ function Welcome() {
 }
 
 /** The setup pages the Rust side agrees to open. */
-type HelpPage = 'claude_code' | 'openai_keys' | 'gemini_keys'
+type HelpPage = 'claude_code' | `${ApiProvider}_keys`
 
 function openHelp(page: HelpPage, showToast: (m: string) => void, t: T) {
   if (!isTauri) {
@@ -250,7 +250,7 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
         />
       </div>
       <button type="button" onClick={() => go('apikey')} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
-        <KeyRound size={14} /> {t('Nâng cao: tôi có API key (ChatGPT, Gemini)', '上級者向け: APIキーを持っている（ChatGPT、Gemini）')}
+        <KeyRound size={14} /> {t('Nâng cao: tôi có API key (Claude, ChatGPT, Gemini)', '上級者向け: APIキーを持っている（Claude、ChatGPT、Gemini）')}
       </button>
     </div>
   )
@@ -319,11 +319,11 @@ function WayCard({
 /** "Advanced": one tab per AI that takes an API key. */
 function ApiKeyTabs({ onReady }: { onReady: (ready: boolean) => void }) {
   const t = useT()
-  const [provider, setProvider] = useState<'openai' | 'gemini'>('openai')
+  const [provider, setProvider] = useState<ApiProvider>('anthropic')
   return (
     <div className="flex flex-col gap-3">
       <div role="tablist" aria-label={t('AI dùng API key', 'APIキーで使うAI')} className="flex w-max gap-1 rounded-lg bg-subtle p-[3px]">
-        {(['openai', 'gemini'] as const).map((p) => (
+        {API_PROVIDERS.map((p) => (
           <button
             key={p}
             type="button"
@@ -338,7 +338,7 @@ function ApiKeyTabs({ onReady }: { onReady: (ready: boolean) => void }) {
               provider === p ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-2 hover:text-ink',
             )}
           >
-            <AiMark provider={p} /> {AI_NAMES[p]}
+            <AiMark provider={p} /> {vendorName(p)}
           </button>
         ))}
       </div>
@@ -349,15 +349,15 @@ function ApiKeyTabs({ onReady }: { onReady: (ready: boolean) => void }) {
   )
 }
 
-/** ChatGPT or Gemini: save the API key, then one short translation proves it works and makes it the AI. */
-function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onReady: (ready: boolean) => void }) {
+/** An AI used with an API key: save the key, then one short translation proves it works and makes it the AI. */
+function ApiKeySetup({ provider, onReady }: { provider: ApiProvider; onReady: (ready: boolean) => void }) {
   const { updateSettings, showToast } = useStore()
   const t = useT()
   const lang = useLang()
   const [hasKey, setHasKey] = useState(false)
   const [draft, setDraft] = useState('')
   const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
-  const name = AI_NAMES[provider]
+  const name = vendorName(provider)
   const model = RECOMMENDED_MODELS[provider]
 
   const runTest = useCallback(() => {
@@ -380,7 +380,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
   useEffect(() => {
     if (!isTauri) return
     let alive = true
-    void invoke<{ openai: boolean; gemini: boolean }>('ai_keys_status').then((k) => {
+    void invoke<Record<ApiProvider, boolean>>('ai_keys_status').then((k) => {
       if (!alive || !k[provider]) return
       setHasKey(true)
       runTest()
@@ -436,7 +436,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
       <div className="flex min-h-6 flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
         <button
           type="button"
-          onClick={() => openHelp(provider === 'openai' ? 'openai_keys' : 'gemini_keys', showToast, t)}
+          onClick={() => openHelp(`${provider}_keys`, showToast, t)}
           className="flex items-center gap-1 text-accent hover:underline"
         >
           <ExternalLink size={13} /> {t(`Tạo API key ${name}`, `${name} の APIキーを作成`)}

@@ -1,4 +1,5 @@
-//! Which AI translates: the provider chosen in Settings (Claude Code, ChatGPT or Gemini), its model and API key,
+//! Which AI translates: the provider chosen in Settings (Claude through Claude Code, or Claude, ChatGPT, Gemini
+//! through an API key), its model and API key,
 //! and the order of fallbacks. Plus the Settings commands to save keys, list models and test a provider.
 
 use std::sync::{Arc, Mutex};
@@ -16,10 +17,12 @@ use crate::provider::claude_cli::TranslateEvent;
 use crate::provider::http_api::Api;
 use crate::settings::SettingsStore;
 
-const ORDER: [&str; 3] = ["claude", "openai", "gemini"];
+/// Provider ids: `claude` is Claude Code (the user's Claude account), `anthropic` is Claude with an API key.
+const ORDER: [&str; 4] = ["claude", "anthropic", "openai", "gemini"];
 
 fn api(id: &str) -> Option<Api> {
     match id {
+        "anthropic" => Some(Api::Anthropic),
         "openai" => Some(Api::OpenAi),
         "gemini" => Some(Api::Gemini),
         _ => None,
@@ -33,6 +36,7 @@ fn credential_name(api: Api) -> String {
 /// The settings field holding a provider's default model.
 fn model_field(id: &str) -> &'static str {
     match id {
+        "anthropic" => "anthropicModel",
         "openai" => "openaiModel",
         "gemini" => "geminiModel",
         _ => "model",
@@ -144,7 +148,7 @@ pub struct QuickChoice {
     pub provider: String,
     pub model: String,
     pub label: String,
-    /// Usable now: Claude always; ChatGPT and Gemini once a key is saved.
+    /// Usable now: Claude Code always; the API providers once a key is saved.
     pub available: bool,
     /// The current default.
     pub current: bool,
@@ -153,6 +157,7 @@ pub struct QuickChoice {
 /// Human name of a model: Claude's models by name, API models by id.
 pub fn label(provider: &str, model: &str) -> String {
     match provider {
+        "anthropic" => format!("Claude API · {model}"),
         "openai" => format!("ChatGPT · {model}"),
         "gemini" => format!("Gemini · {model}"),
         _ => match model {
@@ -162,7 +167,7 @@ pub fn label(provider: &str, model: &str) -> String {
     }
 }
 
-/// Every model offered in the quick switcher: Claude's two, and for ChatGPT and Gemini the default model plus the
+/// Every model offered in the quick switcher: Claude Code's two, and for each API provider the default model plus the
 /// favourites ticked in Settings. Kept short on purpose: the full model lists live in Settings.
 pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice> {
     let current_provider = settings
@@ -187,6 +192,7 @@ pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice
         let mut seen = std::collections::HashSet::new();
         models.retain(|m| seen.insert(m.clone()));
         let available = match id {
+            "anthropic" => keys.anthropic,
             "openai" => keys.openai,
             "gemini" => keys.gemini,
             _ => true,
@@ -253,6 +259,7 @@ pub fn prewarm(app: &AppHandle) {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyStatus {
+    anthropic: bool,
     openai: bool,
     gemini: bool,
 }
@@ -261,6 +268,7 @@ pub struct KeyStatus {
 #[tauri::command]
 pub fn ai_keys_status() -> KeyStatus {
     KeyStatus {
+        anthropic: credentials::get(&credential_name(Api::Anthropic)).is_some(),
         openai: credentials::get(&credential_name(Api::OpenAi)).is_some(),
         gemini: credentials::get(&credential_name(Api::Gemini)).is_some(),
     }
@@ -376,6 +384,7 @@ mod tests {
             "aiQuickModels": { "gemini": ["gemini-b", "gemini-a"], "openai": ["gpt-x"] }
         });
         let keys = KeyStatus {
+            anthropic: false,
             openai: false,
             gemini: true,
         };
@@ -389,6 +398,7 @@ mod tests {
             [
                 ("claude".into(), "sonnet".into(), true, false),
                 ("claude".into(), "haiku".into(), true, false),
+                ("anthropic".into(), "claude-sonnet-5-5".into(), false, false),
                 ("openai".into(), "gpt-5.6-luna".into(), false, false),
                 ("openai".into(), "gpt-x".into(), false, false),
                 ("gemini".into(), "gemini-a".into(), true, true),
@@ -396,7 +406,7 @@ mod tests {
             ]
         );
         assert_eq!(c[1].label, "Claude Haiku");
-        assert_eq!(c[5].label, "Gemini · gemini-b");
+        assert_eq!(c[6].label, "Gemini · gemini-b");
     }
 
     fn plan(settings: &Value, choice: Option<&AiChoice>) -> Vec<(String, String)> {

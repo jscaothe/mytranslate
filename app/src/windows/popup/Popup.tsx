@@ -25,7 +25,7 @@ import { diffChars, diffWords } from '../../lib/diff'
 import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
 import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
 import { useStore } from '../../store'
-import { defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
+import { AI_NAMES, AI_ORDER, defaultChoice, modelField, useQuickChoices, type AiChoice } from '../../lib/ai'
 import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
@@ -119,7 +119,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const currentAi = aiOverride ?? defaultChoice(settings)
   const answeredAi: AiChoice | null =
     // Differs from what was asked for when the chosen model or AI could not answer.
-    live.answeredBy && ['claude', 'openai', 'gemini'].includes(live.answeredBy.provider)
+    live.answeredBy && (AI_ORDER as readonly string[]).includes(live.answeredBy.provider)
       ? { provider: live.answeredBy.provider as AiChoice['provider'], model: live.answeredBy.model }
       : null
   const pickAi = (c: AiChoice) => {
@@ -967,7 +967,7 @@ function Banner({
 
 /** Display name of an AI provider id. */
 function aiName(id: string): string {
-  return id === 'openai' ? 'ChatGPT' : id === 'gemini' ? 'Gemini' : 'Claude'
+  return (AI_ORDER as readonly string[]).includes(id) ? AI_NAMES[id as AiChoice['provider']] : 'Claude'
 }
 
 function ErrorBanner({

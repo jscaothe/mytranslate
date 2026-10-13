@@ -54,6 +54,7 @@ pub fn open(app: ChatApp, lang: Lang) -> Result<(), String> {
 #[serde(rename_all = "snake_case")]
 pub enum HelpPage {
     ClaudeCode,
+    AnthropicKeys,
     OpenaiKeys,
     GeminiKeys,
 }
@@ -62,6 +63,7 @@ impl HelpPage {
     fn url(self) -> &'static str {
         match self {
             HelpPage::ClaudeCode => "https://code.claude.com/docs/en/setup",
+            HelpPage::AnthropicKeys => "https://platform.claude.com/settings/keys",
             HelpPage::OpenaiKeys => "https://platform.openai.com/api-keys",
             HelpPage::GeminiKeys => "https://aistudio.google.com/apikey",
         }
@@ -150,7 +152,7 @@ mod tests {
         let page: HelpPage = serde_json::from_value("gemini_keys".into()).unwrap();
         assert_eq!(page, HelpPage::GeminiKeys);
         assert!(serde_json::from_value::<HelpPage>("https://example.com".into()).is_err());
-        for p in [HelpPage::ClaudeCode, HelpPage::OpenaiKeys, HelpPage::GeminiKeys] {
+        for p in [HelpPage::ClaudeCode, HelpPage::AnthropicKeys, HelpPage::OpenaiKeys, HelpPage::GeminiKeys] {
             assert!(p.url().starts_with("https://"));
         }
     }
