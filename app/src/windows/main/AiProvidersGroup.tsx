@@ -195,7 +195,7 @@ function ClaudeBody() {
     let alive = true
     void claudeStatus()
       .then((s) => alive && setStatus(s))
-      .catch((e) => alive && setStatus({ path: '', version: null, error: String(e) }))
+      .catch((e) => alive && setStatus({ path: '', version: null, error: String(e), loggedIn: null }))
     return () => {
       alive = false
     }

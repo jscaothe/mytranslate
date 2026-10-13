@@ -105,6 +105,8 @@ test('the first-run guide is in Japanese and practises on a Vietnamese message',
   await page.getByRole('button', { name: '初期設定ガイド' }).click()
   await expect(page.getByRole('heading', { name: 'チャット欄で、そのまま日越翻訳' })).toBeVisible()
   await page.getByRole('button', { name: '次へ' }).click()
+  await expect(page.getByRole('heading', { name: '翻訳に使うAIを選んでください' })).toBeVisible()
+  await page.getByRole('button', { name: /Claude アカウント/ }).click()
   await expect(page.getByRole('button', { name: '次へ' })).toBeEnabled()
   await page.getByRole('button', { name: '次へ' }).click()
 

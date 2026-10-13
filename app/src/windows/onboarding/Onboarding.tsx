@@ -1,4 +1,4 @@
-import { ArrowLeftRight, Check, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, RotateCw, ShieldAlert, Terminal } from 'lucide-react'
+import { Check, ChevronLeft, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, ShieldAlert, Terminal } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
@@ -140,147 +140,210 @@ function openHelp(page: HelpPage, showToast: (m: string) => void, t: T) {
   void invoke('open_help_page', { page }).catch((e) => showToast(`${t('Không mở được trình duyệt', 'ブラウザを開けません')}: ${String(e)}`))
 }
 
+/** Where step 2 is: the three ways side by side, one account path, or the API keys under "Advanced". */
+type Route = 'choose' | 'claude' | 'apikey'
+
+/** What this PC already has, for the "Ready on this PC" badge; `null` while looking. */
+type Detected = { claude: boolean } | null
+
 /**
- * Step 2. Claude Code on this machine is used as is; without it (or when the user prefers another) the user picks
- * an AI and sets it up here. ChatGPT and Gemini need only an API key.
+ * Step 2. The ways to use an AI are shown side by side in a fixed order: the user's Claude account, their ChatGPT
+ * account, or MyTranslate's own AI for those without one; API keys are under "Advanced". What this PC already has
+ * only earns a badge, the user still picks.
  */
 function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
   const { scenario } = useStore()
   const t = useT()
-  // null while looking for Claude Code.
-  const [claudeFound, setClaudeFound] = useState<boolean | null>(null)
-  const [pick, setPick] = useState<AiProvider | null>(null)
-  const [search, setSearch] = useState(0)
+  const [route, setRoute] = useState<Route>('choose')
+  const [detected, setDetected] = useState<Detected>(null)
 
   useEffect(() => {
     let alive = true
-    const found = (yes: boolean) => {
-      if (!alive) return
-      setClaudeFound(yes)
-      setPick(yes ? 'claude' : null)
-    }
     let timer = 0
     if (isTauri) {
       void claudeStatus()
-        .then((s) => found(Boolean(s.version)))
-        .catch(() => found(false))
+        .then((s) => alive && setDetected({ claude: Boolean(s.version) && s.loggedIn === true }))
+        .catch(() => alive && setDetected({ claude: false }))
     } else {
-      timer = window.setTimeout(() => found(scenario !== 'no_claude'), 500)
+      timer = window.setTimeout(() => setDetected({ claude: scenario !== 'no_claude' && scenario !== 'not_logged_in' }), 400)
     }
     return () => {
       alive = false
       window.clearTimeout(timer)
     }
-  }, [scenario, search])
+  }, [scenario])
 
-  const choose = (p: AiProvider | null) => {
+  const go = (r: Route) => {
     onReady(false)
-    setPick(p)
+    setRoute(r)
   }
+  const back = (
+    <button type="button" onClick={() => go('choose')} className="flex items-center gap-1 self-start text-[13px] text-accent hover:underline">
+      <ChevronLeft size={15} /> {t('Chọn cách khác', '別の方法を選ぶ')}
+    </button>
+  )
 
-  if (claudeFound === null) {
-    return (
-      <div className="flex h-full items-center justify-center gap-2 text-[13.5px] text-ink-2">
-        <Loader2 size={16} className="animate-spin text-accent" /> {t('Đang tìm Claude Code trên máy này…', 'このPCで Claude Code を探しています…')}
-      </div>
-    )
-  }
-
-  if (claudeFound && pick === 'claude') {
+  if (route === 'claude') {
     return (
       <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-[17px] font-semibold">{t('Kết nối với Claude', 'Claude に接続')}</h2>
-          <p className="mt-1 text-[13.5px] text-ink-2">
-            {t(
-              'Máy này đã có Claude Code. MyTranslate dùng Claude Code đã đăng nhập, không lưu và không đọc thông tin đăng nhập của bạn.',
-              'このPCには Claude Code があります。MyTranslate はログイン済みの Claude Code を使い、ログイン情報を保存したり読み取ったりはしません。',
-            )}
-          </p>
-        </div>
+        <StepHeading
+          title={t('Dùng tài khoản Claude', 'Claude アカウントを使う')}
+          detail={t(
+            'MyTranslate dùng Claude Code, công cụ chính hãng của Anthropic, với tài khoản Claude của bạn. Lượt dịch tính vào gói Claude bạn đang trả; MyTranslate không đọc và không lưu thông tin đăng nhập.',
+            'MyTranslate は Anthropic 公式ツールの Claude Code を、お使いの Claude アカウントで利用します。翻訳はご契約中の Claude プランの利用枠で行われ、ログイン情報を読み取ったり保存したりはしません。',
+          )}
+        />
         <ClaudeCheck onReady={onReady} />
-        <button type="button" onClick={() => choose(null)} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
-          <ArrowLeftRight size={14} /> {t('Dùng ChatGPT hoặc Gemini thay cho Claude', 'Claude の代わりに ChatGPT や Gemini を使う')}
-        </button>
+        {back}
       </div>
     )
   }
 
-  const options: { id: AiProvider; detail: string }[] = [
-    {
-      id: 'claude',
-      detail: claudeFound
-        ? t('Dùng Claude Code đã cài trên máy này.', 'このPCにインストール済みの Claude Code を使います。')
-        : t('Cần cài Claude Code và có tài khoản Claude (gói Pro hoặc Max).', 'Claude Code のインストールと Claude アカウント（Pro または Max）が必要です。'),
-    },
-    { id: 'openai', detail: t('Dùng API key của OpenAI, trả tiền theo lượng dùng.', 'OpenAI の APIキーを使います。利用量に応じた従量課金です。') },
-    { id: 'gemini', detail: t('Dùng API key của Google AI Studio, có gói miễn phí.', 'Google AI Studio の APIキーを使います。無料枠があります。') },
-  ]
+  if (route === 'apikey') {
+    return (
+      <div className="flex flex-col gap-4">
+        <StepHeading
+          title={t('Dùng API key', 'APIキーを使う')}
+          detail={t(
+            'Dành cho người đã có API key. Tiền tính theo lượng dùng, trả trực tiếp cho hãng AI.',
+            'APIキーをお持ちの方向けです。利用量に応じて、AIの提供元に直接お支払いいただきます。',
+          )}
+        />
+        <ApiKeyTabs onReady={onReady} />
+        {back}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[17px] font-semibold">{t('Chọn AI để dịch', '翻訳に使うAIを選ぶ')}</h2>
-        <p className="mt-1 text-[13.5px] text-ink-2">
-          {claudeFound
-            ? t('Chọn AI bạn muốn dùng. Sau này vẫn đổi được trong Cài đặt hoặc ngay trên popup.', '使いたいAIを選んでください。あとから設定やポップアップでも変更できます。')
-            : t('Máy này chưa có Claude Code. Chọn một AI mà bạn có tài khoản.', 'このPCには Claude Code がありません。アカウントをお持ちのAIを選んでください。')}
-        </p>
+      <StepHeading
+        title={t('Bạn muốn dịch bằng AI nào?', '翻訳に使うAIを選んでください')}
+        detail={t('Chọn cách phù hợp với bạn. Sau này vẫn đổi được trong Cài đặt.', 'ご自身に合う方法を選んでください。あとから設定で変更できます。')}
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <WayCard
+          provider="claude"
+          title={t('Tài khoản Claude', 'Claude アカウント')}
+          detail={t('Dùng gói Pro, Max, Team bạn đang trả, không tốn thêm tiền.', 'ご契約中の Pro、Max、Team プランで。追加料金なし。')}
+          badge={detected?.claude ? { kind: 'ready', text: t('Sẵn sàng trên máy này', 'このPCで使えます') } : undefined}
+          onClick={() => go('claude')}
+        />
+        <WayCard
+          provider="openai"
+          title={t('Tài khoản ChatGPT', 'ChatGPT アカウント')}
+          detail={t('Dùng gói Plus, Pro, Business bạn đang trả, không tốn thêm tiền.', 'ご契約中の Plus、Pro、Business プランで。追加料金なし。')}
+          badge={{ kind: 'soon', text: t('Sắp có', '近日対応') }}
+        />
+        <div className="col-span-2 flex items-center gap-2.5 text-[12px] text-ink-3 before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+          {t('hoặc', 'または')}
+        </div>
+        <WayCard
+          provider="cloud"
+          wide
+          title={t('Tôi chưa có tài khoản AI', 'AIのアカウントを持っていない')}
+          detail={t(
+            'Dùng AI của MyTranslate: miễn phí 7 ngày, không cần thẻ; sau đó trả phí hằng tháng.',
+            'MyTranslate のAIを使います。7日間無料（カード不要）、その後は月額制です。',
+          )}
+          badge={{ kind: 'soon', text: t('Sắp có', '近日対応') }}
+        />
       </div>
-      <div role="radiogroup" aria-label={t('AI dịch', '翻訳AI')} className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
-        {options.map((o) => {
-          const selected = pick === o.id
-          return (
-            <div key={o.id}>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => choose(o.id)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-hover"
-              >
-                <span
-                  className={cx(
-                    'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                    selected ? 'border-accent bg-accent' : 'border-line-strong',
-                  )}
-                >
-                  {selected && <span className="size-1.5 rounded-full bg-on-accent" />}
-                </span>
-                <AiMark provider={o.id} className="size-6 text-[12px]" />
-                <span className="min-w-0">
-                  <span className="block text-[13.5px] font-semibold text-ink">{AI_NAMES[o.id]}</span>
-                  <span className="block text-[12.5px] text-ink-3">{o.detail}</span>
-                </span>
-              </button>
-              {selected && o.id === 'claude' && !claudeFound && <InstallClaude onRecheck={() => setSearch((n) => n + 1)} />}
-              {selected && o.id !== 'claude' && <ApiKeySetup key={o.id} provider={o.id} onReady={onReady} />}
-            </div>
-          )
-        })}
-      </div>
+      <button type="button" onClick={() => go('apikey')} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
+        <KeyRound size={14} /> {t('Nâng cao: tôi có API key (ChatGPT, Gemini)', '上級者向け: APIキーを持っている（ChatGPT、Gemini）')}
+      </button>
     </div>
   )
 }
 
-function InstallClaude({ onRecheck }: { onRecheck: () => void }) {
-  const { showToast } = useStore()
-  const t = useT()
+function StepHeading({ title, detail }: { title: string; detail: string }) {
   return (
-    <div className="flex flex-col gap-2.5 border-t border-line bg-subtle/60 px-4 py-3 text-[13px] text-ink-2">
-      <p>
-        {t(
-          'Cài Claude Code theo hướng dẫn, mở nó một lần để đăng nhập tài khoản Claude, rồi quay lại đây.',
-          '手順に沿って Claude Code をインストールし、一度起動して Claude アカウントにログインしてから、ここに戻ってください。',
+    <div>
+      <h2 className="text-[17px] font-semibold">{title}</h2>
+      <p className="mt-1 text-[13.5px] leading-relaxed text-ink-2">{detail}</p>
+    </div>
+  )
+}
+
+/** One way to use an AI. Without `onClick` it is not available yet and says so in its badge. */
+function WayCard({
+  provider,
+  title,
+  detail,
+  badge,
+  wide = false,
+  onClick,
+}: {
+  provider: AiProvider | 'cloud'
+  title: string
+  detail: string
+  badge?: { kind: 'ready' | 'soon'; text: string }
+  wide?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={cx(
+        'flex items-start gap-3 rounded-lg border border-line bg-surface px-4 py-3.5 text-left transition-colors',
+        wide && 'col-span-2',
+        onClick ? 'hover:border-line-strong hover:bg-hover/40' : 'cursor-default',
+      )}
+    >
+      {provider === 'cloud' ? (
+        <AppMark size={28} />
+      ) : (
+        <AiMark provider={provider} className={cx('size-7 rounded-md text-[14px]', !onClick && 'opacity-60')} />
+      )}
+      <span className="min-w-0">
+        <span className={cx('block text-[14.5px] font-semibold', onClick ? 'text-ink' : 'text-ink-2')}>{title}</span>
+        <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-2">{detail}</span>
+        {badge && (
+          <span
+            className={cx(
+              'mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold',
+              badge.kind === 'ready' ? 'bg-good-soft text-good' : 'bg-subtle text-ink-3',
+            )}
+          >
+            {badge.kind === 'ready' && <Check size={12} strokeWidth={3} />}
+            {badge.text}
+          </span>
         )}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => openHelp('claude_code', showToast, t)}>
-          <ExternalLink size={13} /> {t('Mở hướng dẫn cài đặt', 'インストール手順を開く')}
-        </Button>
-        <Button size="sm" onClick={onRecheck}>
-          <RotateCw size={13} /> {t('Đã cài, kiểm tra lại', 'インストールしたので再確認')}
-        </Button>
+      </span>
+    </button>
+  )
+}
+
+/** "Advanced": one tab per AI that takes an API key. */
+function ApiKeyTabs({ onReady }: { onReady: (ready: boolean) => void }) {
+  const t = useT()
+  const [provider, setProvider] = useState<'openai' | 'gemini'>('openai')
+  return (
+    <div className="flex flex-col gap-3">
+      <div role="tablist" aria-label={t('AI dùng API key', 'APIキーで使うAI')} className="flex w-max gap-1 rounded-lg bg-subtle p-[3px]">
+        {(['openai', 'gemini'] as const).map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="tab"
+            aria-selected={provider === p}
+            onClick={() => {
+              onReady(false)
+              setProvider(p)
+            }}
+            className={cx(
+              'flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[13px]',
+              provider === p ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-2 hover:text-ink',
+            )}
+          >
+            <AiMark provider={p} /> {AI_NAMES[p]}
+          </button>
+        ))}
+      </div>
+      <div className="overflow-hidden rounded-lg border border-line bg-surface">
+        <ApiKeySetup key={provider} provider={provider} onReady={onReady} />
       </div>
     </div>
   )
@@ -342,7 +405,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
   const seconds = (ms: number) => (lang === 'ja' ? (ms / 1000).toFixed(1) : (ms / 1000).toFixed(1).replace('.', ','))
 
   return (
-    <div className="flex flex-col gap-2.5 border-t border-line bg-subtle/60 px-4 py-3">
+    <div className="flex flex-col gap-2.5 px-4 py-3">
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -419,7 +482,7 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
   const { scenario, showToast, updateSettings } = useStore()
   const t = useT()
   const [attempt, setAttempt] = useState(0)
-  const failAt = scenario === 'not_logged_in' ? 1 : scenario === 'network' || scenario === 'quota' ? 2 : -1
+  const failAt = scenario === 'no_claude' ? 0 : scenario === 'not_logged_in' ? 1 : scenario === 'network' || scenario === 'quota' ? 2 : -1
   // Each check run is keyed so a retry or a scenario change starts over without resetting state in an effect.
   const runKey = `${attempt}:${failAt}`
   const [progress, setProgress] = useState<{ key: string; states: CheckState[]; details?: Record<number, string> } | null>(null)
@@ -433,7 +496,7 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
     let cancel: (() => void) | null = null
     const set = (s: CheckState[], d: Record<number, string> = {}) => alive && setProgress({ key: runKey, states: s, details: d })
     void (async () => {
-      const status = await claudeStatus().catch((e) => ({ version: null, error: String(e) }))
+      const status = await claudeStatus().catch((e) => ({ version: null, error: String(e), loggedIn: null }))
       if (!alive) return
       if (!status.version) {
         set(['fail', 'idle', 'idle'], { 0: status.error ?? t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません') })
@@ -502,6 +565,11 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
       title: t('Claude Code trên máy', 'このPCの Claude Code'),
       detail: t('Tìm thấy claude 2.x trong PATH', 'PATH に claude 2.x が見つかりました'),
       fail: t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません'),
+      action: (
+        <Button size="sm" onClick={() => openHelp('claude_code', showToast, t)}>
+          <ExternalLink size={13} /> {t('Mở hướng dẫn cài đặt', 'インストール手順を開く')}
+        </Button>
+      ),
     },
     {
       title: t('Tài khoản Claude', 'Claude アカウント'),

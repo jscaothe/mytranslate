@@ -633,28 +633,56 @@ struct ClaudeStatus {
     path: String,
     version: Option<String>,
     error: Option<String>,
+    /// From `claude auth status`; `None` when Claude Code is missing or could not tell.
+    logged_in: Option<bool>,
 }
 
-/// `claude --version`: is the CLI installed and runnable?
+/// `claude --version`: is the CLI installed and runnable? Then `claude auth status`: is it signed in? Only the
+/// yes/no is kept; the account details it prints stay with Claude Code.
 #[tauri::command]
 async fn claude_status(cli: State<'_, Arc<ClaudeCli>>) -> Result<ClaudeStatus, String> {
     let path = cli.exe().to_path_buf();
-    let mut cmd = tokio::process::Command::new(&path);
-    cmd.arg("--version").kill_on_drop(true);
-    #[cfg(windows)]
-    cmd.creation_flags(0x0800_0000);
-    let out = tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output()).await;
-    let (version, error) = match out {
-        Ok(Ok(o)) if o.status.success() => (Some(String::from_utf8_lossy(&o.stdout).trim().to_string()), None),
-        Ok(Ok(o)) => (None, Some(String::from_utf8_lossy(&o.stderr).trim().to_string())),
-        Ok(Err(e)) => (None, Some(e.to_string())),
-        Err(_) => (None, Some("claude --version did not finish in 20 s".to_string())),
+    let (version, error) = match run_quietly(&path, &["--version"]).await {
+        Ok(out) => (Some(out), None),
+        Err(e) => (None, Some(e)),
+    };
+    // Signed out, `auth status` may exit with an error and still print its JSON: read stdout either way.
+    let logged_in = match version {
+        Some(_) => output_quietly(&path, &["auth", "status"])
+            .await
+            .ok()
+            .and_then(|o| serde_json::from_slice::<serde_json::Value>(&o.stdout).ok())
+            .and_then(|v| v["loggedIn"].as_bool()),
+        None => None,
     };
     Ok(ClaudeStatus {
         path: path.display().to_string(),
         version,
         error,
+        logged_in,
     })
+}
+
+/// Runs a short CLI command without a console window; its trimmed stdout, or why it failed.
+async fn run_quietly(exe: &std::path::Path, args: &[&str]) -> Result<String, String> {
+    let o = output_quietly(exe, args).await?;
+    if o.status.success() {
+        Ok(String::from_utf8_lossy(&o.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&o.stderr).trim().to_string())
+    }
+}
+
+/// Runs a short CLI command without a console window, giving up after 20 s.
+async fn output_quietly(exe: &std::path::Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = tokio::process::Command::new(exe);
+    cmd.args(args).kill_on_drop(true);
+    #[cfg(windows)]
+    cmd.creation_flags(0x0800_0000);
+    match tokio::time::timeout(std::time::Duration::from_secs(20), cmd.output()).await {
+        Ok(result) => result.map_err(|e| e.to_string()),
+        Err(_) => Err(format!("{} {} did not finish in 20 s", exe.display(), args.join(" "))),
+    }
 }
 
 /// Teams and Slack, when installed, for the getting-started screen's "Mở Teams" / "Mở Slack".
