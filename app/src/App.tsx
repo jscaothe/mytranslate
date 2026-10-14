@@ -1,7 +1,7 @@
 import { ChevronUp, FolderOpen, Globe, Moon, Sun, Wifi } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { AppMark, Hotkey } from './components/ui'
-import { cx } from './components/styles'
+import { cx, pressable } from './components/styles'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { isTauri } from './lib/claude'
 import { comboFromEvent } from './lib/hotkeys'
@@ -189,7 +189,7 @@ function Shell() {
           aria-label={theme === 'dark' ? t('Chuyển sang giao diện sáng', 'ライトテーマに切り替え') : t('Chuyển sang giao diện tối', 'ダークテーマに切り替え')}
           title={theme === 'dark' ? t('Giao diện sáng', 'ライトテーマ') : t('Giao diện tối', 'ダークテーマ')}
           onClick={() => updateSettings({ theme: theme === 'dark' ? 'light' : 'dark' })}
-          className="flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          className={cx('flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink', pressable)}
         >
           {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
         </button>

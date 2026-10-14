@@ -70,8 +70,9 @@ pub fn copy_selection(select_all_if_empty: impl FnOnce() -> bool) -> Result<Opti
     Ok(text.filter(|t| !t.trim().is_empty()))
 }
 
-/// Brings `hwnd` back to the front and pastes `text` over its current selection.
-pub fn paste_into(hwnd: isize, text: &str) -> Result<(), CaptureError> {
+/// Brings `hwnd` back to the front and pastes `text` over its current selection. With `keep`, `text` is left on
+/// the clipboard afterwards instead of the user's own content, so it can still be pasted by hand.
+pub fn paste_into(hwnd: isize, text: &str, keep: bool) -> Result<(), CaptureError> {
     let target = HWND(hwnd as *mut _);
     unsafe {
         let _ = SetForegroundWindow(target);
@@ -79,6 +80,12 @@ pub fn paste_into(hwnd: isize, text: &str) -> Result<(), CaptureError> {
     sleep(Duration::from_millis(80));
     wait_for_modifiers_released(Duration::from_millis(350));
 
+    if keep {
+        // A normal copy this time: it may go into the clipboard history like anything the user copies.
+        set_text(text, false)?;
+        send_chord(VK_CONTROL, VK_V);
+        return Ok(());
+    }
     let saved = Snapshot::take()?;
     set_text(text, true)?;
     send_chord(VK_CONTROL, VK_V);

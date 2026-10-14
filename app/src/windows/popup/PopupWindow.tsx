@@ -12,6 +12,7 @@ interface OpenPayload {
   direction: Direction
   text: string
   origin: 'chat' | 'composer'
+  inMessageBox: boolean | null
   app: 'slack' | 'teams' | 'other'
   conversation: string
   workspace: string | null
@@ -33,6 +34,7 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
   direction: p.direction,
   source: p.text,
   origin: p.origin,
+  inMessageBox: p.inMessageBox,
   conversation: p.conversation,
   app: p.app,
   window: {
@@ -123,7 +125,7 @@ export function PopupWindow() {
       request={request}
       windowed={host}
       onClose={hide}
-      onApply={(text) => void invoke('popup_apply', { text })}
+      onApply={(text, options) => void invoke('popup_apply', { text, keep: options?.keep ?? false })}
       onPinnedChange={(p) => {
         pinned.current = p
       }}

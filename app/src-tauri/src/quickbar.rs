@@ -1,4 +1,4 @@
-//! The quick toolbar shown next to a mouse selection. It never takes the focus from the chat app: the
+//! The quick toolbar shown next to text the user selected with the mouse or with Ctrl+A. It never takes the focus from the chat app: the
 //! window is "no-activate", shown without activation, and a button press acts on the window that was in front.
 
 use std::sync::Mutex;
@@ -165,6 +165,23 @@ pub fn allowed_in_foreground(app: &AppHandle) -> bool {
 /// A selection that started at height `start_y` just ended at (x, y): show the toolbar there if the settings
 /// allow it in this app.
 pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32) {
+    let (x, y, start_y) = (f64::from(x), f64::from(y), f64::from(start_y));
+    let span = popup::Span {
+        x,
+        top: y.min(start_y),
+        bottom: y.max(start_y),
+    };
+    show(app, x, y, start_y, span);
+}
+
+/// Text selected with the keyboard (Ctrl+A) at `span`: show the toolbar above its first line, clear of the text.
+pub fn offer_span(app: &AppHandle, span: popup::Span) {
+    show(app, span.x, span.top, span.top, span);
+}
+
+/// Shows the toolbar next to (x, y), on the side away from a selection that started at height `start_y`, if the
+/// settings allow it in the app in front. Physical pixels.
+fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
     let ctx = context::foreground();
     let own = std::env::current_exe()
         .ok()
@@ -176,7 +193,7 @@ pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32) {
     let Some(window) = app.get_webview_window(LABEL) else {
         return;
     };
-    let Ok(Some(monitor)) = app.monitor_from_point(f64::from(x), f64::from(y)) else {
+    let Ok(Some(monitor)) = app.monitor_from_point(x, y) else {
         return;
     };
     let scale = monitor.scale_factor();
@@ -191,19 +208,14 @@ pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32) {
     let state = app.state::<QuickbarState>();
     let (w, h) = state.inner.lock().unwrap().size.unwrap_or(DEFAULT_SIZE);
     let (w, h) = (w * scale, h * scale);
-    let anchor = bar_anchor(work, scale, f64::from(y), f64::from(start_y), h);
-    let frame = placement::frame(work, scale, f64::from(x) - 12.0 * scale, anchor, w, h);
+    let anchor = bar_anchor(work, scale, y, start_y, h);
+    let frame = placement::frame(work, scale, x - 12.0 * scale, anchor, w, h);
     {
         let mut inner = state.inner.lock().unwrap();
         inner.visible = true;
         inner.frame = Some(frame);
         inner.target = Some(ctx);
-        let (yf, sf) = (f64::from(y), f64::from(start_y));
-        inner.span = Some(popup::Span {
-            x: f64::from(x),
-            top: yf.min(sf),
-            bottom: yf.max(sf),
-        });
+        inner.span = Some(span);
     }
     let _ = apply(&window, frame);
     if let Ok(hwnd) = window.hwnd() {

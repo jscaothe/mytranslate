@@ -66,26 +66,35 @@ test('a reply typed in Japanese from the reading popup is translated into Vietna
   await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
   await expect(popup(page).getByRole('button', { name: /返信/ }).first()).toBeEnabled()
+  await expect(popup(page).getByRole('button', { name: /返信案/ })).toHaveCount(0)
 
-  await popup(page).press('Enter')
+  await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
-  await expect(reply).toHaveAttribute('placeholder', '日本語で返信を入力…')
+  await expect(reply).toHaveAttribute('placeholder', '日本語（自動で翻訳）またはベトナム語で返信を入力…')
   await reply.fill('確認しました。本番に反映してください。')
   await reply.press('Control+Enter')
 
-  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
-  await expect(popup(page).locator('textarea[data-role=draft]')).toHaveValue(/production/)
+  const result = popup(page).locator('[data-reply-result]')
+  await expect(result.getByText('翻訳した返信')).toBeVisible()
+  await expect(result.locator('p[lang=vi]')).toContainText('production')
+  await reply.press('Enter')
+  await expect(popup(page)).toBeHidden()
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toContain('production')
 })
 
-test('suggested replies are in Vietnamese with their meaning in Japanese', async ({ page }) => {
+test('a reply written straight in Vietnamese is checked in Vietnamese', async ({ page }) => {
   await page.locator('p[lang=vi]', { hasText: 'Về lịch release tháng 11' }).click({ clickCount: 3 })
   await page.keyboard.press('Control+Alt+T')
-  await expect(popup(page).getByRole('button', { name: /返信案/ })).toBeEnabled()
-  await popup(page).press('g')
+  await expect(popup(page).getByRole('button', { name: /返信/ }).first()).toBeEnabled()
+  await popup(page).press('Control+Enter')
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('Tôi đã check lại, ko thấy lỗi nữa.')
+  await reply.press('Control+Enter')
 
-  const block = popup(page).getByText('返信案', { exact: true }).locator('..').locator('..')
-  await expect(block.locator('span[lang=vi]')).toHaveCount(3)
-  await expect(block.locator('span[lang=ja]')).toHaveCount(3)
+  const result = popup(page).locator('[data-reply-result]')
+  await expect(result.getByText('返信のチェック')).toBeVisible()
+  await expect(result.locator('[data-issue]').first()).toBeVisible()
+  await expect(popup(page).getByRole('button', { name: /修正案をコピー/ })).toBeEnabled()
 })
 
 test('the language can be switched in Settings, and the whole app follows', async ({ page }) => {

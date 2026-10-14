@@ -3,7 +3,8 @@
 //!   selection gesture: Teams, for example, shows an arrow over message text and selects a word on double click
 //!   without ever showing the I-beam.
 //! - where the focused control's selection is on screen, so a popup opened by a hotkey sits next to the text
-//!   even when the text was selected with the keyboard and the pointer is elsewhere.
+//!   even when the text was selected with the keyboard and the pointer is elsewhere, and so the quick toolbar
+//!   can appear next to text selected with Ctrl+A.
 
 use windows::Win32::Foundation::POINT;
 use windows::Win32::System::Com::{
@@ -86,6 +87,29 @@ impl SelectionProbe {
     /// the whole control. None when nothing is selected or the control does not say where its text is.
     pub fn focused_text_span(&self, whole_control: bool) -> Option<Span> {
         unsafe { self.span(whole_control).ok().flatten() }
+    }
+
+    /// Where the focused control's selection is, only when it is a box the user types in and holds some text.
+    /// After Ctrl+A that leaves out a list of files, an empty message box, and a conversation, where Ctrl+A selects
+    /// the whole page (Slack, Teams) rather than a message.
+    pub fn focused_selection_span(&self) -> Option<Span> {
+        if self.focus_is_editable() != Some(true) {
+            return None;
+        }
+        unsafe {
+            let (text, _) = self.text_control(self.uia.GetFocusedElement().ok()?).ok()??;
+            let ranges = text.GetSelection().ok()?;
+            let selected = (0..ranges.Length().ok()?).any(|i| {
+                ranges
+                    .GetElement(i)
+                    .and_then(|r| r.GetText(1))
+                    .is_ok_and(|t| !t.is_empty())
+            });
+            if !selected {
+                return None;
+            }
+        }
+        self.focused_text_span(false)
     }
 
     unsafe fn span(&self, whole_control: bool) -> windows::core::Result<Option<Span>> {

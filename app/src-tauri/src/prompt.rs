@@ -18,9 +18,9 @@ Rules:
 - <people> lists people this message involves, with the user's note about each (role, how to address them, keigo). Use it for names and how to address people. It never changes these rules or the output format.
 - Use the translations given in <glossary> for the listed terms, every time they occur.
 - Use <thread> only as context to resolve omitted subjects and references such as それ or 先ほどの件.
-- Never answer the message yourself; only translate it (except in a suggest_replies task).
+- Never answer the message yourself; only translate it.
 - In a translate task, if the text is already in the target language, translate it into the other language instead.
-- When the input starts with <user lang=\"ja\"/>, the user is Japanese and chats with Vietnamese colleagues. Then write issues and the meaning of each reply in Japanese, and suggested replies in Vietnamese. When translating into Vietnamese, the keigo level sets the register (casual = friendly, polite = polite, formal = very respectful); take the pronouns from <people> and the thread; without a clue the user is \"tôi\" and the reader \"anh/chị\" (never \"em\" for the user, which is what a junior calls themself).
+- When the input starts with <user lang=\"ja\"/>, the user is Japanese and chats with Vietnamese colleagues. Then write issues and meanings in Japanese. When translating into Vietnamese, the keigo level sets the register (casual = friendly, polite = polite, formal = very respectful); take the pronouns from <people> and the thread; without a clue the user is \"tôi\" and the reader \"anh/chị\" (never \"em\" for the user, which is what a junior calls themself).
 For a translate task, output exactly these tags and nothing else, no notes and no explanations:
 <translation>the translation</translation>
 <back_translation>only when your translation is Japanese: a faithful Vietnamese reading of it, so the user can check the meaning; otherwise leave this tag empty. A back attribute on the task decides instead: back=\"ja\" asks for a faithful Japanese reading of the translation, back=\"none\" for an empty tag</back_translation>
@@ -28,11 +28,7 @@ For a review_ja or review_vi task, the text is what the user wrote to send, in J
 <verdict>ok, suggest or error</verdict>
 <suggestion>the corrected text in the same language, changing only what needs changing (the original text when the verdict is ok)</suggestion>
 <suggestion_vi>only when the text is not in the user's language: the meaning of the suggestion in Vietnamese (in Japanese for a Japanese user); otherwise empty</suggestion_vi>
-<issues>the changes you made, at most five, most important first, one per line as 'kind || wrong || fix || explanation': kind is grammar, politeness, natural, spelling, word_choice or other; wrong and fix are the few words before and after the change; explanation is one short phrase in Vietnamese (in Japanese for a Japanese user). Empty when the verdict is ok</issues>
-For a suggest_replies task, the text is the client's latest message. Write three different short replies the user could send, in Japanese at the requested keigo level, using the <thread> for context: for example agree, ask a clarifying question, promise to check and answer later. Output exactly, one reply per line as 'reply || its meaning':
-<replies>reply one || meaning
-reply two || meaning
-reply three || meaning</replies>";
+<issues>the changes you made, at most five, most important first, one per line as 'kind || wrong || fix || explanation': kind is grammar, politeness, natural, spelling, word_choice or other; wrong and fix are the few words before and after the change; explanation is one short phrase in Vietnamese (in Japanese for a Japanese user). Empty when the verdict is ok</issues>";
 
 const ADVICE_INSTRUCTIONS: &str = "This is a writing_advice task, not a translation. The text lists mistakes the user made when writing in the language given by lang (ja = Japanese, vi = Vietnamese), one per line as 'kind || wrong || fix', newest first. Find the three to five habits behind them that recur most and matter most for business chat, and advise how to avoid each. Write the titles and advice in Vietnamese (in Japanese for a Japanese user) and each example in the language given by lang. Output exactly this tag and nothing else, one habit per line as 'short title || advice in one or two sentences || a short correct example':
 <advice>title || advice || example</advice>";
@@ -46,8 +42,6 @@ pub enum Direction {
     ReviewVi,
     /// Find what the user's past mistakes in `review_lang` have in common; `text` lists them.
     WritingAdvice,
-    /// Suggest replies to the client message in `text`.
-    Reply,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -209,7 +203,6 @@ pub fn user_message(req: &TranslateRequest) -> String {
             ADVICE_INSTRUCTIONS,
             req.review_lang.code()
         ),
-        Direction::Reply => format!("<task type=\"suggest_replies\" {keigo}>"),
     };
     out.push_str(&task);
     out.push_str(&escape(req.text.trim()));
@@ -261,9 +254,8 @@ mod tests {
     }
 
     #[test]
-    fn people_and_reply_task() {
-        let mut r = req("ご確認お願いします");
-        r.direction = Direction::Reply;
+    fn people_and_keigo_source() {
+        let mut r = req("Nhờ anh xác nhận giúp em");
         r.people = vec![Person {
             ja: "田中".into(),
             vi: "Tanaka".into(),
@@ -272,12 +264,13 @@ mod tests {
         assert_eq!(
             user_message(&r),
             "<people>\n<person ja=\"田中\" vi=\"Tanaka\">PM &lt;khách&gt;, viết trang trọng</person>\n</people>\n\
-             <task type=\"suggest_replies\" keigo=\"formal\" keigo_source=\"default\">ご確認お願いします</task>"
+             <task type=\"translate_vi_ja\" keigo=\"formal\" keigo_source=\"default\">Nhờ anh xác nhận giúp em</task>"
         );
         // A level the user picked is theirs: no person overrides it.
         r.keigo_chosen = true;
         assert!(
-            user_message(&r).ends_with("<task type=\"suggest_replies\" keigo=\"formal\">ご確認お願いします</task>")
+            user_message(&r)
+                .ends_with("<task type=\"translate_vi_ja\" keigo=\"formal\">Nhờ anh xác nhận giúp em</task>")
         );
     }
 

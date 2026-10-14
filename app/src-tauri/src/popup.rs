@@ -74,6 +74,9 @@ pub struct OpenPayload {
     pub direction: Direction,
     pub text: String,
     pub origin: Origin,
+    /// Whether the text was selected in a box the user can type in: `None` when UI Automation could not tell.
+    /// A reply written in the popup replaces such text, whichever way it was translated.
+    pub in_message_box: Option<bool>,
     pub app: ChatApp,
     pub conversation: String,
     pub workspace: Option<String>,
@@ -331,6 +334,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
             direction,
             text,
             origin,
+            in_message_box,
             app: ctx.app,
             conversation: ctx.conversation,
             workspace: ctx.workspace,
@@ -541,12 +545,14 @@ pub fn popup_hide(app: AppHandle) {
     }
 }
 
-/// Replaces the selection in the window the text came from.
+/// Replaces the selection in the window the text came from. With `keep`, the text also stays on the clipboard,
+/// for when it is not known whether the selection can be typed over.
 #[tauri::command]
-pub async fn popup_apply(app: AppHandle, text: String) -> Result<(), String> {
+pub async fn popup_apply(app: AppHandle, text: String, keep: Option<bool>) -> Result<(), String> {
     popup_hide(app.clone());
     let hwnd = app.state::<PopupState>().inner.lock().unwrap().target_hwnd;
-    tauri::async_runtime::spawn_blocking(move || capture::paste_into(hwnd, &text))
+    let keep = keep.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || capture::paste_into(hwnd, &text, keep))
         .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())

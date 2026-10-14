@@ -1,7 +1,7 @@
 import { Minus, Square, X } from 'lucide-react'
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 import { useT } from '../lib/i18n'
-import { cx } from './styles'
+import { cx, pressable } from './styles'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
 
@@ -16,12 +16,15 @@ export function Button({
     <button
       type="button"
       className={cx(
-        'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md font-medium whitespace-nowrap transition-colors disabled:cursor-not-allowed disabled:opacity-50',
+        // One look for every button: the main action (usually Enter) differs only by its bolder label and key.
+        'inline-flex shrink-0 items-center justify-center gap-1.5 rounded-md whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50 disabled:active:scale-100',
+        pressable,
         size === 'sm' ? 'h-7 px-2.5 text-[12.5px]' : 'h-8 px-3 text-[13px]',
-        variant === 'primary' && 'bg-accent text-on-accent hover:bg-accent-hover',
-        variant === 'secondary' && 'border border-line bg-surface text-ink hover:bg-hover',
+        variant !== 'ghost' && 'border border-line bg-surface hover:bg-hover',
+        variant === 'primary' ? 'font-semibold text-ink' : 'font-medium',
+        variant === 'secondary' && 'text-ink',
         variant === 'ghost' && 'text-ink-2 hover:bg-hover hover:text-ink',
-        variant === 'danger' && 'bg-bad text-white hover:opacity-90',
+        variant === 'danger' && 'text-bad',
         className,
       )}
       {...rest}
@@ -44,7 +47,8 @@ export function IconButton({
       aria-label={label}
       title={label}
       className={cx(
-        'inline-flex size-7 shrink-0 items-center justify-center rounded-md transition-colors',
+        'inline-flex size-7 shrink-0 items-center justify-center rounded-md',
+        pressable,
         active ? 'bg-accent-soft text-accent' : 'text-ink-2 hover:bg-hover hover:text-ink',
         className,
       )}

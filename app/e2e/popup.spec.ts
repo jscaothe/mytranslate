@@ -50,21 +50,126 @@ test('a message of several lines keeps its lines in the reading back', async ({ 
   expect((await back.innerText()).split('\n')).toHaveLength(2)
 })
 
-test('a Japanese message is translated and Claude suggests replies that can be copied', async ({ page }) => {
+const clipboard = (page: Page) => page.evaluate(() => navigator.clipboard.readText())
+
+/** Opens the popup on the first Japanese message and waits for its translation. */
+async function readFirstMessage(page: Page) {
   await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
   await page.keyboard.press('Control+Alt+T')
-
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
-  const suggest = popup(page).getByRole('button', { name: /Gợi ý/ })
-  await expect(suggest).toBeEnabled()
-  await popup(page).press('g')
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
+}
 
-  const block = popup(page).getByText('Gợi ý trả lời').locator('..').locator('..')
-  await expect(block.locator('span[lang=ja]')).toHaveCount(3)
-  const first = await block.locator('span[lang=ja]').first().textContent()
-  await block.locator('span[lang=ja]').first().click()
-  await expect(page.getByRole('status').filter({ hasText: 'Đã sao chép câu trả lời' })).toBeVisible()
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(first)
+test('Enter copies the translation of a Japanese message, with no reply suggestions any more', async ({ page }) => {
+  await readFirstMessage(page)
+  await expect(popup(page).getByRole('button', { name: /Gợi ý/ })).toHaveCount(0)
+  const translation = await popup(page).locator('p[lang=vi]').first().innerText()
+  await popup(page).press('Enter')
+  await expect(popup(page)).toBeHidden()
+  expect(await clipboard(page)).toBe(translation)
+})
+
+test('Ctrl+Enter replies to a message; Enter translates the Vietnamese reply and copies it', async ({ page }) => {
+  await readFirstMessage(page)
+  await popup(page).press('Control+Enter')
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await expect(reply).toBeFocused()
+  await reply.fill('Em đã sửa xong rồi ạ')
+  // A message in the conversation cannot be typed over: the reply is copied.
+  await expect(popup(page).getByRole('button', { name: /^Sao chép/ })).toBeEnabled()
+  await reply.press('Enter')
+  await expect(popup(page)).toBeHidden()
+  expect(await clipboard(page)).toMatch(/[ぁ-んァ-ン一-龯]/)
+})
+
+test('Shift+Enter starts a new line in the reply and Escape leaves the reply first', async ({ page }) => {
+  await readFirstMessage(page)
+  await popup(page).press('Control+Enter')
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('Dòng một')
+  await reply.press('Shift+Enter')
+  await reply.pressSequentially('Dòng hai')
+  await expect(reply).toHaveValue('Dòng một\nDòng hai')
+  await reply.press('Escape')
+  await expect(reply).toHaveCount(0)
+  await expect(popup(page)).toBeVisible()
+  await popup(page).press('Escape')
+  await expect(popup(page)).toBeHidden()
+})
+
+test('a reply to Japanese in the message box is checked with Ctrl+Enter and replaces it with Enter', async ({ page }) => {
+  await composer(page).fill('仕訳の入力画面でエラーが出ています。')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
+  await popup(page).press('Control+Enter')
+
+  // Written straight in Japanese: checked in Japanese, not translated.
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('明日までに確認してください')
+  await reply.press('Control+Enter')
+  const result = popup(page).locator('[data-reply-result]')
+  await expect(result.getByText('Kiểm tra câu trả lời')).toBeVisible()
+  await expect(result.locator('[data-issue=politeness]')).toContainText('Kính ngữ')
+  const use = popup(page).getByRole('button', { name: /Thay bằng câu đã sửa/ })
+  await expect(use).toBeEnabled()
+
+  // Keeping one's own sentence is one click away; Enter still works from the reply box afterwards.
+  await result.getByRole('checkbox').check()
+  await expect(popup(page).getByRole('button', { name: /^Thay vào ô chat/ })).toBeEnabled()
+  await result.getByRole('checkbox').uncheck()
+  await expect(reply).toBeFocused()
+  await reply.press('Enter')
+  await expect(popup(page)).toBeHidden()
+  const replaced = await composer(page).inputValue()
+  expect(replaced).not.toBe('明日までに確認してください')
+  expect(replaced).toContain('確認')
+})
+
+test('a Vietnamese reply is translated by the check, read back, and Enter puts the Japanese in the box', async ({ page }) => {
+  await composer(page).fill('仕訳の入力画面でエラーが出ています。')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
+  await popup(page).press('Control+Enter')
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('Em sẽ kiểm tra và báo lại anh trong hôm nay')
+  await reply.press('Control+Enter')
+
+  const result = popup(page).locator('[data-reply-result]')
+  await expect(result.getByText('Câu trả lời đã dịch')).toBeVisible()
+  await expect(result.getByText('Ý nghĩa khi đọc lại')).toBeVisible()
+  const japanese = await result.locator('p[lang=ja]').innerText()
+
+  // Changing the reply after the check marks the result as out of date.
+  await reply.press('End')
+  await reply.pressSequentially(' ạ')
+  await expect(popup(page).getByText(/Bạn đã sửa câu trả lời/)).toBeVisible()
+  await reply.press('Backspace')
+  await reply.press('Backspace')
+  await expect(popup(page).getByText(/Bạn đã sửa câu trả lời/)).toHaveCount(0)
+
+  await reply.press('Enter')
+  await expect(popup(page)).toBeHidden()
+  await expect(composer(page)).toHaveValue(japanese)
+})
+
+test('Ctrl+A on text in the message box offers the toolbar, and the next key puts it away', async ({ page }) => {
+  await composer(page).fill('Em đã sửa xong rồi ạ')
+  await composer(page).press('Control+a')
+  const bar = page.locator('[data-quick-bar]')
+  await expect(bar).toBeVisible()
+  await page.keyboard.press('ArrowRight')
+  await expect(bar).toBeHidden()
+
+  // An empty box has nothing to offer.
+  await composer(page).fill('')
+  await composer(page).press('Control+a')
+  await expect(bar).toBeHidden()
+
+  await composer(page).fill('Em đã sửa xong rồi ạ')
+  await composer(page).press('Control+a')
+  await bar.getByRole('button', { name: /Dịch/ }).first().click()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
 })
 
 test('Japanese in the composer is reviewed and the suggestion replaces it', async ({ page }) => {

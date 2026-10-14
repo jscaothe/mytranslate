@@ -23,13 +23,15 @@ export interface WindowedHost {
   startResize: (direction: ResizeDirection) => void
 }
 
-export type PopupOrigin = 'chat' | 'composer' | 'popup' | 'onboarding'
+export type PopupOrigin = 'chat' | 'composer' | 'onboarding'
 
 export interface PopupRequest {
   id: number
   direction: Direction
   source: string
   origin: PopupOrigin
+  /** Whether the text was selected in a box the user can type in; `null` when the app could not tell. */
+  inMessageBox: boolean | null
   /** The chat the text came from, as shown in the popup's title bar (the prototype; the real app uses `window`). */
   conversation: string
   app: ChatApp | 'other'
