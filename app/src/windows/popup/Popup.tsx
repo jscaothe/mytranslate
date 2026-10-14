@@ -301,23 +301,29 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const runReply = (text: string, purpose: ReplyRun['purpose']) =>
     setReplyRun((r) => ({ seq: (r?.seq ?? 0) + 1, text, purpose, direction: replyDirection(text) }))
 
-  const checkReply = () => {
+  /** The step Enter takes now that a step's result is not on screen: translate the reply, or check it. */
+  const replyTranslates = replyDirection(replyText.trim()) === writeDirection(lang)
+
+  /** Enter, one step at a time: translate (or check), then use what that showed. */
+  const nextReplyStep = () => {
     const text = replyText.trim()
-    if (!text || replyBusy || replyChecked) return
+    if (!text || replyBusy) return
+    if (replyChecked) return deliverReply(replyResult)
     setKeepOwn(false)
     runReply(text, 'check')
   }
 
-  const sendReply = () => {
+  /** Ctrl+Enter, without stopping to look: what is on screen, or the reply translated (or as written) at once. */
+  const sendReplyNow = () => {
     const text = replyText.trim()
     if (!text || replyBusy) return
     if (replyChecked) return deliverReply(replyResult)
     // Already in the other side's language: nothing to translate.
-    if (replyDirection(text) !== writeDirection(lang)) return deliverReply(text)
+    if (!replyTranslates) return deliverReply(text)
     runReply(text, 'use')
   }
 
-  // Enter on a reply in the user's language: translated, then used straight away.
+  // Ctrl+Enter on a reply in the user's language: translated, then used straight away.
   const delivered = useRef(false)
   useEffect(() => {
     if (replyRun?.purpose !== 'use' || replyLive.phase !== 'done' || delivered.current) return
@@ -350,8 +356,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       // Enter while an input method (the Japanese IME) is composing confirms the word; Shift+Enter is a new line.
       if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        if (e.ctrlKey) checkReply()
-        else sendReply()
+        if (e.ctrlKey) sendReplyNow()
+        else nextReplyStep()
       }
       return
     }
@@ -583,7 +589,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         )}
         {replyMode && replyRun?.purpose === 'check' && replyStale && !replyBusy && (
           <p className="px-4 pb-2 text-[12px] text-warn">
-            {t('Bạn đã sửa câu trả lời: Ctrl+Enter để kiểm tra lại, hoặc Enter để dùng luôn.', '返信が変更されました。Ctrl+Enter で再チェック、Enter でそのまま使えます。')}
+            {replyTranslates
+              ? t('Bạn đã sửa câu trả lời: Enter để dịch lại, hoặc Ctrl+Enter để dùng luôn.', '返信が変更されました。Enter で翻訳し直し、Ctrl+Enter でそのまま使えます。')
+              : t('Bạn đã sửa câu trả lời: Enter để kiểm tra lại, hoặc Ctrl+Enter để dùng luôn.', '返信が変更されました。Enter で再チェック、Ctrl+Enter でそのまま使えます。')}
           </p>
         )}
         {resultReady && live.answeredBy?.fallbackFrom && (
@@ -637,17 +645,34 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
                 </button>
               </p>
               <div className="ml-auto flex shrink-0 items-center gap-2">
-                <Button size="sm" disabled={!replyText.trim() || replyBusy || replyChecked} onClick={checkReply}>
-                  <SpellCheck size={14} /> {t('Kiểm tra', 'チェック')} <Kbd>Ctrl+Enter</Kbd>
-                </Button>
-                <Button size="sm" variant="primary" disabled={!replyText.trim() || replyBusy} onClick={sendReply}>
-                  {replyReplaces
-                    ? replyFixed
-                      ? t('Thay bằng câu đã sửa', '修正案で置き換え')
-                      : t('Thay vào ô chat', '入力欄に貼り付け')
-                    : replyFixed
-                      ? t('Sao chép câu đã sửa', '修正案をコピー')
-                      : t('Sao chép', 'コピー')}{' '}
+                {/* Until a step's result is on screen, Ctrl+Enter skips looking at it; afterwards Enter does the same. */}
+                {!replyChecked && (
+                  <Button size="sm" disabled={!replyText.trim() || replyBusy} onClick={sendReplyNow}>
+                    {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Sao chép ngay', 'すぐコピー')} <Kbd>Ctrl+Enter</Kbd>
+                  </Button>
+                )}
+                <Button size="sm" variant="primary" disabled={!replyText.trim() || replyBusy} onClick={nextReplyStep}>
+                  {!replyChecked ? (
+                    replyTranslates ? (
+                      <>
+                        <Languages size={14} /> {t('Dịch', '翻訳')}
+                      </>
+                    ) : (
+                      <>
+                        <SpellCheck size={14} /> {t('Kiểm tra', 'チェック')}
+                      </>
+                    )
+                  ) : replyReplaces ? (
+                    replyFixed ? (
+                      t('Thay bằng câu đã sửa', '修正案で置き換え')
+                    ) : (
+                      t('Thay vào ô chat', '入力欄に貼り付け')
+                    )
+                  ) : replyFixed ? (
+                    t('Sao chép câu đã sửa', '修正案をコピー')
+                  ) : (
+                    t('Sao chép', 'コピー')
+                  )}{' '}
                   <Kbd>↵</Kbd>
                 </Button>
               </div>

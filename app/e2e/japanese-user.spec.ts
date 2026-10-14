@@ -72,7 +72,7 @@ test('a reply typed in Japanese from the reading popup is translated into Vietna
   const reply = popup(page).locator('textarea[data-role=reply]')
   await expect(reply).toHaveAttribute('placeholder', '日本語（自動で翻訳）またはベトナム語で返信を入力…')
   await reply.fill('確認しました。本番に反映してください。')
-  await reply.press('Control+Enter')
+  await reply.press('Enter')
 
   const result = popup(page).locator('[data-reply-result]')
   await expect(result.getByText('翻訳した返信')).toBeVisible()
@@ -89,7 +89,7 @@ test('a reply written straight in Vietnamese is checked in Vietnamese', async ({
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
   await reply.fill('Tôi đã check lại, ko thấy lỗi nữa.')
-  await reply.press('Control+Enter')
+  await reply.press('Enter')
 
   const result = popup(page).locator('[data-reply-result]')
   await expect(result.getByText('返信のチェック')).toBeVisible()

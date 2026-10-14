@@ -69,15 +69,33 @@ test('Enter copies the translation of a Japanese message, with no reply suggesti
   expect(await clipboard(page)).toBe(translation)
 })
 
-test('Ctrl+Enter replies to a message; Enter translates the Vietnamese reply and copies it', async ({ page }) => {
+test('Ctrl+Enter replies to a message; Enter translates the Vietnamese reply, shows it, then copies it', async ({ page }) => {
   await readFirstMessage(page)
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
   await expect(reply).toBeFocused()
   await reply.fill('Em đã sửa xong rồi ạ')
-  // A message in the conversation cannot be typed over: the reply is copied.
+  await expect(popup(page).getByRole('button', { name: /^Dịch/ })).toBeEnabled()
+
+  // First Enter: the Japanese to send, with its meaning read back.
+  await reply.press('Enter')
+  const result = popup(page).locator('[data-reply-result]')
+  await expect(result.getByText('Ý nghĩa khi đọc lại')).toBeVisible()
+  const japanese = await result.locator('p[lang=ja]').innerText()
+  // A message in the conversation cannot be typed over: the second Enter copies it.
   await expect(popup(page).getByRole('button', { name: /^Sao chép/ })).toBeEnabled()
   await reply.press('Enter')
+  await expect(popup(page)).toBeHidden()
+  expect(await clipboard(page)).toBe(japanese)
+})
+
+test('Ctrl+Enter in the reply skips looking: the Vietnamese reply is translated and copied at once', async ({ page }) => {
+  await readFirstMessage(page)
+  await popup(page).press('Control+Enter')
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('Em đã sửa xong rồi ạ')
+  await expect(popup(page).getByRole('button', { name: /Sao chép ngay/ })).toBeEnabled()
+  await reply.press('Control+Enter')
   await expect(popup(page)).toBeHidden()
   expect(await clipboard(page)).toMatch(/[ぁ-んァ-ン一-龯]/)
 })
@@ -100,7 +118,7 @@ test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the H�
   await expect(popup(page)).toBeVisible()
 })
 
-test('a reply to Japanese in the message box is checked with Ctrl+Enter and replaces it with Enter', async ({ page }) => {
+test('a Japanese reply to Japanese in the message box is checked with Enter and replaces it with Enter', async ({ page }) => {
   await composer(page).fill('仕訳の入力画面でエラーが出ています。')
   await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
@@ -110,7 +128,8 @@ test('a reply to Japanese in the message box is checked with Ctrl+Enter and repl
   // Written straight in Japanese: checked in Japanese, not translated.
   const reply = popup(page).locator('textarea[data-role=reply]')
   await reply.fill('明日までに確認してください')
-  await reply.press('Control+Enter')
+  await expect(popup(page).getByRole('button', { name: /^Kiểm tra/ })).toBeEnabled()
+  await reply.press('Enter')
   const result = popup(page).locator('[data-reply-result]')
   await expect(result.getByText('Kiểm tra câu trả lời')).toBeVisible()
   await expect(result.locator('[data-issue=politeness]')).toContainText('Kính ngữ')
@@ -129,14 +148,14 @@ test('a reply to Japanese in the message box is checked with Ctrl+Enter and repl
   expect(replaced).toContain('確認')
 })
 
-test('a Vietnamese reply is translated by the check, read back, and Enter puts the Japanese in the box', async ({ page }) => {
+test('a Vietnamese reply is translated with Enter, read back, and Enter again puts the Japanese in the box', async ({ page }) => {
   await composer(page).fill('仕訳の入力画面でエラーが出ています。')
   await page.keyboard.press('Control+Alt+T')
   await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
   await reply.fill('Em sẽ kiểm tra và báo lại anh trong hôm nay')
-  await reply.press('Control+Enter')
+  await reply.press('Enter')
 
   const result = popup(page).locator('[data-reply-result]')
   await expect(result.getByText('Câu trả lời đã dịch')).toBeVisible()
