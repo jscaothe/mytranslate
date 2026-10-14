@@ -1,9 +1,13 @@
 // Builds a release that installed apps can update to, and lays out the files to publish.
 //
-//   node scripts/release.mjs [--url <folder URL>] [--notes "Có gì mới"] [--config <json>] [--publish]
+//   node scripts/release.mjs [--channel staging] [--url <folder URL>] [--notes "Có gì mới"] [--config <json>] [--publish]
 //
 // --url is the folder the files will be published at; the app looks for `<url>latest.json`. It defaults to the
 // team's Cloudflare R2 bucket. --publish uploads the files there with wrangler (run `npx wrangler login` once).
+// --channel staging builds "MyTranslate Staging" (tauri.staging.conf.json), which installs beside the stable app,
+// keeps its own data and updates from `staging/` in the bucket. Its version is the stable one with
+// `-staging.<number of commits>`, so each staging build updates the one before. Only the NSIS installer is built:
+// an MSI cannot carry a pre-release version.
 // The updater private key is read from TAURI_SIGNING_PRIVATE_KEY, or from %USERPROFILE%\.tauri\mytranslate-updater.key.
 // Output: release/<version>/ with the installers, their signatures and latest.json. Publish the whole folder
 // content at --url (the version folder keeps old releases apart).
@@ -22,18 +26,36 @@ const R2_URL = 'https://pub-69dc6a2e1f5e440cba0e4352a80177f8.r2.dev/'
 const R2_ACCOUNT = 'c74342fd8c0005fcf5e2ec19a612d485'
 const R2_BUCKET = 'mytranslate-releases'
 
-let url = arg('--url') ?? process.env.MYTRANSLATE_RELEASE_URL ?? R2_URL
+const channel = arg('--channel') ?? 'stable'
+if (channel !== 'stable' && channel !== 'staging') {
+  console.error('--channel is stable or staging')
+  process.exit(2)
+}
+const staging = channel === 'staging'
+// Where the channel lives in the bucket: the stable release at the top, staging in its own folder.
+const prefix = staging ? 'staging/' : ''
+const channelUrl = `${R2_URL}${prefix}`
+
+let url = arg('--url') ?? process.env.MYTRANSLATE_RELEASE_URL ?? channelUrl
 if (!url.endsWith('/')) url += '/'
 const publish = args.includes('--publish')
-if (publish && url !== R2_URL) {
-  console.error(`--publish uploads to the R2 bucket, so --url must be ${R2_URL}`)
+if (publish && url !== channelUrl) {
+  console.error(`--publish uploads to the R2 bucket, so --url must be ${channelUrl}`)
   process.exit(2)
 }
 const notes = arg('--notes') ?? ''
-const extraConfig = arg('--config')
 
-const conf = JSON.parse(readFileSync(join(app, 'src-tauri', 'tauri.conf.json'), 'utf8'))
-const version = extraConfig ? (JSON.parse(extraConfig).version ?? conf.version) : conf.version
+const readJson = (file) => JSON.parse(readFileSync(join(app, 'src-tauri', file), 'utf8'))
+const conf = readJson('tauri.conf.json')
+let config = arg('--config') ? JSON.parse(arg('--config')) : null
+if (staging) {
+  const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: app, encoding: 'utf8' }).trim()
+  const { $schema, ...overlay } = readJson('tauri.staging.conf.json')
+  config = { ...overlay, version: `${conf.version}-staging.${commits}`, ...config }
+}
+const extraConfig = config ? JSON.stringify(config) : undefined
+const version = config?.version ?? conf.version
+const productName = config?.productName ?? conf.productName
 
 const env = { ...process.env, MYTRANSLATE_UPDATE_URL: `${url}latest.json` }
 if (!env.TAURI_SIGNING_PRIVATE_KEY) {
@@ -46,7 +68,7 @@ if (!env.TAURI_SIGNING_PRIVATE_KEY) {
 }
 env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD ??= ''
 
-console.log(`Building MyTranslate ${version}, updates from ${url}latest.json`)
+console.log(`Building ${productName} ${version}, updates from ${url}latest.json`)
 // Passed as a file, so the JSON never goes through a shell.
 const configFile = join(app, 'release', 'build-config.json')
 if (extraConfig) {
@@ -66,8 +88,9 @@ const pick = (dir, suffix) => {
   return f
 }
 const setup = pick('nsis', '-setup.exe')
-const msi = pick('msi', '.msi')
-for (const [dir, f] of [['nsis', setup], ['nsis', `${setup}.sig`], ['msi', msi]]) copyFileSync(join(bundle, dir, f), join(out, f))
+const msi = staging ? null : pick('msi', '.msi')
+const files = [['nsis', setup], ['nsis', `${setup}.sig`], ...(msi ? [['msi', msi]] : [])]
+for (const [dir, f] of files) copyFileSync(join(bundle, dir, f), join(out, f))
 
 // The NSIS installer is what the updater runs: per user, no administrator rights needed.
 const manifest = {
@@ -84,7 +107,7 @@ const manifest = {
 writeFileSync(join(app, 'release', 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`)
 if (!publish) {
   console.log(`\nPublish the content of ${join(app, 'release')} at ${url}:`)
-  console.log(`  latest.json\n  ${version}/${setup}\n  ${version}/${msi}`)
+  console.log(`  latest.json\n  ${version}/${setup}${msi ? `\n  ${version}/${msi}` : ''}`)
   process.exit(0)
 }
 
@@ -98,6 +121,6 @@ const put = (key, file, contentType, extra = []) => {
   const npx = join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npx-cli.js')
   execFileSync(process.execPath, [npx, '--yes', ...cmd], { cwd: app, env: wranglerEnv, stdio: 'inherit' })
 }
-for (const f of [setup, msi]) put(`${version}/${f}`, join(out, f), 'application/octet-stream')
-put('latest.json', join(app, 'release', 'latest.json'), 'application/json', ['--cache-control', 'no-cache'])
+for (const f of [setup, msi].filter(Boolean)) put(`${prefix}${version}/${f}`, join(out, f), 'application/octet-stream')
+put(`${prefix}latest.json`, join(app, 'release', 'latest.json'), 'application/json', ['--cache-control', 'no-cache'])
 console.log(`\nPublished ${version}: ${url}latest.json`)

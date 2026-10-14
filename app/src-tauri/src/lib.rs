@@ -6,6 +6,7 @@ mod credentials;
 mod dates;
 mod history;
 mod hotkeys;
+mod identity;
 pub mod lang;
 mod placement;
 mod popup;
@@ -774,7 +775,7 @@ fn is_installed() -> bool {
     let (Ok(exe), Some(local)) = (std::env::current_exe(), std::env::var_os("LOCALAPPDATA")) else {
         return false;
     };
-    let installed = std::path::Path::new(&local).join("MyTranslate");
+    let installed = std::path::Path::new(&local).join(identity::name());
     exe.parent()
         .is_some_and(|dir| dir.to_string_lossy().eq_ignore_ascii_case(&installed.to_string_lossy()))
 }
@@ -786,6 +787,8 @@ fn show_main_window(app: AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    identity::init(context.config().product_name.as_deref());
     tauri::Builder::default()
         // Must be first: a second launch (Start menu, autostart) just brings the running app forward.
         .plugin(tauri_plugin_single_instance::init(|app, args, _cwd| {
@@ -930,7 +933,7 @@ pub fn run() {
             quickbar::quickbar_action,
             clipboard_write,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running MyTranslate");
 }
 
