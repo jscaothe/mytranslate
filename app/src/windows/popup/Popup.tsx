@@ -165,10 +165,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const manageAi = () => {
     setAiMenuOpen(false)
     if (!windowed) {
-      store.openMain('settings')
+      store.openMain('settings', 'ai')
       return
     }
-    void invoke('show_main_window').then(() => emit('ui:open-tab', 'settings'))
+    void invoke('show_main_window').then(() => emit('ui:open-tab', 'settings:ai'))
   }
 
   const saved = live.saved

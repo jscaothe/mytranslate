@@ -7,6 +7,13 @@ const openTab = async (page: Page, tab: string) => {
   await page.getByRole('button', { name: tab, exact: true }).click()
 }
 
+/** Settings, on one of its parts. */
+const openSettings = async (page: Page, part: string) => {
+  await openTab(page, 'Cài đặt')
+  await page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button', { name: part, exact: true }).click()
+  await expect(page.getByRole('heading', { name: part, exact: true })).toBeVisible()
+}
+
 
 test.beforeEach(async ({ page }) => {
   await page.goto('/')
@@ -15,7 +22,8 @@ test.beforeEach(async ({ page }) => {
 test('the main window has the Glossary, writing skills and Settings: threads and contacts are kept out of sight', async ({ page }) => {
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   const nav = page.getByRole('navigation', { name: 'Điều hướng' })
-  await expect(nav.getByRole('button')).toHaveText(['', '', ''])
+  // Every part with its name, Settings together with the others.
+  await expect(nav.getByRole('button')).toHaveText(['Glossary', 'Kỹ năng viết', 'Cài đặt'])
   await expect(nav.getByRole('button', { name: 'Glossary' })).toHaveAttribute('aria-current', 'page')
   await expect(nav.getByRole('button', { name: 'Kỹ năng viết' })).toBeVisible()
   await expect(nav.getByRole('button', { name: 'Cài đặt' })).toBeVisible()
@@ -94,8 +102,36 @@ test('glossary: the team file is chosen and dropped from the Glossary tab', asyn
   await expect(page.getByText('Glossary chung')).toHaveCount(0)
 })
 
-test('settings: history retention and the two-step wipe', async ({ page }) => {
+test('settings open on AI, split into parts listed beside the page', async ({ page }) => {
   await openTab(page, 'Cài đặt')
+  await expect(page.getByRole('heading', { name: 'AI dịch', exact: true })).toBeVisible()
+  const parts = page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button')
+  await expect(parts).toHaveText(['AI dịch', 'Chung', 'Dịch', 'Phím tắt', 'Thanh thao tác nhanh', 'Cập nhật', 'Dữ liệu'])
+  await expect(parts.first()).toHaveAttribute('aria-current', 'page')
+})
+
+test('settings search finds rows without Vietnamese marks, a whole part by its subject, or says nothing matches', async ({ page }) => {
+  await openTab(page, 'Cài đặt')
+  const search = page.getByRole('searchbox', { name: 'Tìm trong cài đặt' })
+  await search.fill('kinh ngu')
+  await expect(page.getByRole('heading', { name: 'Kết quả cho "kinh ngu"' })).toBeVisible()
+  await expect(page.getByRole('radiogroup', { name: 'Mức kính ngữ mặc định' })).toBeVisible()
+  await expect(page.getByRole('radiogroup', { name: 'Giữ lịch sử' })).toHaveCount(0)
+
+  await search.fill('chatgpt')
+  await expect(page.getByRole('region', { name: 'ChatGPT API' })).toBeVisible()
+
+  await search.fill('khong co gi')
+  await expect(page.getByText('Không có mục cài đặt nào khớp.')).toBeVisible()
+
+  // Picking a part leaves the search.
+  await page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button', { name: 'Phím tắt', exact: true }).click()
+  await expect(search).toHaveValue('')
+  await expect(page.getByRole('button', { name: 'Phím tắt: Dịch (tự chọn ngôn ngữ đích)' })).toHaveText('CtrlAltT')
+})
+
+test('settings: history retention and the two-step wipe', async ({ page }) => {
+  await openSettings(page, 'Dữ liệu')
   const keep = page.getByRole('radiogroup', { name: 'Giữ lịch sử' })
   await expect(keep.getByRole('radio', { name: '3 tháng' })).toHaveAttribute('aria-checked', 'true')
   await keep.getByRole('radio', { name: '6 tháng' }).click()
@@ -110,7 +146,7 @@ test('settings: history retention and the two-step wipe', async ({ page }) => {
 })
 
 test('settings: checking finds a new version and installing shows progress', async ({ page }) => {
-  await openTab(page, 'Cài đặt')
+  await openSettings(page, 'Cập nhật')
   await page.getByRole('button', { name: 'Kiểm tra ngay' }).click()
   await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
   await page.getByRole('button', { name: 'Cập nhật và khởi động lại' }).click()

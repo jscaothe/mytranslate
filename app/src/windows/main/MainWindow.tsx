@@ -4,16 +4,18 @@ import { ErrorBoundary } from '../../components/ErrorBoundary'
 import { AppMark, WindowFrame } from '../../components/ui'
 import { UpdateBanner } from '../../components/UpdatePanel'
 import { useUpdates } from '../../lib/updates'
-import { cx } from '../../components/styles'
+import { cx, pressable } from '../../components/styles'
 import { useT, type T } from '../../lib/i18n'
 import { useStore, type MainTab } from '../../store'
 import { GlossaryView } from './GlossaryView'
 import { SettingsView } from './SettingsView'
 import { WritingView } from './WritingView'
 
+/** Every part of the window, together at the top, each with its icon and name (Settings no longer sits apart). */
 const nav = (t: T): { tab: MainTab; label: string; icon: ReactNode }[] => [
-  { tab: 'glossary', label: t('Glossary', '用語集'), icon: <BookOpen size={19} /> },
-  { tab: 'writing', label: t('Kỹ năng viết', '文章力'), icon: <PenLine size={19} /> },
+  { tab: 'glossary', label: t('Glossary', '用語集'), icon: <BookOpen size={18} /> },
+  { tab: 'writing', label: t('Kỹ năng viết', '文章力'), icon: <PenLine size={18} /> },
+  { tab: 'settings', label: t('Cài đặt', '設定'), icon: <Settings size={18} /> },
 ]
 
 /** In the prototype the window is drawn on a fake desktop; in Tauri (`chromeless`) the OS draws the frame. */
@@ -49,16 +51,12 @@ function MainContent() {
     <div className="flex min-h-0 flex-1 flex-col">
     {mainTab !== 'settings' && <UpdateBanner status={updates.status} install={updates.install} onInstall={() => void updates.installNow()} />}
     <div className="flex min-h-0 flex-1">
-      <nav className="flex w-16 shrink-0 flex-col items-center gap-1 border-r border-line py-2" aria-label={t('Điều hướng', 'ナビゲーション')}>
+      <nav className="flex w-[168px] shrink-0 flex-col gap-0.5 border-r border-line p-2" aria-label={t('Điều hướng', 'ナビゲーション')}>
         {nav(t).map((n) => (
           <NavButton key={n.tab} active={mainTab === n.tab} label={n.label} onClick={() => setMainTab(n.tab)}>
             {n.icon}
           </NavButton>
         ))}
-        <div className="flex-1" />
-        <NavButton active={mainTab === 'settings'} label={t('Cài đặt', '設定')} onClick={() => setMainTab('settings')}>
-          <Settings size={19} />
-        </NavButton>
       </nav>
       {/* Keyed by tab: opening another tab leaves an error behind. */}
       <ErrorBoundary key={mainTab}>
@@ -76,16 +74,16 @@ function NavButton({ active, label, onClick, children }: { active: boolean; labe
     <button
       type="button"
       onClick={onClick}
-      aria-label={label}
       aria-current={active ? 'page' : undefined}
-      title={label}
       className={cx(
-        'relative flex size-11 flex-col items-center justify-center rounded-md transition-colors',
-        active ? 'bg-selected text-accent' : 'text-ink-2 hover:bg-hover hover:text-ink',
+        'relative flex h-9 items-center gap-2.5 rounded-md px-2.5 text-left text-[13.5px]',
+        pressable,
+        active ? 'bg-selected font-semibold text-accent' : 'text-ink-2 hover:bg-hover hover:text-ink',
       )}
     >
-      {active && <span className="absolute top-3 bottom-3 left-0 w-[3px] rounded-full bg-accent" />}
+      {active && <span className="absolute top-2.5 bottom-2.5 left-0 w-[3px] rounded-full bg-accent" />}
       {children}
+      {label}
     </button>
   )
 }
