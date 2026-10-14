@@ -78,35 +78,38 @@ export function WritingView() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-3 border-b border-line px-5 py-3">
-        <h2 className="text-[15px] font-semibold">{t('Kỹ năng viết', '文章力')}</h2>
-        <Segmented
-          label={t('Ngôn ngữ của câu', '文の言語')}
-          value={shown}
-          onChange={setTarget}
-          options={[
-            { value: 'ja', label: t('Tiếng Nhật', '日本語') },
-            { value: 'vi', label: t('Tiếng Việt', 'ベトナム語') },
-          ]}
-        />
-        <div className="flex-1" />
-        <Segmented
-          label={t('Khoảng thời gian', '期間')}
-          value={period}
-          onChange={setPeriod}
-          options={[
-            { value: '30', label: t('30 ngày', '30日') },
-            { value: '90', label: t('90 ngày', '90日') },
-            { value: 'all', label: t('Tất cả', 'すべて') },
-          ]}
-        />
+      <div className="shrink-0 border-b border-line">
+        {/* As wide as the page below, so the period sits over the right edge of the cards on a wide screen too. */}
+        <div className="flex max-w-[960px] items-center gap-3 px-8 py-3">
+          <h2 className="text-[15px] font-semibold">{t('Kỹ năng viết', '文章力')}</h2>
+          <Segmented
+            label={t('Ngôn ngữ của câu', '文の言語')}
+            value={shown}
+            onChange={setTarget}
+            options={[
+              { value: 'ja', label: t('Tiếng Nhật', '日本語') },
+              { value: 'vi', label: t('Tiếng Việt', 'ベトナム語') },
+            ]}
+          />
+          <div className="flex-1" />
+          <Segmented
+            label={t('Khoảng thời gian', '期間')}
+            value={period}
+            onChange={setPeriod}
+            options={[
+              { value: '30', label: t('30 ngày', '30日') },
+              { value: '90', label: t('90 ngày', '90日') },
+              { value: 'all', label: t('Tất cả', 'すべて') },
+            ]}
+          />
+        </div>
       </div>
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         {current && current.reviews === 0 ? (
           <Empty hotkey={settings.hotkeys.review} textLang={shown} />
         ) : current ? (
-          <div className="mx-auto flex max-w-[760px] flex-col gap-5 px-6 py-5">
+          <div className="flex max-w-[960px] flex-col gap-5 px-8 py-5">
             <Summary stats={current} />
             <Card title={t('Lỗi theo loại', '誤りの種類')}>
               <KindBars kinds={current.kinds} textLang={shown} />

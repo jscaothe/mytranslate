@@ -23,7 +23,7 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
-import { cx } from '../../components/styles'
+import { cx, pressable } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { diffChars, diffWords } from '../../lib/diff'
 import { isMostlyJapanese, locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
@@ -558,6 +558,20 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             draft={draft}
             onDraft={setDraft}
             back={live.sections.backTranslation || undefined}
+            aside={
+              <button
+                type="button"
+                disabled={feedback}
+                onClick={() => {
+                  setFeedbackSent(true)
+                  if (windowed && saved) void setFeedback(saved.messageId, true)
+                  showToast(t('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt', 'ありがとうございます。この翻訳はプロンプト改善の参考にします'))
+                }}
+                className={cx('-mr-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-ink-3 hover:bg-hover hover:text-ink disabled:hover:bg-transparent', pressable)}
+              >
+                <ThumbsDown size={12} /> {feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
+              </button>
+            }
           />
         )}
         {replyMode && replyRun && (
@@ -635,25 +649,20 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
               rows={2}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              placeholder={t('Gõ câu trả lời bằng tiếng Việt (tự dịch) hoặc tiếng Nhật…', '日本語（自動で翻訳）またはベトナム語で返信を入力…')}
+              placeholder={t('Gõ câu trả lời bằng tiếng Việt hoặc tiếng Nhật (Shift+Enter xuống dòng)', '日本語またはベトナム語で返信を入力（Shift+Enter で改行）')}
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
             <div className="flex flex-wrap items-center gap-2">
               {/* Leaving the reply is a quiet link rather than a third button, so the two actions keep one row. */}
-              <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] whitespace-nowrap text-ink-3">
-                <span>
-                  <Kbd>Shift+Enter</Kbd> {t('xuống dòng', '改行')}
-                </span>
-                <button type="button" onClick={cancelReply} className="rounded hover:text-ink">
-                  {t('Hủy', 'キャンセル')}
-                </button>
-              </p>
+              <button type="button" onClick={cancelReply} className={cx('rounded px-1 text-[12.5px] text-ink-3 hover:text-ink', pressable)}>
+                {t('Hủy', 'キャンセル')}
+              </button>
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 {/* Until a step's result is on screen, Ctrl+Enter skips looking at it; afterwards Enter does the same. */}
                 {!replyChecked && (
                   <Button size="sm" disabled={!replyText.trim() || replyBusy} onClick={sendReplyNow}>
                     {replyReplaces ? <Replace size={14} /> : <Copy size={14} />}{' '}
-                    {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Sao chép ngay', 'すぐコピー')} <Kbd>Ctrl+Enter</Kbd>
+                    {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Sao chép ngay', 'すぐコピー')} <Kbd>Ctrl+↵</Kbd>
                   </Button>
                 )}
                 <Button size="sm" variant="primary" disabled={!replyText.trim() || replyBusy} onClick={nextReplyStep}>
@@ -687,16 +696,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             origin={origin}
             ready={resultReady}
             keigo={keigo}
-            feedback={feedback}
             onKeigo={changeKeigo}
             onPrimary={primary}
             onKeep={keepOriginal}
             onReply={startReply}
-            onFeedback={() => {
-              setFeedbackSent(true)
-              if (windowed && saved) void setFeedback(saved.messageId, true)
-              showToast(t('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt', 'ありがとうございます。この翻訳はプロンプト改善の参考にします'))
-            }}
           />
         )}
       </footer>
@@ -710,7 +713,7 @@ function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin
   const t = useT()
   const lang = useLang()
   const enter = <Kbd>Enter</Kbd>
-  const ctrlEnter = <Kbd>Ctrl+Enter</Kbd>
+  const ctrlEnter = <Kbd>Ctrl+↵</Kbd>
   const tab = <Kbd>Tab</Kbd>
   return (
     <div role="note" className="flex items-start gap-2 border-t border-line bg-accent-soft px-4 py-2 text-[12.5px] leading-relaxed text-ink">
@@ -880,6 +883,7 @@ function TranslationBody({
   draft,
   onDraft,
   back,
+  aside,
 }: {
   direction: 'ja_vi' | 'vi_ja'
   role: Role
@@ -888,6 +892,8 @@ function TranslationBody({
   onDraft: (v: string) => void
   /** The result read back in the user's language, so they can check the meaning before sending. */
   back?: string
+  /** Shown under the finished translation: the "not a good translation" feedback. */
+  aside?: ReactNode
 }) {
   const t = useT()
   const userLang = useLang()
@@ -910,6 +916,7 @@ function TranslationBody({
             <InkText text={stream.text} />
           </p>
         )}
+        {stream.done && aside && <div className="mt-1 flex justify-end">{aside}</div>}
       </Section>
       {stream.done && role === 'write' && back && (
         <Section className="bg-subtle">
@@ -1279,32 +1286,22 @@ function FooterActions({
   origin,
   ready,
   keigo,
-  feedback,
   onKeigo,
   onPrimary,
   onKeep,
   onReply,
-  onFeedback,
 }: {
   role: Role
   origin: PopupOrigin
   ready: boolean
   keigo: Keigo
-  feedback: boolean
   onKeigo: (k: Keigo) => void
   onPrimary: () => void
   onKeep: () => void
   onReply: () => void
-  onFeedback: () => void
 }) {
   const t = useT()
   const lang = useLang()
-  // Every action in the popup shows an icon and its name (decided 2026-10-14); only the title bar keeps icons alone.
-  const feedbackButton = (
-    <Button size="sm" variant="ghost" disabled={!ready || feedback} onClick={onFeedback}>
-      <ThumbsDown size={14} /> {feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
-    </Button>
-  )
   const enterKbd = <Kbd>↵</Kbd>
 
   if (role === 'read') {
@@ -1312,10 +1309,9 @@ function FooterActions({
       // Wraps instead of overflowing when the popup is made narrow: copy moves under reply.
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={onReply}>
-          <Reply size={14} /> {t('Trả lời', '返信')} <Kbd>Ctrl+Enter</Kbd>
+          <Reply size={14} /> {t('Trả lời', '返信')} <Kbd>Ctrl+↵</Kbd>
         </Button>
         <div className="ml-auto flex items-center gap-2">
-          {feedbackButton}
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
             <Copy size={14} /> {t('Sao chép', 'コピー')} {enterKbd}
           </Button>
@@ -1336,7 +1332,6 @@ function FooterActions({
           />
         </span>
         <div className="ml-auto flex items-center gap-2">
-        {feedbackButton}
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
             <Replace size={14} /> {t('Thay vào chat', '入力欄に貼り付け')} {enterKbd}
