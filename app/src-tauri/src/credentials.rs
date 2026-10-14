@@ -1,4 +1,5 @@
-//! API keys in the Windows Credential Manager ("Generic credentials", target `MyTranslate/<name>`), never in the
+//! API keys in the Windows Credential Manager ("Generic credentials", target `MyTranslate/<name>`, or
+//! `MyTranslate Staging/<name>` for the staging build), never in the
 //! settings file: they are encrypted for the signed-in Windows user and do not travel with a backup or a copy of
 //! the settings.
 
@@ -9,7 +10,7 @@ use windows::Win32::Security::Credentials::{
 use windows::core::{HSTRING, PWSTR};
 
 fn target(name: &str) -> HSTRING {
-    HSTRING::from(format!("MyTranslate/{name}"))
+    HSTRING::from(format!("{}/{name}", crate::identity::name()))
 }
 
 pub fn get(name: &str) -> Option<String> {

@@ -1,0 +1,39 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "MyTranslate Staging",
+  "identifier": "com.mytranslate.desktop.staging",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "MyTranslate Staging",
+        "width": 1040,
+        "height": 700,
+        "minWidth": 800,
+        "minHeight": 560,
+        "resizable": true,
+        "center": true,
+        "visible": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": [
+      "nsis"
+    ],
+    "icon": [
+      "icons-staging/32x32.png",
+      "icons-staging/128x128.png",
+      "icons-staging/128x128@2x.png",
+      "icons-staging/icon.icns",
+      "icons-staging/icon.ico"
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons-staging/icon.ico",
+        "headerImage": "installer/header.bmp",
+        "sidebarImage": "installer/sidebar.bmp"
+      }
+    }
+  }
+}

@@ -93,7 +93,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     });
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
-        .tooltip("MyTranslate")
+        .tooltip(crate::identity::name())
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(move |app, event| match event.id().as_ref() {
@@ -182,13 +182,16 @@ pub fn sync(app: &AppHandle) {
         let _ = items.open.set_text(open_text(&store));
     }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let name = crate::identity::name();
         let tooltip = if paused {
-            store.language().pick(
-                "MyTranslate (đang tạm dừng phím tắt)",
-                "MyTranslate（ショートカット一時停止中）",
+            format!(
+                "{name}{}",
+                store
+                    .language()
+                    .pick(" (đang tạm dừng phím tắt)", "（ショートカット一時停止中）")
             )
         } else {
-            "MyTranslate"
+            name.to_string()
         };
         let _ = tray.set_tooltip(Some(tooltip));
     }
