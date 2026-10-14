@@ -57,7 +57,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
   await expect(tip).toContainText('để gõ câu trả lời')
   await tip.getByRole('button', { name: 'Đã hiểu' }).click()
   await expect(tip).toHaveCount(0)
-  await page.keyboard.press('Escape')
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
   await expect(popup(page)).toBeHidden()
 
   await selectStart(page, message, 10)

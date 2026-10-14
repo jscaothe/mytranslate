@@ -1,34 +1,38 @@
 //! Notices when the user selects text with the mouse or with Ctrl+A, so the quick toolbar can appear next to it.
 //!
 //! Low-level mouse and keyboard hooks run on their own thread with a message loop; the hook procedures only
-//! forward events through a channel, and a second thread decides. A selection is a left-button drag, or a double/triple click,
-//! with the text I-beam pointer at press or release (Teams shows it only while selecting); without it, UI
-//! Automation is asked whether text got selected. That rules out dragging windows, scrollbars and splitters.
+//! forward events through a channel, and a second thread decides. A selection is a left-button drag, or a
+//! double/triple click, with the text I-beam pointer at press or release (Teams shows it only while selecting);
+//! without it, UI Automation is asked whether text got selected. That rules out dragging windows, scrollbars and
+//! splitters.
 //! Ctrl+A shows the toolbar only when UI Automation finds text selected in a focused box the user types in, so
 //! selecting all files in Explorer, an empty message box, or a whole chat page (Ctrl+A in Slack's conversation)
 //! shows nothing.
 //! Nothing is read from the selection here; text is only copied when the user presses a toolbar button.
 //! The toolbar stays until the next click outside it or the next key: a user who selected all to delete or type
 //! over it is not kept waiting. The keyboard hook only tells Ctrl+A apart from any other key; it never records
-//! which keys are pressed.
+//! which keys are pressed. It is removed while one of this app's own windows is in front (see `follow_foreground`).
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicIsize, AtomicU64, Ordering};
 use std::sync::mpsc::{Sender, channel};
 use std::time::{Duration, Instant};
 
 use tauri::AppHandle;
-use windows::Win32::Foundation::{LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::GetCurrentProcessId;
+use windows::Win32::UI::Accessibility::{HWINEVENTHOOK, SetWinEventHook};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetDoubleClickTime, VIRTUAL_KEY, VK_A, VK_CONTROL, VK_LCONTROL, VK_LMENU, VK_LSHIFT, VK_LWIN,
     VK_MENU, VK_RCONTROL, VK_RMENU, VK_RSHIFT, VK_RWIN, VK_SHIFT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CURSORINFO, CallNextHookEx, GetCursorInfo, GetMessageW, GetSystemMetrics, HHOOK, IDC_IBEAM, KBDLLHOOKSTRUCT,
-    LLKHF_INJECTED, LLMHF_INJECTED, LoadCursorW, MSG, MSLLHOOKSTRUCT, SM_CXDOUBLECLK, SetWindowsHookExW,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
-    WM_SYSKEYDOWN, WM_SYSKEYUP,
+    CURSORINFO, CallNextHookEx, EVENT_SYSTEM_FOREGROUND, GetCursorInfo, GetForegroundWindow, GetMessageW,
+    GetSystemMetrics, GetWindowThreadProcessId, HHOOK, IDC_IBEAM, KBDLLHOOKSTRUCT, LLKHF_INJECTED, LLMHF_INJECTED,
+    LoadCursorW, MSG, MSLLHOOKSTRUCT, SM_CXDOUBLECLK, SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WINEVENT_OUTOFCONTEXT, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
+    WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP,
 };
 
 use crate::quickbar;
@@ -78,6 +82,8 @@ static ACCEPT_INJECTED_KEYS: OnceLock<bool> = OnceLock::new();
 static KEY_SEQ: AtomicU64 = AtomicU64::new(0);
 /// Ctrl+A is held down: Windows repeats the key press, which is not a new Ctrl+A.
 static SELECT_ALL_HELD: AtomicBool = AtomicBool::new(false);
+/// The keyboard hook while it is installed, 0 while it is not. Only the hook thread changes it.
+static KEYBOARD_HOOK: AtomicIsize = AtomicIsize::new(0);
 
 /// Starts the hooks and the decision thread. Safe to call once at start-up.
 pub fn start(app: &AppHandle) {
@@ -104,12 +110,25 @@ pub fn start(app: &AppHandle) {
             if let Err(e) = &mouse {
                 log::warn!("selection hook unavailable: {e}");
             }
-            let keyboard = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0);
-            if let Err(e) = &keyboard {
-                log::warn!("Ctrl+A hook unavailable: {e}");
+            if mouse.is_ok() {
+                log::debug!("selection hook installed");
             }
-            if mouse.is_ok() && keyboard.is_ok() {
-                log::debug!("selection hooks installed");
+            // The keyboard hook follows the window in front, from now on and for the window in front right now.
+            if SetWinEventHook(
+                EVENT_SYSTEM_FOREGROUND,
+                EVENT_SYSTEM_FOREGROUND,
+                None,
+                Some(foreground_proc),
+                0,
+                0,
+                WINEVENT_OUTOFCONTEXT,
+            )
+            .is_invalid()
+            {
+                log::warn!("cannot follow the window in front; the Ctrl+A hook stays on");
+                set_keyboard_hook(true);
+            } else {
+                follow_foreground(GetForegroundWindow());
             }
             // Low-level hooks are called through this thread's message loop.
             let mut msg = MSG::default();
@@ -209,6 +228,46 @@ fn is_ibeam() -> bool {
         };
         GetCursorInfo(&mut info).is_ok() && info.hCursor == ibeam
     }
+}
+
+/// UniKey (and other Vietnamese input methods working the same way) stops turning Telex into Vietnamese in this
+/// app's own windows while this process has a low-level keyboard hook: typed into the popup, "tooi" stayed "tooi"
+/// instead of "tôi", while other apps were unaffected (measured 2026-10-14). Ctrl+A is only needed in other apps,
+/// so the hook is removed while one of this app's windows is in front and put back when another app is.
+fn follow_foreground(hwnd: HWND) {
+    let mut pid = 0;
+    unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+    let ours = pid == unsafe { GetCurrentProcessId() };
+    log::debug!("foreground pid {pid}, ours {ours}");
+    set_keyboard_hook(!ours);
+}
+
+/// Installs or removes the keyboard hook. Called on the hook thread only, whose message loop runs the hook.
+fn set_keyboard_hook(on: bool) {
+    let current = KEYBOARD_HOOK.load(Ordering::Relaxed);
+    if on && current == 0 {
+        let module = unsafe { GetModuleHandleW(None) }.ok().map(|m| m.into());
+        match unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_proc), module, 0) } {
+            Ok(hook) => KEYBOARD_HOOK.store(hook.0 as isize, Ordering::Relaxed),
+            Err(e) => log::warn!("Ctrl+A hook unavailable: {e}"),
+        }
+    } else if !on && current != 0 {
+        let _ = unsafe { UnhookWindowsHookEx(HHOOK(current as *mut _)) };
+        KEYBOARD_HOOK.store(0, Ordering::Relaxed);
+        SELECT_ALL_HELD.store(false, Ordering::Relaxed);
+    }
+}
+
+unsafe extern "system" fn foreground_proc(
+    _hook: HWINEVENTHOOK,
+    _event: u32,
+    hwnd: HWND,
+    _object: i32,
+    _child: i32,
+    _thread: u32,
+    _time: u32,
+) {
+    follow_foreground(hwnd);
 }
 
 fn is_down(key: VIRTUAL_KEY) -> bool {

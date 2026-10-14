@@ -333,13 +333,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     const inDraft = target.dataset.role === 'draft'
     const typing = inReply || inDraft || target.tagName === 'INPUT'
 
+    // No key closes the popup or leaves the reply (decided 2026-10-14): Esc also cancels a word in the Japanese
+    // input method, and a reply being written was lost with it. The close button and a click elsewhere close it.
     if (e.key === 'Escape') {
       e.preventDefault()
-      if (aiMenuOpen) {
-        setAiMenuOpen(false)
-        rootRef.current?.focus()
-      } else if (replyMode) cancelReply()
-      else close()
       return
     }
     // Keys inside the AI menu belong to it (Enter picks the focused entry).
@@ -483,7 +480,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         >
           <Pin size={14} />
         </IconButton>
-        <IconButton label={t('Đóng (Esc)', '閉じる (Esc)')} onClick={close}>
+        <IconButton label={t('Đóng', '閉じる')} onClick={close}>
           <X size={15} />
         </IconButton>
       </header>
@@ -603,7 +600,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             origin={origin}
             onDismiss={() => {
               setTipOpen(false)
-              // The button goes away with the tip; keep the popup's keys (Enter, Esc) working.
+              // The button goes away with the tip; keep the popup's keys (Enter) working.
               rootRef.current?.focus()
             }}
           />
@@ -630,13 +627,13 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
             <div className="flex flex-wrap items-center gap-2">
-              {/* Esc leaves the reply: a key named here rather than a third button, so the two actions keep one row. */}
+              {/* Leaving the reply is a quiet link rather than a third button, so the two actions keep one row. */}
               <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] whitespace-nowrap text-ink-3">
                 <span>
                   <Kbd>Shift+Enter</Kbd> {t('xuống dòng', '改行')}
                 </span>
                 <button type="button" onClick={cancelReply} className="rounded hover:text-ink">
-                  <Kbd>Esc</Kbd> {t('hủy', 'キャンセル')}
+                  {t('Hủy', 'キャンセル')}
                 </button>
               </p>
               <div className="ml-auto flex shrink-0 items-center gap-2">
@@ -687,25 +684,24 @@ function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin
   const enter = <Kbd>Enter</Kbd>
   const ctrlEnter = <Kbd>Ctrl+Enter</Kbd>
   const tab = <Kbd>Tab</Kbd>
-  const esc = <Kbd>Esc</Kbd>
   return (
     <div role="note" className="flex items-start gap-2 border-t border-line bg-accent-soft px-4 py-2 text-[12.5px] leading-relaxed text-ink">
       <Lightbulb size={14} className="mt-[3px] shrink-0 text-accent" />
       <p className="min-w-0 flex-1">
         {lang === 'ja' ? (
           role === 'read' ? (
-            <>{enter} で翻訳をコピー、{ctrlEnter} で返信を入力します。{esc} で閉じます。</>
+            <>{enter} で翻訳をコピー、{ctrlEnter} で返信を入力します。</>
           ) : origin === 'composer' ? (
-            <>{enter} でベトナム語訳を入力欄に貼り付けます。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
+            <>{enter} でベトナム語訳を入力欄に貼り付けます。{tab} で丁寧さを切り替えます。</>
           ) : (
-            <>{enter} で翻訳をコピーします。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
+            <>{enter} で翻訳をコピーします。{tab} で丁寧さを切り替えます。</>
           )
         ) : role === 'read' ? (
-          <>Nhấn {enter} để sao chép bản dịch, {ctrlEnter} để gõ câu trả lời. {esc} để đóng.</>
+          <>Nhấn {enter} để sao chép bản dịch, {ctrlEnter} để gõ câu trả lời.</>
         ) : origin === 'composer' ? (
-          <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. {tab} đổi mức kính ngữ. {esc} để đóng.</>
+          <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. {tab} đổi mức kính ngữ.</>
         ) : (
-          <>Nhấn {enter} để sao chép bản dịch. {tab} đổi mức kính ngữ. {esc} để đóng.</>
+          <>Nhấn {enter} để sao chép bản dịch. {tab} đổi mức kính ngữ.</>
         )}
       </p>
       <button type="button" onClick={onDismiss} className="shrink-0 rounded px-1 font-medium text-accent hover:underline">
@@ -1333,7 +1329,7 @@ function FooterActions({
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" onClick={onKeep}>
-        {t('Giữ nguyên', 'そのまま')} <Kbd>Esc</Kbd>
+        {t('Giữ nguyên', 'そのまま')}
       </Button>
       <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
         {origin === 'composer' ? t('Dùng đề xuất', '修正案を使う') : t('Sao chép đề xuất', '修正案をコピー')} {enterKbd}
