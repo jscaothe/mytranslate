@@ -82,7 +82,7 @@ test('Ctrl+Enter replies to a message; Enter translates the Vietnamese reply and
   expect(await clipboard(page)).toMatch(/[ぁ-んァ-ン一-龯]/)
 })
 
-test('Shift+Enter starts a new line in the reply and Escape leaves the reply first', async ({ page }) => {
+test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the Hủy link leaves the reply', async ({ page }) => {
   await readFirstMessage(page)
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
@@ -90,11 +90,14 @@ test('Shift+Enter starts a new line in the reply and Escape leaves the reply fir
   await reply.press('Shift+Enter')
   await reply.pressSequentially('Dòng hai')
   await expect(reply).toHaveValue('Dòng một\nDòng hai')
+  // Escape also cancels a word in the Japanese input method: it must not throw the reply away.
   await reply.press('Escape')
+  await expect(reply).toHaveValue('Dòng một\nDòng hai')
+  await expect(popup(page).getByText('Esc', { exact: true })).toHaveCount(0)
+  await popup(page).getByRole('button', { name: 'Hủy', exact: true }).click()
   await expect(reply).toHaveCount(0)
-  await expect(popup(page)).toBeVisible()
   await popup(page).press('Escape')
-  await expect(popup(page)).toBeHidden()
+  await expect(popup(page)).toBeVisible()
 })
 
 test('a reply to Japanese in the message box is checked with Ctrl+Enter and replaces it with Enter', async ({ page }) => {
@@ -239,11 +242,13 @@ test('the popup names the chat it reads from, with no thread to pick', async ({ 
   await expect(popup(page).getByPlaceholder(/thread/i)).toHaveCount(0)
 })
 
-test('Escape closes the popup and leaves the composer alone', async ({ page }) => {
+test('the close button closes the popup and leaves the composer alone; Escape does not', async ({ page }) => {
   await composer(page).fill('Xin chào')
   await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toBeVisible()
   await popup(page).press('Escape')
+  await expect(popup(page)).toBeVisible()
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
   await expect(popup(page)).toBeHidden()
   await expect(composer(page)).toHaveValue('Xin chào')
 })

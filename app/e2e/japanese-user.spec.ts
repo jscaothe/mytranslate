@@ -141,7 +141,7 @@ test('Japanese checked as Japanese, with the explanations and writing advice in 
   await expect(popup(page)).toHaveAttribute('data-direction', 'review_ja')
   await expect(popup(page).locator('[data-issue=politeness]')).toContainText('敬語')
   await expect(popup(page).locator('[data-issue=politeness]')).toContainText('命令的')
-  await popup(page).press('Escape')
+  await popup(page).getByRole('button', { name: '閉じる', exact: true }).click()
 
   await page.getByRole('button', { name: 'メイン画面' }).click()
   await page.getByRole('button', { name: '文章力', exact: true }).click()
