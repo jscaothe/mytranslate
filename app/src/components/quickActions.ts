@@ -10,7 +10,6 @@ export interface QuickActionMeta {
   /** Button text on the toolbar. */
   label: string
   primary?: boolean
-  title?: string
 }
 
 /** The toolbar buttons, worded in the user's language. */

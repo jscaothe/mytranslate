@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import {
   AlertTriangle,
   ArrowRight,
+  Check,
   CircleAlert,
   Copy,
   GripVertical,
@@ -9,10 +10,13 @@ import {
   Languages,
   Lightbulb,
   Pin,
+  Replace,
   Reply,
   RotateCcw,
+  Settings,
   SpellCheck,
   ThumbsDown,
+  Undo2,
   WifiOff,
   X,
 } from 'lucide-react'
@@ -648,6 +652,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
                 {/* Until a step's result is on screen, Ctrl+Enter skips looking at it; afterwards Enter does the same. */}
                 {!replyChecked && (
                   <Button size="sm" disabled={!replyText.trim() || replyBusy} onClick={sendReplyNow}>
+                    {replyReplaces ? <Replace size={14} /> : <Copy size={14} />}{' '}
                     {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Sao chép ngay', 'すぐコピー')} <Kbd>Ctrl+Enter</Kbd>
                   </Button>
                 )}
@@ -663,15 +668,13 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
                       </>
                     )
                   ) : replyReplaces ? (
-                    replyFixed ? (
-                      t('Thay bằng câu đã sửa', '修正案で置き換え')
-                    ) : (
-                      t('Thay vào ô chat', '入力欄に貼り付け')
-                    )
-                  ) : replyFixed ? (
-                    t('Sao chép câu đã sửa', '修正案をコピー')
+                    <>
+                      <Replace size={14} /> {replyFixed ? t('Thay bằng câu đã sửa', '修正案で置き換え') : t('Thay vào ô chat', '入力欄に貼り付け')}
+                    </>
                   ) : (
-                    t('Sao chép', 'コピー')
+                    <>
+                      <Copy size={14} /> {replyFixed ? t('Sao chép câu đã sửa', '修正案をコピー') : t('Sao chép', 'コピー')}
+                    </>
                   )}{' '}
                   <Kbd>↵</Kbd>
                 </Button>
@@ -1126,14 +1129,14 @@ function ErrorBanner({
   const [signingIn, setSigningIn] = useState<'idle' | 'waiting' | 'failed'>('idle')
   const retryButton = (variant?: 'primary') => (
     <Button size="sm" variant={variant} onClick={onRetry}>
-      {t('Thử lại', '再試行')}
+      <RotateCcw size={13} /> {t('Thử lại', '再試行')}
     </Button>
   )
   const retry = <div className="mt-2 flex gap-2">{retryButton('primary')}</div>
   const openSettings = (
     <div className="mt-2 flex gap-2">
       <Button size="sm" variant="primary" onClick={() => void invoke('show_main_window')}>
-        {t('Mở Cài đặt', '設定を開く')}
+        <Settings size={13} /> {t('Mở Cài đặt', '設定を開く')}
       </Button>
       {retryButton()}
     </div>
@@ -1185,7 +1188,7 @@ function ErrorBanner({
           </Button>
         ))}
       <Button size="sm" variant={alternatives.length === 0 ? 'primary' : 'ghost'} onClick={onSettings}>
-        {t('Mở Cài đặt', '設定を開く')}
+        <Settings size={13} /> {t('Mở Cài đặt', '設定を開く')}
       </Button>
     </div>
   )
@@ -1264,7 +1267,7 @@ function ErrorBanner({
             onAction(t('Đã sao chép thông tin lỗi', 'エラー情報をコピーしました'))
           }}
         >
-          {t('Sao chép lỗi', 'エラーをコピー')}
+          <Copy size={13} /> {t('Sao chép lỗi', 'エラーをコピー')}
         </Button>
       </div>
     </Banner>
@@ -1296,15 +1299,11 @@ function FooterActions({
 }) {
   const t = useT()
   const lang = useLang()
+  // Every action in the popup shows an icon and its name (decided 2026-10-14); only the title bar keeps icons alone.
   const feedbackButton = (
-    <IconButton
-      label={feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
-      active={feedback}
-      disabled={!ready}
-      onClick={onFeedback}
-    >
-      <ThumbsDown size={14} />
-    </IconButton>
+    <Button size="sm" variant="ghost" disabled={!ready || feedback} onClick={onFeedback}>
+      <ThumbsDown size={14} /> {feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
+    </Button>
   )
   const enterKbd = <Kbd>↵</Kbd>
 
@@ -1340,7 +1339,7 @@ function FooterActions({
         {feedbackButton}
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
-            {t('Thay vào chat', '入力欄に貼り付け')} {enterKbd}
+            <Replace size={14} /> {t('Thay vào chat', '入力欄に貼り付け')} {enterKbd}
           </Button>
         ) : (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
@@ -1354,10 +1353,19 @@ function FooterActions({
   return (
     <div className="flex flex-wrap items-center justify-end gap-2">
       <Button size="sm" onClick={onKeep}>
-        {t('Giữ nguyên', 'そのまま')}
+        <Undo2 size={14} /> {t('Giữ nguyên', 'そのまま')}
       </Button>
       <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
-        {origin === 'composer' ? t('Dùng đề xuất', '修正案を使う') : t('Sao chép đề xuất', '修正案をコピー')} {enterKbd}
+        {origin === 'composer' ? (
+          <>
+            <Check size={14} /> {t('Dùng đề xuất', '修正案を使う')}
+          </>
+        ) : (
+          <>
+            <Copy size={14} /> {t('Sao chép đề xuất', '修正案をコピー')}
+          </>
+        )}{' '}
+        {enterKbd}
       </Button>
     </div>
   )

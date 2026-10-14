@@ -1,5 +1,6 @@
 import { invoke } from '@tauri-apps/api/core'
-import { useEffect, useRef } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { useEffect, useRef, useState } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { useStore } from '../../store'
 
@@ -12,6 +13,12 @@ import { useStore } from '../../store'
 export function QuickbarWindow() {
   const { settings } = useStore()
   const barRef = useRef<HTMLDivElement>(null)
+  // A fresh bar each time it is shown: a shortcut hint left open when it was hidden does not come back with it.
+  const [shown, setShown] = useState(0)
+  useEffect(() => {
+    const off = listen('quickbar:shown', () => setShown((n) => n + 1))
+    return () => void off.then((f) => f())
+  }, [])
   // Report the toolbar's real size so the window fits it exactly.
   useEffect(() => {
     const el = barRef.current?.firstElementChild as HTMLElement | null
@@ -25,11 +32,12 @@ export function QuickbarWindow() {
     ro.observe(el)
     fit()
     return () => ro.disconnect()
-  }, [settings.quickActions.items, settings.quickActions.display, settings.language])
+  }, [settings.quickActions.items, settings.quickActions.display, settings.language, shown])
 
   return (
     <div ref={barRef} className="flex w-max">
       <QuickActionBar
+        key={shown}
         bare
         items={settings.quickActions.items}
         display={settings.quickActions.display}
