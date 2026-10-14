@@ -11,7 +11,7 @@ import {
   Pin,
   Reply,
   RotateCcw,
-  Sparkles,
+  SpellCheck,
   ThumbsDown,
   WifiOff,
   X,
@@ -22,8 +22,8 @@ import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { diffChars, diffWords } from '../../lib/diff'
-import { locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
-import { setFeedback, suggestReplies, type Reply as SuggestedReply } from '../../lib/history'
+import { isMostlyJapanese, locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
+import { setFeedback } from '../../lib/history'
 import { useStore } from '../../store'
 import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, modelField, useQuickChoices, type AiChoice, type QuickChoice } from '../../lib/ai'
 import { ACCOUNT_TOOL, loginAccount, type Account } from '../../lib/accounts'
@@ -41,6 +41,14 @@ const LONG_TEXT_LIMIT = 4000
 /** A review spells out at most this many points; the suggestion covers them all. */
 const MAX_SHOWN_ISSUES = 3
 const keigoOrder: Keigo[] = ['casual', 'polite', 'formal']
+
+/** One run for the reply: `check` shows what it produced, `use` sends it as soon as it is done. */
+interface ReplyRun {
+  seq: number
+  text: string
+  purpose: 'check' | 'use'
+  direction: Direction
+}
 /** A popup that could not read any text explains why, then gets out of the way. */
 const NOTICE_CLOSE_MS = 2200
 
@@ -49,8 +57,12 @@ export interface PopupProps {
   /** Size of the host area; omit to render inline instead of floating. */
   container?: { width: number; height: number }
   onClose: () => void
-  /** Replace the text in the chat composer (only for origin `composer`). */
-  onApply?: (text: string) => void
+  /**
+   * Replace the selected text in the chat app: a result for origin `composer`, or a reply written in the popup
+   * when the text was selected in a message box. `keep` leaves the text on the clipboard too, for when it is not
+   * known whether the selection can be typed over.
+   */
+  onApply?: (text: string, options?: { keep?: boolean }) => void
   /** Pinned popups stay open when the user clicks elsewhere. */
   onPinnedChange?: (pinned: boolean) => void
   /** Set when the popup is its own OS window (Tauri) instead of a box drawn on a page. */
@@ -65,9 +77,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   // A first-time tip about the keys, shown in the first real popup only (the guide's practice popup does not count).
   const [tipOpen, setTipOpen] = useState(() => !settings.popupTipShown && request.origin !== 'onboarding')
 
-  const [direction, setDirection] = useState<Direction>(request.direction)
-  const [source, setSource] = useState(request.source)
-  const [origin, setOrigin] = useState<PopupOrigin>(request.origin)
+  const { direction, source, origin } = request
   // The user's default keigo until they change it here. Only a level they chose overrides a person's note in the Glossary.
   const [keigo, setKeigo] = useState<Keigo>(settings.defaultKeigo)
   const [keigoChosen, setKeigoChosen] = useState(false)
@@ -76,8 +86,13 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   // The AI switcher: a choice made here translates again with it (and becomes the default).
   const [aiMenuOpen, setAiMenuOpen] = useState(false)
   const [aiOverride, setAiOverride] = useState<AiChoice | null>(null)
+  // Writing back from the reading popup: Ctrl+Enter checks the reply, Enter uses it (see `replyRun`).
   const [replyMode, setReplyMode] = useState(false)
   const [replyText, setReplyText] = useState('')
+  const [replyRun, setReplyRun] = useState<ReplyRun | null>(null)
+  /** After a check: send the reply as written instead of the corrected one. */
+  const [keepOwn, setKeepOwn] = useState(false)
+  const replyRef = useRef<HTMLTextAreaElement>(null)
   /** User edits of the finished result, tied to the stream run they belong to. */
   const [edit, setEdit] = useState<{ key: string | null; text: string } | null>(null)
   const [longConfirmed, setLongConfirmed] = useState(request.source.length <= LONG_TEXT_LIMIT)
@@ -111,6 +126,18 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     keigoChosen,
     runKey,
     enabled: longConfirmed && !notice,
+    scenario,
+    history: windowed ? { conversationId, threadId: filedThread } : undefined,
+    ai: aiOverride,
+  })
+  // The reply's own run: its translation, or the check of a reply already in the other side's language.
+  const replyLive = useTranslation({
+    direction: replyRun?.direction ?? writeDirection(lang),
+    text: replyRun?.text ?? '',
+    keigo,
+    keigoChosen,
+    runKey: replyRun?.seq ?? 0,
+    enabled: replyRun !== null,
     scenario,
     history: windowed ? { conversationId, threadId: filedThread } : undefined,
     ai: aiOverride,
@@ -161,7 +188,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     return () => window.clearTimeout(t)
   }, [notice, onClose])
 
-  const tipVisible = tipOpen && resultReady && !isReview
+  const tipVisible = tipOpen && resultReady && !isReview && !replyMode
   const { updateSettings } = store
   useEffect(() => {
     if (tipVisible && !settings.popupTipShown) updateSettings({ popupTipShown: true })
@@ -207,15 +234,15 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const primary = () => {
     if (!resultReady) return
-    if (role === 'read') return
     const text = finalText
-    if (origin === 'composer' && onApply) {
+    if (role === 'read') {
+      void copy(text, t('Đã sao chép bản dịch', '翻訳をコピーしました'))
+    } else if (origin === 'composer' && onApply) {
       onApply(text)
-      onClose()
     } else {
       void copy(text, t('Đã sao chép, dán vào ô chat bằng Ctrl+V', 'コピーしました。Ctrl+V で入力欄に貼り付けてください'))
-      onClose()
     }
+    onClose()
   }
 
   const keepOriginal = () => {
@@ -230,35 +257,75 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
 
   const cycleKeigo = () => changeKeigo(keigoOrder[(keigoOrder.indexOf(keigo) + 1) % keigoOrder.length])
 
-  // Reply suggestions for the other side's message: three short replies in their language, with the meaning.
-  const [replies, setReplies] = useState<{ state: 'idle' | 'loading' | 'error'; items: SuggestedReply[]; error?: string }>({ state: 'idle', items: [] })
-  const askReplies = () => {
-    if (!resultReady || role !== 'read' || replies.state === 'loading') return
-    setReplies({ state: 'loading', items: [] })
-    const done = (items: SuggestedReply[]) => setReplies({ state: 'idle', items })
-    if (!windowed) {
-      window.setTimeout(() => done(MOCK_REPLIES[lang]), 700)
-      return
-    }
-    suggestReplies({ text: source, keigo, conversationId, threadId: filedThread })
-      .then(done)
-      .catch((e) => setReplies({ state: 'error', items: [], error: String(e) }))
-  }
+  // The reply. Typed in the user's language it is translated; typed in the other side's it is used as written, and
+  // a check reviews it in that language. It replaces the selected text when that was in a message box.
+  const replyReplaces = !!onApply && request.inMessageBox !== false
+  const replyBusy = replyRun !== null && replyLive.phase !== 'done' && replyLive.phase !== 'error'
+  const replyStale = replyRun !== null && replyText.trim() !== replyRun.text
+  const replyIsReview = replyRun?.direction === 'review_ja' || replyRun?.direction === 'review_vi'
+  const replyReview = useMemo(
+    () =>
+      replyRun && replyIsReview && replyLive.phase === 'done'
+        ? toReview(replyRun.text, replyLive.sections, replyRun.direction === 'review_ja' ? 'ja' : 'vi')
+        : null,
+    [replyRun, replyIsReview, replyLive.phase, replyLive.sections],
+  )
+  /** A check is shown for the reply as it is now: Enter sends what the check produced. */
+  const replyChecked = replyRun?.purpose === 'check' && replyLive.phase === 'done' && !replyStale
+  const replyFixed = replyChecked && !!replyReview && replyReview.verdict !== 'ok' && !keepOwn
+  const replyResult = !replyRun ? '' : replyIsReview ? (replyFixed ? replyReview!.suggestion : replyRun.text) : replyLive.sections.translation
 
   const startReply = () => {
     setReplyMode(true)
   }
 
-  const submitReply = () => {
-    const text = replyText.trim()
-    if (!text) return
-    setDirection(writeDirection(lang))
-    setSource(text)
-    setOrigin('popup')
+  const cancelReply = () => {
     setReplyMode(false)
-    setReplyText('')
-    setRunKey((r) => r + 1)
+    setReplyRun(null)
+    rootRef.current?.focus()
   }
+
+  const deliverReply = (text: string) => {
+    if (replyReplaces) onApply!(text, { keep: request.inMessageBox === null })
+    else void copy(text, t('Đã sao chép câu trả lời', '返信をコピーしました'))
+    onClose()
+  }
+
+  /** Review in the other side's language, or translate from the user's. */
+  const replyDirection = (text: string): Direction => {
+    const other = otherLang(lang)
+    if (isMostlyJapanese(text) === (other === 'ja')) return other === 'ja' ? 'review_ja' : 'review_vi'
+    return writeDirection(lang)
+  }
+
+  const runReply = (text: string, purpose: ReplyRun['purpose']) =>
+    setReplyRun((r) => ({ seq: (r?.seq ?? 0) + 1, text, purpose, direction: replyDirection(text) }))
+
+  const checkReply = () => {
+    const text = replyText.trim()
+    if (!text || replyBusy || replyChecked) return
+    setKeepOwn(false)
+    runReply(text, 'check')
+  }
+
+  const sendReply = () => {
+    const text = replyText.trim()
+    if (!text || replyBusy) return
+    if (replyChecked) return deliverReply(replyResult)
+    // Already in the other side's language: nothing to translate.
+    if (replyDirection(text) !== writeDirection(lang)) return deliverReply(text)
+    runReply(text, 'use')
+  }
+
+  // Enter on a reply in the user's language: translated, then used straight away.
+  const delivered = useRef(false)
+  useEffect(() => {
+    if (replyRun?.purpose !== 'use' || replyLive.phase !== 'done' || delivered.current) return
+    delivered.current = true
+    deliverReply(replyLive.sections.translation)
+    // Runs once per finished run; `deliverReply` only reads what that run produced.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [replyRun, replyLive.phase])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const target = e.target as HTMLElement
@@ -271,7 +338,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       if (aiMenuOpen) {
         setAiMenuOpen(false)
         rootRef.current?.focus()
-      } else if (replyMode) setReplyMode(false)
+      } else if (replyMode) cancelReply()
       else close()
       return
     }
@@ -283,9 +350,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       return
     }
     if (inReply) {
-      if (e.key === 'Enter' && e.ctrlKey) {
+      // Enter while an input method (the Japanese IME) is composing confirms the word; Shift+Enter is a new line.
+      if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
-        submitReply()
+        if (e.ctrlKey) checkReply()
+        else sendReply()
       }
       return
     }
@@ -304,17 +373,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
       cycleKeigo()
       return
     }
-    if (e.key === 'Enter' && !e.shiftKey && (inDraft || !typing)) {
+    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && (inDraft || !typing)) {
       e.preventDefault()
-      // On the other side's message Enter starts a reply. Not a letter key: an input method (UniKey, the
+      // On the other side's message Ctrl+Enter starts a reply. Not a letter key: an input method (UniKey, the
       // Japanese IME) would count the letter as the start of the first word typed in the reply box.
-      if (role === 'read') startReply()
-      else primary()
-      return
-    }
-    if (!typing && role === 'read' && e.key.toLowerCase() === 'g' && !e.ctrlKey && !e.altKey) {
-      e.preventDefault()
-      askReplies()
+      if (!e.ctrlKey) primary()
+      else if (role === 'read') startReply()
     }
   }
 
@@ -489,15 +553,42 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             back={live.sections.backTranslation || undefined}
           />
         )}
-        {role === 'read' && (replies.state !== 'idle' || replies.items.length > 0) ? (
-          <RepliesBlock
-            state={replies.state}
-            items={replies.items}
-            error={replies.error}
-            onRetry={askReplies}
-            onCopy={(r) => void copy(r.text, t('Đã sao chép câu trả lời', '返信をコピーしました'))}
-          />
-        ) : null}
+        {replyMode && replyRun && (
+          <div data-reply-result className={cx('border-t border-line', replyStale && 'opacity-45')}>
+            {replyLive.phase === 'error' && replyLive.error ? (
+              <ErrorBanner
+                kind={replyLive.error.kind}
+                provider={replyLive.error.provider}
+                message={replyLive.error.message}
+                onRetry={() => setReplyRun((r) => r && { ...r, seq: r.seq + 1 })}
+                onAction={(t) => showToast(t)}
+                alternatives={aiChoices.filter((c) => c.available && c.provider !== replyLive.error?.provider)}
+                onPick={pickAi}
+                onSettings={manageAi}
+              />
+            ) : replyRun.purpose === 'use' ? (
+              <PendingBlock label={t('Đang dịch câu trả lời…', '返信を翻訳中…')} />
+            ) : (
+              <ReplyCheck
+                run={replyRun}
+                sections={replyLive.sections}
+                done={replyLive.phase === 'done'}
+                review={replyReview}
+                keepOwn={keepOwn}
+                onKeepOwn={(keep) => {
+                  setKeepOwn(keep)
+                  // Back to the reply box, where Enter uses the reply.
+                  replyRef.current?.focus()
+                }}
+              />
+            )}
+          </div>
+        )}
+        {replyMode && replyRun?.purpose === 'check' && replyStale && !replyBusy && (
+          <p className="px-4 pb-2 text-[12px] text-warn">
+            {t('Bạn đã sửa câu trả lời: Ctrl+Enter để kiểm tra lại, hoặc Enter để dùng luôn.', '返信が変更されました。Ctrl+Enter で再チェック、Enter でそのまま使えます。')}
+          </p>
+        )}
         {resultReady && live.answeredBy?.fallbackFrom && (
           <div className="border-t border-line px-4 py-1.5 text-[12px] text-ink-2">
             {t(
@@ -529,22 +620,40 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
         {replyMode ? (
           <div className="flex flex-col gap-2">
             <textarea
+              ref={replyRef}
               data-role="reply"
               autoFocus
               rows={2}
               value={replyText}
               onChange={(e) => setReplyText(e.target.value)}
-              placeholder={t('Gõ câu trả lời bằng tiếng Việt...', '日本語で返信を入力…')}
+              placeholder={t('Gõ câu trả lời bằng tiếng Việt (tự dịch) hoặc tiếng Nhật…', '日本語（自動で翻訳）またはベトナム語で返信を入力…')}
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
-            <div className="flex items-center justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setReplyMode(false)}>
-                {t('Hủy', 'キャンセル')} <Kbd>Esc</Kbd>
-              </Button>
-              <Button size="sm" variant="primary" disabled={!replyText.trim()} onClick={submitReply}>
-                {t('Dịch sang tiếng Nhật', 'ベトナム語に翻訳')}{' '}
-                <Kbd className="h-4 border-transparent bg-white/25 text-on-accent">Ctrl+Enter</Kbd>
-              </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {/* Esc leaves the reply: a key named here rather than a third button, so the two actions keep one row. */}
+              <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] whitespace-nowrap text-ink-3">
+                <span>
+                  <Kbd>Shift+Enter</Kbd> {t('xuống dòng', '改行')}
+                </span>
+                <button type="button" onClick={cancelReply} className="rounded hover:text-ink">
+                  <Kbd>Esc</Kbd> {t('hủy', 'キャンセル')}
+                </button>
+              </p>
+              <div className="ml-auto flex shrink-0 items-center gap-2">
+                <Button size="sm" disabled={!replyText.trim() || replyBusy || replyChecked} onClick={checkReply}>
+                  <SpellCheck size={14} /> {t('Kiểm tra', 'チェック')} <Kbd>Ctrl+Enter</Kbd>
+                </Button>
+                <Button size="sm" variant="primary" disabled={!replyText.trim() || replyBusy} onClick={sendReply}>
+                  {replyReplaces
+                    ? replyFixed
+                      ? t('Thay bằng câu đã sửa', '修正案で置き換え')
+                      : t('Thay vào ô chat', '入力欄に貼り付け')
+                    : replyFixed
+                      ? t('Sao chép câu đã sửa', '修正案をコピー')
+                      : t('Sao chép', 'コピー')}{' '}
+                  <Kbd>↵</Kbd>
+                </Button>
+              </div>
             </div>
           </div>
         ) : (
@@ -558,9 +667,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
             onPrimary={primary}
             onKeep={keepOriginal}
             onReply={startReply}
-            onSuggest={askReplies}
-            suggesting={replies.state === 'loading'}
-            onCopy={() => void copy(finalText, t('Đã sao chép bản dịch', '翻訳をコピーしました'))}
             onFeedback={() => {
               setFeedbackSent(true)
               if (windowed && saved) void setFeedback(saved.messageId, true)
@@ -579,6 +685,7 @@ function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin
   const t = useT()
   const lang = useLang()
   const enter = <Kbd>Enter</Kbd>
+  const ctrlEnter = <Kbd>Ctrl+Enter</Kbd>
   const tab = <Kbd>Tab</Kbd>
   const esc = <Kbd>Esc</Kbd>
   return (
@@ -587,14 +694,14 @@ function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin
       <p className="min-w-0 flex-1">
         {lang === 'ja' ? (
           role === 'read' ? (
-            <>{enter} で日本語の返信を入力すると、MyTranslate がベトナム語に翻訳します。{esc} で閉じます。</>
+            <>{enter} で翻訳をコピー、{ctrlEnter} で返信を入力します。{esc} で閉じます。</>
           ) : origin === 'composer' ? (
             <>{enter} でベトナム語訳を入力欄に貼り付けます。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
           ) : (
             <>{enter} で翻訳をコピーします。{tab} で丁寧さを切り替えます。{esc} で閉じます。</>
           )
         ) : role === 'read' ? (
-          <>Nhấn {enter} để gõ câu trả lời bằng tiếng Việt, MyTranslate sẽ dịch sang tiếng Nhật cho bạn. {esc} để đóng.</>
+          <>Nhấn {enter} để sao chép bản dịch, {ctrlEnter} để gõ câu trả lời. {esc} để đóng.</>
         ) : origin === 'composer' ? (
           <>Nhấn {enter} để thay bản tiếng Nhật vào ô chat. {tab} đổi mức kính ngữ. {esc} để đóng.</>
         ) : (
@@ -608,79 +715,77 @@ function FirstTip({ role, origin, onDismiss }: { role: Role; origin: PopupOrigin
   )
 }
 
-/** The prototype's suggested replies: in the other side's language, with the meaning in the user's. */
-const MOCK_REPLIES: Record<Lang, SuggestedReply[]> = {
-  vi: [
-    { text: '承知いたしました。確認いたします。', meaning: 'Em đã hiểu. Em sẽ kiểm tra ạ.' },
-    { text: '詳細を教えていただけますでしょうか。', meaning: 'Anh có thể cho em biết chi tiết hơn được không ạ?' },
-    { text: '本日中に確認してご連絡いたします。', meaning: 'Trong hôm nay em sẽ kiểm tra và liên lạc lại ạ.' },
-  ],
-  ja: [
-    { text: 'Anh hiểu rồi. Cảm ơn em nhé.', meaning: 'わかりました。ありがとう。' },
-    { text: 'Em cho anh biết thêm chi tiết được không?', meaning: 'もう少し詳しく教えてもらえますか。' },
-    { text: 'Anh sẽ kiểm tra và trả lời em trong hôm nay.', meaning: '今日中に確認して返事します。' },
-  ],
-}
-
-function RepliesBlock({
-  state,
-  items,
-  error,
-  onRetry,
-  onCopy,
+/** The check of a reply: its review in the other side's language, or its translation with the meaning read back. */
+function ReplyCheck({
+  run,
+  sections,
+  done,
+  review,
+  keepOwn,
+  onKeepOwn,
 }: {
-  state: 'idle' | 'loading' | 'error'
-  items: SuggestedReply[]
-  error?: string
-  onRetry: () => void
-  onCopy: (r: SuggestedReply) => void
+  run: ReplyRun
+  sections: Sections
+  done: boolean
+  review: ReviewResult | null
+  keepOwn: boolean
+  onKeepOwn: (keep: boolean) => void
 }) {
   const t = useT()
-  const lang = useLang()
+  const userLang = useLang()
+  const reviewing = run.direction === 'review_ja' || run.direction === 'review_vi'
+  const heading = (
+    <div className="flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">
+      {reviewing ? <SpellCheck size={12} className="text-accent" /> : <Languages size={12} className="text-accent" />}
+      {reviewing ? t('Kiểm tra câu trả lời', '返信のチェック') : t('Câu trả lời đã dịch', '翻訳した返信')}
+      {reviewing && review && (
+        <span className="ml-auto normal-case tracking-normal">
+          <DirectionBadge direction={run.direction} verdict={review.verdict} />
+        </span>
+      )}
+    </div>
+  )
+  if (reviewing) {
+    return (
+      <>
+        <div className="px-4 pt-3">{heading}</div>
+        <ReviewBody result={review} streaming={sections.suggestion} textLang={run.direction === 'review_ja' ? 'ja' : 'vi'} />
+        {review && review.verdict !== 'ok' && (
+          <Section>
+            <label className="flex cursor-pointer items-center gap-2 text-[13px] text-ink-2">
+              <input type="checkbox" checked={keepOwn} onChange={(e) => onKeepOwn(e.target.checked)} className="size-3.5 accent-[var(--accent)]" />
+              {t('Giữ nguyên câu của tôi, không dùng đề xuất', '修正案を使わず、自分の文のまま使う')}
+            </label>
+          </Section>
+        )}
+      </>
+    )
+  }
+  if (!sections.translation) {
+    return (
+      <>
+        <div className="px-4 pt-3">{heading}</div>
+        <PendingBlock label={t('Đang dịch…', '翻訳中…')} />
+      </>
+    )
+  }
   return (
-    <Section className="bg-subtle">
-      <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">
-        <Sparkles size={12} className="text-accent" /> {t('Gợi ý trả lời', '返信案')}
-      </div>
-      {state === 'loading' && (
-        <div role="status" className="flex items-center gap-2 py-1 text-[13.5px] text-ink-2">
-          <Loader2 size={15} className="animate-spin text-accent motion-reduce:animate-none" /> {t('Đang soạn gợi ý…', '返信案を作成中…')}
-        </div>
+    <>
+      <Section>
+        <div className="mb-1">{heading}</div>
+        <p lang={targetLang(run.direction)} className={cx('text-[15px] leading-relaxed whitespace-pre-wrap', !done && 'stream-caret')}>
+          <InkText text={sections.translation} />
+        </p>
+      </Section>
+      {done && sections.backTranslation && (
+        <Section className="bg-subtle">
+          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Ý nghĩa khi đọc lại', '読み返したときの意味')}</div>
+          <p lang={userLang} className="text-[13.5px] leading-relaxed whitespace-pre-wrap text-ink-2">
+            {sections.backTranslation}
+          </p>
+        </Section>
       )}
-      {state === 'error' && (
-        <div className="flex items-center gap-2 text-[13px] text-bad">
-          <span className="min-w-0 flex-1 truncate" title={error}>
-            {t('Không lấy được gợi ý', '返信案を取得できません')}
-          </span>
-          <Button size="sm" onClick={onRetry}>
-            {t('Thử lại', '再試行')}
-          </Button>
-        </div>
-      )}
-      <div className="flex flex-col gap-1">
-        {items.map((r) => (
-          <button
-            key={r.text}
-            type="button"
-            onClick={() => onCopy(r)}
-            title={t('Bấm để sao chép', 'クリックでコピー')}
-            className="group -mx-2 flex items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-hover"
-          >
-            <span className="min-w-0 flex-1">
-              <span lang={otherLang(lang)} className="block text-[14px] leading-relaxed text-ink">
-                {r.text}
-              </span>
-              {r.meaning && (
-                <span lang={lang} className="block text-[12.5px] leading-relaxed text-ink-2">
-                  {r.meaning}
-                </span>
-              )}
-            </span>
-            <Copy size={13} className="mt-1 shrink-0 text-ink-3 opacity-0 group-hover:opacity-100" />
-          </button>
-        ))}
-      </div>
-    </Section>
+    </>
   )
 }
 
@@ -1155,9 +1260,6 @@ function FooterActions({
   onPrimary,
   onKeep,
   onReply,
-  onSuggest,
-  suggesting,
-  onCopy,
   onFeedback,
 }: {
   role: Role
@@ -1169,9 +1271,6 @@ function FooterActions({
   onPrimary: () => void
   onKeep: () => void
   onReply: () => void
-  onSuggest: () => void
-  suggesting: boolean
-  onCopy: () => void
   onFeedback: () => void
 }) {
   const t = useT()
@@ -1186,27 +1285,19 @@ function FooterActions({
       <ThumbsDown size={14} />
     </IconButton>
   )
-  const enterKbd = <Kbd className="h-4 border-transparent bg-white/25 px-1 text-[12px] text-on-accent">↵</Kbd>
+  const enterKbd = <Kbd>↵</Kbd>
 
   if (role === 'read') {
     return (
-      // Wraps instead of overflowing when the popup is made narrow: copy moves under reply and suggest.
+      // Wraps instead of overflowing when the popup is made narrow: copy moves under reply.
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" onClick={onReply}>
-          <Reply size={14} /> {t('Trả lời', '返信')} <Kbd>↵</Kbd>
-        </Button>
-        <Button
-          size="sm"
-          disabled={!ready || suggesting}
-          onClick={onSuggest}
-          title={t('AI gợi ý 3 câu trả lời tiếng Nhật', 'AIがベトナム語の返信案を3つ提案します')}
-        >
-          <Sparkles size={14} /> {t('Gợi ý', '返信案')} <Kbd>G</Kbd>
+          <Reply size={14} /> {t('Trả lời', '返信')} <Kbd>Ctrl+Enter</Kbd>
         </Button>
         <div className="ml-auto flex items-center gap-2">
           {feedbackButton}
-          <Button size="sm" disabled={!ready} onClick={onCopy}>
-            <Copy size={14} /> {t('Sao chép', 'コピー')}
+          <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>
+            <Copy size={14} /> {t('Sao chép', 'コピー')} {enterKbd}
           </Button>
         </div>
       </div>

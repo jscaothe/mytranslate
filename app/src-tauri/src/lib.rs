@@ -303,7 +303,7 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         Direction::ViJa => ("vi_ja", &s.translation, &s.back_translation),
         Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
         Direction::ReviewVi => ("review_vi", &s.suggestion, &s.suggestion_vi),
-        Direction::Reply | Direction::WritingAdvice => return None,
+        Direction::WritingAdvice => return None,
     };
     // The user's own message goes from their language into the other side's; a review is always theirs.
     let mine = !matches!(
@@ -365,7 +365,7 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
         (Direction::ReviewJa, Lang::Vi) => s.suggestion_vi.as_str(),
         (Direction::ReviewJa, Lang::Ja) | (Direction::ReviewVi, Lang::Vi) => s.suggestion.as_str(),
         (Direction::ReviewVi, Lang::Ja) => s.suggestion_vi.as_str(),
-        (Direction::Reply | Direction::WritingAdvice, _) => "",
+        (Direction::WritingAdvice, _) => "",
     };
     // Japanese has no spaces between words: keep the first characters instead.
     let title = if req.user_lang == Lang::Ja {
@@ -495,65 +495,6 @@ async fn writing_advice_make(
             .into());
     }
     history.set_advice(lang, &items).map_err(|e| e.to_string())
-}
-
-/// A reply in the other side's language, with its meaning in the user's.
-#[derive(Debug, PartialEq, Serialize)]
-struct Reply {
-    text: String,
-    meaning: String,
-}
-
-/// Three short replies the user could send to the other side's message, with their meaning.
-#[tauri::command]
-async fn suggest_replies(
-    app: AppHandle,
-    router: State<'_, Arc<Router>>,
-    text: String,
-    keigo: Keigo,
-    conversation_id: Option<i64>,
-    thread_id: Option<i64>,
-) -> Result<Vec<Reply>, String> {
-    let mut request = TranslateRequest::task(Direction::Reply, &text, keigo);
-    request.conversation_id = conversation_id;
-    request.thread_id = thread_id;
-    add_context(&app, &mut request);
-    let sections = complete(&app, router.inner(), request).await?;
-    let replies = parse_replies(&sections.replies);
-    if replies.is_empty() {
-        return Err(no_replies_error(&app));
-    }
-    Ok(replies)
-}
-
-fn no_replies_error(app: &AppHandle) -> String {
-    language(app)
-        .pick("AI không trả về gợi ý", "AIから返信案が返りませんでした")
-        .into()
-}
-
-/// "reply || meaning" per line; a line without the separator is a reply without its meaning.
-fn parse_replies(text: &str) -> Vec<Reply> {
-    text.lines()
-        .map(|l| {
-            l.trim()
-                .trim_start_matches(|c: char| c == '-' || c == '・' || c.is_ascii_digit() || c == '.')
-                .trim()
-        })
-        .filter(|l| !l.is_empty())
-        .map(|l| match l.split_once("||") {
-            Some((text, meaning)) => Reply {
-                text: text.trim().to_string(),
-                meaning: meaning.trim().to_string(),
-            },
-            None => Reply {
-                text: l.to_string(),
-                meaning: String::new(),
-            },
-        })
-        .filter(|r| !r.text.is_empty())
-        .take(3)
-        .collect()
 }
 
 /// The team glossary file named in the settings, read-only.
@@ -959,7 +900,6 @@ pub fn run() {
             updates::update_status,
             updates::update_check,
             updates::update_install,
-            suggest_replies,
             writing_stats,
             writing_advice_get,
             writing_advice_make,
@@ -982,26 +922,6 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn replies_tolerate_numbering_and_missing_meaning() {
-        let r = parse_replies(
-            "1. 承知しました。 || Em đã hiểu.\n\n- 確認いたします。||Em sẽ kiểm tra.\nご連絡ありがとうございます。\n4つ目 || thừa",
-        );
-        assert_eq!(r.len(), 3);
-        assert_eq!(
-            (r[0].text.as_str(), r[0].meaning.as_str()),
-            ("承知しました。", "Em đã hiểu.")
-        );
-        assert_eq!(
-            (r[1].text.as_str(), r[1].meaning.as_str()),
-            ("確認いたします。", "Em sẽ kiểm tra.")
-        );
-        assert_eq!(
-            (r[2].text.as_str(), r[2].meaning.as_str()),
-            ("ご連絡ありがとうございます。", "")
-        );
-    }
 
     fn msg(text: &str) -> ThreadMessage {
         ThreadMessage {

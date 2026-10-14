@@ -131,6 +131,7 @@ export function Playground() {
         direction,
         source: got.text,
         origin,
+        inMessageBox: got.origin === 'composer',
         // What the real app reads from the chat window's title: a channel with its #, a DM by the person's name.
         conversation: channel.kind === 'channel' ? `#${channel.label}` : channel.label,
         app,
@@ -173,6 +174,21 @@ export function Playground() {
   // Global shortcuts (in the real app these are OS-wide).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // Like the real app: Ctrl+A on text in the message box offers the toolbar; any other key puts it away.
+      if (!['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) setQuick(null)
+      const selectAll = e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.key.toLowerCase() === 'a'
+      const el = composerRef.current
+      if (selectAll && el && document.activeElement === el && settings.quickActions.enabled && !settings.hotkeysPaused) {
+        // Let the browser select first.
+        window.setTimeout(() => {
+          const root = rootRef.current
+          if (!root || el.selectionStart === el.selectionEnd || !el.value.trim()) return
+          const box = root.getBoundingClientRect()
+          const r = el.getBoundingClientRect()
+          const y = r.top - box.top
+          setQuick({ x: r.left - box.left + 12, y, startY: y })
+        }, 0)
+      }
       const combo = comboFromEvent(e)
       if (!combo) return
       const { hotkeys } = settings
@@ -320,6 +336,7 @@ export function Playground() {
                 <Step n={1} title="ベトナム側のメッセージを読む">
                   ベトナム語のメッセージを選択して <Hotkey combo={settings.hotkeys.auto} />
                   {settings.quickActions.enabled ? '、または表示されたツールバーの「日本語に翻訳」をクリック。' : '。'}
+                  <Hotkey combo="Enter" /> で翻訳をコピー、<Hotkey combo="Ctrl+Enter" /> でそのまま返信を書けます。
                 </Step>
                 <Step n={2} title="日本語で返信する">
                   入力欄に日本語を書いて <Hotkey combo={settings.hotkeys.auto} />。<Hotkey combo="Tab" /> で丁寧さを切り替え、
@@ -339,7 +356,8 @@ export function Playground() {
               <>
                 <Step n={1} title="Đọc tin của khách">
                   Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.auto} />
-                  {settings.quickActions.enabled ? ', hoặc bấm "Dịch" trên thanh thao tác hiện ra.' : '.'}
+                  {settings.quickActions.enabled ? ', hoặc bấm "Dịch" trên thanh thao tác hiện ra.' : '.'} <Hotkey combo="Enter" /> sao chép bản
+                  dịch, <Hotkey combo="Ctrl+Enter" /> để trả lời ngay trong popup.
                 </Step>
                 <Step n={2} title="Trả lời bằng tiếng Việt">
                   Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}

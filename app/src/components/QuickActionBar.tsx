@@ -3,7 +3,7 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useLang, useT } from '../lib/i18n'
 import type { QuickActionId, QuickActionItem } from '../store'
 import { quickActionMeta, visibleQuickActions } from './quickActions'
-import { cx } from './styles'
+import { cx, pressable } from './styles'
 
 /**
  * Small toolbar shown next to a mouse selection. Buttons use onMouseDown preventDefault so the selection
@@ -71,7 +71,7 @@ export function QuickActionBar({
             aria-label={t('Ẩn thanh thao tác', 'ツールバーを隠す')}
             title={bare ? t('Ẩn (Esc)', '隠す (Esc)') : undefined}
             onClick={onDismiss}
-            className="flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-colors hover:bg-hover hover:text-ink"
+            className={cx('flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 hover:bg-hover hover:text-ink', pressable)}
           >
             <X size={10} strokeWidth={2.2} />
           </button>
@@ -107,9 +107,10 @@ function BarButton({
       aria-label={iconOnly ? children : undefined}
       onClick={onClick}
       className={cx(
-        'group relative flex h-6 shrink-0 items-center justify-center rounded-[5px] text-[12px] font-medium whitespace-nowrap transition-colors',
+        'group relative flex h-6 shrink-0 items-center justify-center rounded-[5px] text-[12px] whitespace-nowrap hover:bg-hover hover:text-ink',
+        pressable,
         iconOnly ? 'w-6' : 'gap-1 pr-2 pl-1.5',
-        primary ? 'bg-accent text-on-accent hover:bg-accent-hover' : 'text-ink-2 hover:bg-hover hover:text-ink',
+        primary ? 'font-semibold text-ink' : 'font-medium text-ink-2',
       )}
     >
       {icon}

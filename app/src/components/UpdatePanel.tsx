@@ -2,6 +2,7 @@ import { ArrowUpCircle, CheckCircle2, Loader2, X } from 'lucide-react'
 import { useState } from 'react'
 import { locale, useLang, useT } from '../lib/i18n'
 import { formatBytes, type InstallState, type UpdateStatus } from '../lib/updates'
+import { cx, pressable } from './styles'
 import { Button } from './ui'
 
 /** Download progress, or the reason the update failed. */
@@ -73,7 +74,7 @@ export function UpdateBanner({
           aria-label={t('Để sau', '後で')}
           title={t('Để sau', '後で')}
           onClick={() => setDismissed(available.version)}
-          className="flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink"
+          className={cx('flex size-7 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink', pressable)}
         >
           <X size={14} />
         </button>

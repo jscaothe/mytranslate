@@ -54,7 +54,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
   await selectStart(page, message, 10)
   await page.keyboard.press('Control+Alt+T')
   const tip = popup(page).getByRole('note')
-  await expect(tip).toContainText('để gõ câu trả lời bằng tiếng Việt')
+  await expect(tip).toContainText('để gõ câu trả lời')
   await tip.getByRole('button', { name: 'Đã hiểu' }).click()
   await expect(tip).toHaveCount(0)
   await page.keyboard.press('Escape')
@@ -63,7 +63,7 @@ test('the first real popup explains the keys once', async ({ page }) => {
   await selectStart(page, message, 10)
   await page.keyboard.press('Control+Alt+T')
   await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
-  await expect(popup(page).getByRole('button', { name: /Gợi ý/ })).toBeEnabled()
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
   await expect(popup(page).getByRole('note')).toHaveCount(0)
 })
 

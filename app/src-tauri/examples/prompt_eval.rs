@@ -117,7 +117,6 @@ fn main() {
             Direction::ReviewJa => format!("Kiểm tra JA ({:?})", case.keigo).to_lowercase(),
             Direction::ReviewVi => "kiểm tra vi".into(),
             Direction::WritingAdvice => "lời khuyên".into(),
-            Direction::Reply => format!("Gợi ý trả lời ({:?})", case.keigo).to_lowercase(),
         };
         let direction = match case.user {
             Lang::Vi => direction,
@@ -132,7 +131,6 @@ fn main() {
                     format!("{} {}", s.suggestion_vi, s.issues.replace('\n', "; ")),
                     first(&timing),
                 ),
-                Direction::Reply => (s.replies, String::new(), first(&timing)),
                 _ => (s.translation, s.back_translation, first(&timing)),
             },
             Some(TranslateEvent::Error { message, .. }) => (format!("LỖI: {message}"), String::new(), None),

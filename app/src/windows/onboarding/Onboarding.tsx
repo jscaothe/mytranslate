@@ -501,6 +501,7 @@ function TryIt() {
       direction,
       source: text || window.getSelection()?.toString().trim() || sample,
       origin: 'onboarding',
+      inMessageBox: false,
       conversation: '#dev-qa',
       app: 'slack',
       anchor: { x: 0, y: 0 },

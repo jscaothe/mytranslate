@@ -5,7 +5,7 @@ import { QuickActionBar } from '../../components/QuickActionBar'
 import { InstallProgress, UpToDate } from '../../components/UpdatePanel'
 import type { useUpdates } from '../../lib/updates'
 import { Button, Hotkey, Segmented, Switch } from '../../components/ui'
-import { cx, inputClass } from '../../components/styles'
+import { cx, inputClass, pressable } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
@@ -253,7 +253,7 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
                       type="button"
                       aria-label={t(`Bỏ chặn ${a}`, `${a} の除外を解除`)}
                       onClick={() => updateSettings({ blockedApps: settings.blockedApps.filter((x) => x !== a) })}
-                      className="flex size-4 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink"
+                      className={cx('flex size-4 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink', pressable)}
                     >
                       <X size={11} />
                     </button>

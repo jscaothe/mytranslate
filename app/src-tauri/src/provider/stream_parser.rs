@@ -15,14 +15,11 @@ pub struct Sections {
     pub issues: String,
     pub suggestion: String,
     pub suggestion_vi: String,
-    /// suggest_replies only: one "Japanese || Vietnamese" per line.
-    pub replies: String,
     /// writing_advice only: one "title || advice || example" per line.
     pub advice: String,
 }
 
-const TAGS: [&str; 9] = [
-    "replies",
+const TAGS: [&str; 8] = [
     "advice",
     "translation",
     "back_translation",
@@ -73,8 +70,7 @@ pub fn parse(raw: &str) -> Sections {
             "issues" => out.issues = text,
             "suggestion" => out.suggestion = text,
             "suggestion_vi" => out.suggestion_vi = text,
-            "advice" => out.advice = text,
-            _ => out.replies = text,
+            _ => out.advice = text,
         }
     }
     // Tolerate a reply that ignored the tags entirely: show it as the translation.
