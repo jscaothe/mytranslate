@@ -70,7 +70,7 @@ test('a reply typed in Japanese from the reading popup is translated into Vietna
 
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
-  await expect(reply).toHaveAttribute('placeholder', '日本語（自動で翻訳）またはベトナム語で返信を入力…')
+  await expect(reply).toHaveAttribute('placeholder', '日本語またはベトナム語で返信を入力（Shift+Enter で改行）')
   await reply.fill('確認しました。本番に反映してください。')
   await reply.press('Enter')
 

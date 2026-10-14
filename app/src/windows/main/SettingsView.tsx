@@ -514,7 +514,9 @@ function SettingsLayout({ pages }: { pages: Record<SettingsSection, ReactNode> }
         ))}
       </nav>
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-[680px] flex-col gap-6 px-6 py-6">
+        {/* Next to the list of parts, as in Windows Settings: on a wide screen the page grows up to a width that still
+            reads in one sweep, and the room left is on the far side rather than split around a narrow column. */}
+        <div className="flex max-w-[960px] flex-col gap-6 px-8 py-6">
           {q ? (
             <>
               <h2 className="text-[20px] font-semibold">{t(`Kết quả cho "${query.trim()}"`, `「${query.trim()}」の検索結果`)}</h2>

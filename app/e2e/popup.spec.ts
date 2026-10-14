@@ -75,7 +75,7 @@ test('Ctrl+Enter replies to a message; Enter translates the Vietnamese reply, sh
   const reply = popup(page).locator('textarea[data-role=reply]')
   await expect(reply).toBeFocused()
   await reply.fill('Em đã sửa xong rồi ạ')
-  await expect(popup(page).getByRole('button', { name: /^Dịch/ })).toBeEnabled()
+  await expect(popup(page).getByRole('button', { name: /^Dịch(?! chưa tốt)/ })).toBeEnabled()
 
   // First Enter: the Japanese to send, with its meaning read back.
   await reply.press('Enter')
