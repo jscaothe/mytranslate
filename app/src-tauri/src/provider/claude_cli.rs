@@ -8,7 +8,7 @@
 //! - `--effort low` with Sonnet avoids most of the model's "thinking" before it writes.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -107,6 +107,9 @@ pub enum ErrorKind {
     BadKey,
     /// Could not reach the vendor.
     Network,
+    /// The vendor refuses MyTranslate's use of its tool (Claude Code, Codex) with the user's plan; the account
+    /// itself is fine.
+    Blocked,
 }
 
 struct Process {
@@ -119,7 +122,8 @@ struct Process {
 }
 
 pub struct ClaudeCli {
-    exe: PathBuf,
+    /// Found again after MyTranslate installs Claude Code.
+    exe: std::sync::RwLock<PathBuf>,
     workdir: PathBuf,
     model: std::sync::Mutex<String>,
     spare: Mutex<Option<Process>>,
@@ -134,7 +138,7 @@ impl ClaudeCli {
     pub fn new(workdir: PathBuf, model: &str) -> Arc<Self> {
         let _ = std::fs::create_dir_all(&workdir);
         Arc::new(Self {
-            exe: find_claude(),
+            exe: std::sync::RwLock::new(find_claude()),
             workdir,
             model: std::sync::Mutex::new(model.to_string()),
             spare: Mutex::new(None),
@@ -144,8 +148,14 @@ impl ClaudeCli {
         })
     }
 
-    pub fn exe(&self) -> &Path {
-        &self.exe
+    pub fn exe(&self) -> PathBuf {
+        self.exe.read().unwrap().clone()
+    }
+
+    /// Looks for `claude` again (it was just installed) and boots a spare with it.
+    pub fn relocate(self: &Arc<Self>) {
+        *self.exe.write().unwrap() = find_claude();
+        self.refill();
     }
 
     fn current_model(&self) -> String {
@@ -398,7 +408,7 @@ impl ClaudeCli {
     }
 
     fn spawn_process(&self, model: &str) -> std::io::Result<Process> {
-        let mut cmd = Command::new(&self.exe);
+        let mut cmd = Command::new(self.exe());
         cmd.args([
             "-p",
             "--safe-mode",
@@ -470,6 +480,21 @@ fn parse_rate_limit(v: &Value) -> RateLimit {
     }
 }
 
+/// Whether the vendor's answer says this use of its tool is not allowed (as opposed to a signed-out account). The
+/// exact wording is not documented; these are the phrases such refusals have used.
+pub fn refused_by_vendor(lower: &str) -> bool {
+    [
+        "third-party",
+        "third party",
+        "not permitted",
+        "only authorized for use",
+        "not allowed to use",
+        "unauthorized client",
+    ]
+    .iter()
+    .any(|p| lower.contains(p))
+}
+
 /// Claude Code retries a request it could not send for minutes, silently. When the server stays out of reach (no
 /// HTTP answer at all, or a proxy asking for credentials) for a few attempts, the network is the problem: say so
 /// now instead of after the request timeout. Server errors (overloaded, 5xx) are left to Claude Code's retries.
@@ -490,7 +515,9 @@ fn unreachable(msg: &Value) -> Option<String> {
 
 fn classify_failure(text: &str) -> (ErrorKind, String) {
     let lower = text.to_lowercase();
-    let kind = if lower.contains("login")
+    let kind = if refused_by_vendor(&lower) {
+        ErrorKind::Blocked
+    } else if lower.contains("login")
         || lower.contains("log in")
         || lower.contains("authenticat")
         || lower.contains("oauth")
@@ -510,7 +537,7 @@ fn classify_failure(text: &str) -> (ErrorKind, String) {
 }
 
 /// Finds `claude.exe` on PATH, falling back to the default per-user install location.
-fn find_claude() -> PathBuf {
+pub fn find_claude() -> PathBuf {
     let name = if cfg!(windows) { "claude.exe" } else { "claude" };
     if let Some(paths) = std::env::var_os("PATH") {
         for dir in std::env::split_paths(&paths) {
@@ -601,6 +628,13 @@ mod tests {
             ErrorKind::RateLimited
         );
         assert_eq!(classify_failure("").0, ErrorKind::Cli);
+        assert_eq!(
+            classify_failure(
+                "This credential is only authorized for use with Claude Code and cannot be used for other API requests."
+            )
+            .0,
+            ErrorKind::Blocked
+        );
     }
 
     #[test]

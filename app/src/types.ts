@@ -6,7 +6,7 @@ export type Direction = 'ja_vi' | 'vi_ja' | 'review_ja' | 'review_vi'
 export type Keigo = 'casual' | 'polite' | 'formal'
 
 /** Simulated backend condition, chosen from the prototype toolbar. */
-export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'network'
+export type Scenario = 'normal' | 'no_claude' | 'not_logged_in' | 'quota' | 'network' | 'blocked'
 
 export interface GlossaryTerm {
   id: string

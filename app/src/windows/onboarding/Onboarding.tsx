@@ -1,16 +1,18 @@
-import { ArrowLeftRight, Check, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, RotateCw, ShieldAlert, Terminal } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { Check, ChevronLeft, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, ShieldAlert } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
 import { invoke } from '@tauri-apps/api/core'
-import { AI_NAMES, KEY_HELP, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
-import { claudeStatus, isTauri, startTranslation, type ErrorKind } from '../../lib/claude'
+import { API_PROVIDERS, KEY_HELP, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
+import { ACCOUNT_TOOL, accountStatus, type Account } from '../../lib/accounts'
+import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { otherLang, readDirection, useLang, useT, type Lang, type T } from '../../lib/i18n'
-import { useStore, type AiProvider, type QuickActionId } from '../../store'
+import { useStore, type AiProvider, type ApiProvider, type QuickActionId } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 import { Popup } from '../popup/Popup'
+import { AccountCheck } from '../../components/AccountCheck'
 import type { PopupRequest } from '../popup/types'
 import { HowItWorksDemo } from './HowItWorksDemo'
 
@@ -19,8 +21,6 @@ const sampleMessage: Record<Lang, string> = {
   vi: 'お世話になっております。明日の打ち合わせの資料を共有いたします。',
   ja: 'Em gửi anh tài liệu cho buổi họp ngày mai ạ. Anh xem trước giúp em nhé.',
 }
-
-type CheckState = 'idle' | 'running' | 'ok' | 'fail'
 
 /** First-run guide. In the real app (`chromeless`) it fills the main window; in the prototype it sits on the fake desktop. */
 export function Onboarding({ chromeless = false }: { chromeless?: boolean }) {
@@ -127,7 +127,7 @@ function Welcome() {
 }
 
 /** The setup pages the Rust side agrees to open. */
-type HelpPage = 'claude_code' | 'openai_keys' | 'gemini_keys'
+type HelpPage = 'claude_code' | `${ApiProvider}_keys`
 
 function openHelp(page: HelpPage, showToast: (m: string) => void, t: T) {
   if (!isTauri) {
@@ -140,161 +140,228 @@ function openHelp(page: HelpPage, showToast: (m: string) => void, t: T) {
   void invoke('open_help_page', { page }).catch((e) => showToast(`${t('Không mở được trình duyệt', 'ブラウザを開けません')}: ${String(e)}`))
 }
 
+/** Where step 2 is: the three ways side by side, one account path, or the API keys under "Advanced". */
+type Route = 'choose' | Account | 'apikey'
+
+/** What this PC already has, for the "Ready on this PC" badge; `null` while looking. */
+type Detected = Record<Account, boolean> | null
+
 /**
- * Step 2. Claude Code on this machine is used as is; without it (or when the user prefers another) the user picks
- * an AI and sets it up here. ChatGPT and Gemini need only an API key.
+ * Step 2. The ways to use an AI are shown side by side in a fixed order: the user's Claude account, their ChatGPT
+ * account, or MyTranslate's own AI for those without one; API keys are under "Advanced". What this PC already has
+ * only earns a badge, the user still picks.
  */
 function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
   const { scenario } = useStore()
   const t = useT()
-  // null while looking for Claude Code.
-  const [claudeFound, setClaudeFound] = useState<boolean | null>(null)
-  const [pick, setPick] = useState<AiProvider | null>(null)
-  const [search, setSearch] = useState(0)
+  const [route, setRoute] = useState<Route>('choose')
+  const [detected, setDetected] = useState<Detected>(null)
 
   useEffect(() => {
     let alive = true
-    const found = (yes: boolean) => {
-      if (!alive) return
-      setClaudeFound(yes)
-      setPick(yes ? 'claude' : null)
-    }
-    let timer = 0
-    if (isTauri) {
-      void claudeStatus()
-        .then((s) => found(Boolean(s.version)))
-        .catch(() => found(false))
-    } else {
-      timer = window.setTimeout(() => found(scenario !== 'no_claude'), 500)
-    }
+    const ready = (a: Account) =>
+      accountStatus(a, scenario)
+        .then((s) => s.installed && s.loggedIn === true)
+        .catch(() => false)
+    void Promise.all([ready('claude'), ready('codex')]).then(([claude, codex]) => alive && setDetected({ claude, codex }))
     return () => {
       alive = false
-      window.clearTimeout(timer)
     }
-  }, [scenario, search])
+  }, [scenario])
 
-  const choose = (p: AiProvider | null) => {
+  const go = (r: Route) => {
     onReady(false)
-    setPick(p)
+    setRoute(r)
   }
+  const back = (
+    <button type="button" onClick={() => go('choose')} className="flex items-center gap-1 self-start text-[13px] text-accent hover:underline">
+      <ChevronLeft size={15} /> {t('Chọn cách khác', '別の方法を選ぶ')}
+    </button>
+  )
 
-  if (claudeFound === null) {
-    return (
-      <div className="flex h-full items-center justify-center gap-2 text-[13.5px] text-ink-2">
-        <Loader2 size={16} className="animate-spin text-accent" /> {t('Đang tìm Claude Code trên máy này…', 'このPCで Claude Code を探しています…')}
-      </div>
-    )
-  }
-
-  if (claudeFound && pick === 'claude') {
+  if (route === 'claude' || route === 'codex') {
+    const { tool, name, maker } = ACCOUNT_TOOL[route]
     return (
       <div className="flex flex-col gap-4">
-        <div>
-          <h2 className="text-[17px] font-semibold">{t('Kết nối với Claude', 'Claude に接続')}</h2>
-          <p className="mt-1 text-[13.5px] text-ink-2">
+        <StepHeading
+          title={t(`Dùng tài khoản ${name}`, `${name} アカウントを使う`)}
+          detail={t(
+            `MyTranslate tự cài ${tool} (công cụ chính hãng của ${maker}) và tự kiểm tra; bạn chỉ cần đăng nhập ${name} khi trang đăng nhập mở ra. Lượt dịch tính vào gói ${name} bạn đang trả; MyTranslate không đọc và không lưu thông tin đăng nhập.`,
+            `MyTranslate が ${maker} 公式の ${tool} をインストールして確認します。ログインページが開いたら ${name} にログインするだけです。翻訳はご契約中の ${name} プランの利用枠で行われ、ログイン情報を読み取ったり保存したりはしません。`,
+          )}
+        />
+        <AccountCheck key={route} account={route} onReady={onReady} />
+        {route === 'codex' && (
+          <p className="flex gap-2 rounded-lg bg-accent-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-accent">
+            <CircleAlert size={15} className="mt-0.5 shrink-0" />
             {t(
-              'Máy này đã có Claude Code. MyTranslate dùng Claude Code đã đăng nhập, không lưu và không đọc thông tin đăng nhập của bạn.',
-              'このPCには Claude Code があります。MyTranslate はログイン済みの Claude Code を使い、ログイン情報を保存したり読み取ったりはしません。',
+              'Gói ChatGPT miễn phí không dùng được Codex. Nếu chưa có gói trả phí, hãy dùng tài khoản Claude hoặc API key (Nâng cao).',
+              '無料の ChatGPT プランでは Codex を使えません。有料プランがない場合は、Claude アカウントか APIキー（上級者向け）をお使いください。',
             )}
           </p>
-        </div>
-        <ClaudeCheck onReady={onReady} />
-        <button type="button" onClick={() => choose(null)} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
-          <ArrowLeftRight size={14} /> {t('Dùng ChatGPT hoặc Gemini thay cho Claude', 'Claude の代わりに ChatGPT や Gemini を使う')}
-        </button>
+        )}
+        {back}
       </div>
     )
   }
 
-  const options: { id: AiProvider; detail: string }[] = [
-    {
-      id: 'claude',
-      detail: claudeFound
-        ? t('Dùng Claude Code đã cài trên máy này.', 'このPCにインストール済みの Claude Code を使います。')
-        : t('Cần cài Claude Code và có tài khoản Claude (gói Pro hoặc Max).', 'Claude Code のインストールと Claude アカウント（Pro または Max）が必要です。'),
-    },
-    { id: 'openai', detail: t('Dùng API key của OpenAI, trả tiền theo lượng dùng.', 'OpenAI の APIキーを使います。利用量に応じた従量課金です。') },
-    { id: 'gemini', detail: t('Dùng API key của Google AI Studio, có gói miễn phí.', 'Google AI Studio の APIキーを使います。無料枠があります。') },
-  ]
+  if (route === 'apikey') {
+    return (
+      <div className="flex flex-col gap-4">
+        <StepHeading
+          title={t('Dùng API key', 'APIキーを使う')}
+          detail={t(
+            'Dành cho người đã có API key. Tiền tính theo lượng dùng, trả trực tiếp cho hãng AI.',
+            'APIキーをお持ちの方向けです。利用量に応じて、AIの提供元に直接お支払いいただきます。',
+          )}
+        />
+        <ApiKeyTabs onReady={onReady} />
+        {back}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
-      <div>
-        <h2 className="text-[17px] font-semibold">{t('Chọn AI để dịch', '翻訳に使うAIを選ぶ')}</h2>
-        <p className="mt-1 text-[13.5px] text-ink-2">
-          {claudeFound
-            ? t('Chọn AI bạn muốn dùng. Sau này vẫn đổi được trong Cài đặt hoặc ngay trên popup.', '使いたいAIを選んでください。あとから設定やポップアップでも変更できます。')
-            : t('Máy này chưa có Claude Code. Chọn một AI mà bạn có tài khoản.', 'このPCには Claude Code がありません。アカウントをお持ちのAIを選んでください。')}
-        </p>
+      <StepHeading
+        title={t('Bạn muốn dịch bằng AI nào?', '翻訳に使うAIを選んでください')}
+        detail={t('Chọn cách phù hợp với bạn. Sau này vẫn đổi được trong Cài đặt.', 'ご自身に合う方法を選んでください。あとから設定で変更できます。')}
+      />
+      <div className="grid grid-cols-2 gap-3">
+        <WayCard
+          provider="claude"
+          title={t('Tài khoản Claude', 'Claude アカウント')}
+          detail={t('Dùng gói Pro, Max, Team bạn đang trả, không tốn thêm tiền.', 'ご契約中の Pro、Max、Team プランで。追加料金なし。')}
+          badge={detected?.claude ? { kind: 'ready', text: t('Sẵn sàng trên máy này', 'このPCで使えます') } : undefined}
+          onClick={() => go('claude')}
+        />
+        <WayCard
+          provider="openai"
+          title={t('Tài khoản ChatGPT', 'ChatGPT アカウント')}
+          detail={t('Dùng gói Plus, Pro, Business bạn đang trả, không tốn thêm tiền.', 'ご契約中の Plus、Pro、Business プランで。追加料金なし。')}
+          badge={detected?.codex ? { kind: 'ready', text: t('Sẵn sàng trên máy này', 'このPCで使えます') } : undefined}
+          onClick={() => go('codex')}
+        />
+        <div className="col-span-2 flex items-center gap-2.5 text-[12px] text-ink-3 before:h-px before:flex-1 before:bg-line after:h-px after:flex-1 after:bg-line">
+          {t('hoặc', 'または')}
+        </div>
+        <WayCard
+          provider="cloud"
+          wide
+          title={t('Tôi chưa có tài khoản AI', 'AIのアカウントを持っていない')}
+          detail={t('Dùng AI của MyTranslate, không cần tài khoản AI riêng.', 'MyTranslate のAIを使います。AIのアカウントは不要です。')}
+          badge={{ kind: 'dev', text: t('Đang phát triển', '開発中') }}
+        />
       </div>
-      <div role="radiogroup" aria-label={t('AI dịch', '翻訳AI')} className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
-        {options.map((o) => {
-          const selected = pick === o.id
-          return (
-            <div key={o.id}>
-              <button
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() => choose(o.id)}
-                className="flex w-full items-center gap-3 px-4 py-2.5 text-left hover:bg-hover"
-              >
-                <span
-                  className={cx(
-                    'flex size-4 shrink-0 items-center justify-center rounded-full border',
-                    selected ? 'border-accent bg-accent' : 'border-line-strong',
-                  )}
-                >
-                  {selected && <span className="size-1.5 rounded-full bg-on-accent" />}
-                </span>
-                <AiMark provider={o.id} className="size-6 text-[12px]" />
-                <span className="min-w-0">
-                  <span className="block text-[13.5px] font-semibold text-ink">{AI_NAMES[o.id]}</span>
-                  <span className="block text-[12.5px] text-ink-3">{o.detail}</span>
-                </span>
-              </button>
-              {selected && o.id === 'claude' && !claudeFound && <InstallClaude onRecheck={() => setSearch((n) => n + 1)} />}
-              {selected && o.id !== 'claude' && <ApiKeySetup key={o.id} provider={o.id} onReady={onReady} />}
-            </div>
-          )
-        })}
-      </div>
+      <button type="button" onClick={() => go('apikey')} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
+        <KeyRound size={14} /> {t('Nâng cao: tôi có API key (Claude, ChatGPT, Gemini)', '上級者向け: APIキーを持っている（Claude、ChatGPT、Gemini）')}
+      </button>
     </div>
   )
 }
 
-function InstallClaude({ onRecheck }: { onRecheck: () => void }) {
-  const { showToast } = useStore()
-  const t = useT()
+function StepHeading({ title, detail }: { title: string; detail: string }) {
   return (
-    <div className="flex flex-col gap-2.5 border-t border-line bg-subtle/60 px-4 py-3 text-[13px] text-ink-2">
-      <p>
-        {t(
-          'Cài Claude Code theo hướng dẫn, mở nó một lần để đăng nhập tài khoản Claude, rồi quay lại đây.',
-          '手順に沿って Claude Code をインストールし、一度起動して Claude アカウントにログインしてから、ここに戻ってください。',
+    <div>
+      <h2 className="text-[17px] font-semibold">{title}</h2>
+      <p className="mt-1 text-[13.5px] leading-relaxed text-ink-2">{detail}</p>
+    </div>
+  )
+}
+
+/** One way to use an AI. Without `onClick` it is not available yet and says so in its badge. */
+function WayCard({
+  provider,
+  title,
+  detail,
+  badge,
+  wide = false,
+  onClick,
+}: {
+  provider: AiProvider | 'cloud'
+  title: string
+  detail: string
+  badge?: { kind: 'ready' | 'dev'; text: string }
+  wide?: boolean
+  onClick?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!onClick}
+      className={cx(
+        'flex items-start gap-3 rounded-lg border border-line bg-surface px-4 py-3.5 text-left transition-colors',
+        wide && 'col-span-2',
+        onClick ? 'hover:border-line-strong hover:bg-hover/40' : 'cursor-default',
+      )}
+    >
+      {provider === 'cloud' ? (
+        <AppMark size={28} />
+      ) : (
+        <AiMark provider={provider} className={cx('size-7 rounded-md text-[14px]', !onClick && 'opacity-60')} />
+      )}
+      <span className="min-w-0">
+        <span className={cx('block text-[14.5px] font-semibold', onClick ? 'text-ink' : 'text-ink-2')}>{title}</span>
+        <span className="mt-0.5 block text-[13px] leading-relaxed text-ink-2">{detail}</span>
+        {badge && (
+          <span
+            className={cx(
+              'mt-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[12px] font-semibold',
+              badge.kind === 'ready' ? 'bg-good-soft text-good' : 'bg-subtle text-ink-3',
+            )}
+          >
+            {badge.kind === 'ready' && <Check size={12} strokeWidth={3} />}
+            {badge.text}
+          </span>
         )}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => openHelp('claude_code', showToast, t)}>
-          <ExternalLink size={13} /> {t('Mở hướng dẫn cài đặt', 'インストール手順を開く')}
-        </Button>
-        <Button size="sm" onClick={onRecheck}>
-          <RotateCw size={13} /> {t('Đã cài, kiểm tra lại', 'インストールしたので再確認')}
-        </Button>
+      </span>
+    </button>
+  )
+}
+
+/** "Advanced": one tab per AI that takes an API key. */
+function ApiKeyTabs({ onReady }: { onReady: (ready: boolean) => void }) {
+  const t = useT()
+  const [provider, setProvider] = useState<ApiProvider>('anthropic')
+  return (
+    <div className="flex flex-col gap-3">
+      <div role="tablist" aria-label={t('AI dùng API key', 'APIキーで使うAI')} className="flex w-max gap-1 rounded-lg bg-subtle p-[3px]">
+        {API_PROVIDERS.map((p) => (
+          <button
+            key={p}
+            type="button"
+            role="tab"
+            aria-selected={provider === p}
+            onClick={() => {
+              onReady(false)
+              setProvider(p)
+            }}
+            className={cx(
+              'flex items-center gap-1.5 rounded-md px-3.5 py-1.5 text-[13px]',
+              provider === p ? 'bg-surface font-semibold text-ink shadow-sm' : 'text-ink-2 hover:text-ink',
+            )}
+          >
+            <AiMark provider={p} /> {vendorName(p)}
+          </button>
+        ))}
+      </div>
+      <div className="overflow-hidden rounded-lg border border-line bg-surface">
+        <ApiKeySetup key={provider} provider={provider} onReady={onReady} />
       </div>
     </div>
   )
 }
 
-/** ChatGPT or Gemini: save the API key, then one short translation proves it works and makes it the AI. */
-function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onReady: (ready: boolean) => void }) {
+/** An AI used with an API key: save the key, then one short translation proves it works and makes it the AI. */
+function ApiKeySetup({ provider, onReady }: { provider: ApiProvider; onReady: (ready: boolean) => void }) {
   const { updateSettings, showToast } = useStore()
   const t = useT()
   const lang = useLang()
   const [hasKey, setHasKey] = useState(false)
   const [draft, setDraft] = useState('')
   const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
-  const name = AI_NAMES[provider]
+  const name = vendorName(provider)
   const model = RECOMMENDED_MODELS[provider]
 
   const runTest = useCallback(() => {
@@ -317,7 +384,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
   useEffect(() => {
     if (!isTauri) return
     let alive = true
-    void invoke<{ openai: boolean; gemini: boolean }>('ai_keys_status').then((k) => {
+    void invoke<Record<ApiProvider, boolean>>('ai_keys_status').then((k) => {
       if (!alive || !k[provider]) return
       setHasKey(true)
       runTest()
@@ -342,7 +409,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
   const seconds = (ms: number) => (lang === 'ja' ? (ms / 1000).toFixed(1) : (ms / 1000).toFixed(1).replace('.', ','))
 
   return (
-    <div className="flex flex-col gap-2.5 border-t border-line bg-subtle/60 px-4 py-3">
+    <div className="flex flex-col gap-2.5 px-4 py-3">
       <form
         className="flex gap-2"
         onSubmit={(e) => {
@@ -373,7 +440,7 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
       <div className="flex min-h-6 flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
         <button
           type="button"
-          onClick={() => openHelp(provider === 'openai' ? 'openai_keys' : 'gemini_keys', showToast, t)}
+          onClick={() => openHelp(`${provider}_keys`, showToast, t)}
           className="flex items-center gap-1 text-accent hover:underline"
         >
           <ExternalLink size={13} /> {t(`Tạo API key ${name}`, `${name} の APIキーを作成`)}
@@ -412,181 +479,6 @@ function ApiKeySetup({ provider, onReady }: { provider: 'openai' | 'gemini'; onR
       )}
     </div>
   )
-}
-
-/** Claude Code is installed: is it signed in, and does one short translation work. */
-function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
-  const { scenario, showToast, updateSettings } = useStore()
-  const t = useT()
-  const [attempt, setAttempt] = useState(0)
-  const failAt = scenario === 'not_logged_in' ? 1 : scenario === 'network' || scenario === 'quota' ? 2 : -1
-  // Each check run is keyed so a retry or a scenario change starts over without resetting state in an effect.
-  const runKey = `${attempt}:${failAt}`
-  const [progress, setProgress] = useState<{ key: string; states: CheckState[]; details?: Record<number, string> } | null>(null)
-  const states: CheckState[] = progress?.key === runKey ? progress.states : ['running', 'idle', 'idle']
-  const details = progress?.key === runKey ? (progress.details ?? {}) : {}
-
-  // Real app: is claude installed, then one short translation proves the login works and shows the speed.
-  useEffect(() => {
-    if (!isTauri) return
-    let alive = true
-    let cancel: (() => void) | null = null
-    const set = (s: CheckState[], d: Record<number, string> = {}) => alive && setProgress({ key: runKey, states: s, details: d })
-    void (async () => {
-      const status = await claudeStatus().catch((e) => ({ version: null, error: String(e) }))
-      if (!alive) return
-      if (!status.version) {
-        set(['fail', 'idle', 'idle'], { 0: status.error ?? t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません') })
-        onReady(false)
-        return
-      }
-      const found = { 0: t(`Tìm thấy ${status.version}`, `${status.version} が見つかりました`) }
-      set(['ok', 'running', 'idle'], found)
-      cancel = await startTranslation({ direction: 'ja_vi', text: 'ありがとうございます。', keigo: 'polite' }, (e) => {
-        if (e.type === 'done') {
-          const seconds = e.timing.firstTokenMs === null ? null : e.timing.firstTokenMs / 1000
-          const ok =
-            seconds === null
-              ? t('Dịch thử thành công', 'テスト翻訳に成功しました')
-              : t(
-                  `Dịch thử thành công, chữ đầu tiên sau ${seconds.toFixed(1).replace('.', ',')} giây`,
-                  `テスト翻訳に成功しました（最初の文字まで ${seconds.toFixed(1)} 秒）`,
-                )
-          set(['ok', 'ok', 'ok'], { ...found, 2: ok })
-          updateSettings({ aiProvider: 'claude' })
-          onReady(true)
-        }
-        if (e.type === 'error' && e.kind !== 'cancelled') {
-          if (e.kind === 'not_logged_in') set(['ok', 'fail', 'idle'], found)
-          else set(['ok', 'ok', 'fail'], { ...found, 2: claudeFailure(e.kind, e.message, t) })
-          onReady(false)
-        }
-      })
-    })()
-    return () => {
-      alive = false
-      cancel?.()
-    }
-  }, [runKey, onReady, updateSettings, t])
-
-  useEffect(() => {
-    if (isTauri) return
-    const timers: number[] = []
-    let current: CheckState[] = ['running', 'idle', 'idle']
-    for (let i = 0; i < 3; i++) {
-      timers.push(
-        window.setTimeout(() => {
-          current = [...current]
-          if (i === failAt) {
-            current[i] = 'fail'
-          } else {
-            current[i] = 'ok'
-            if (i < 2) current[i + 1] = 'running'
-          }
-          setProgress({ key: runKey, states: current })
-          onReady(i === 2 && failAt === -1)
-        }, 700 * (i + 1)),
-      )
-      if (i === failAt) break
-    }
-    return () => timers.forEach(window.clearTimeout)
-  }, [runKey, failAt, onReady])
-
-  const retry = () => {
-    onReady(false)
-    setAttempt((n) => n + 1)
-  }
-
-  const items: { title: string; detail: string; fail: string; action?: ReactNode }[] = [
-    {
-      title: t('Claude Code trên máy', 'このPCの Claude Code'),
-      detail: t('Tìm thấy claude 2.x trong PATH', 'PATH に claude 2.x が見つかりました'),
-      fail: t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません'),
-    },
-    {
-      title: t('Tài khoản Claude', 'Claude アカウント'),
-      detail: t('Đã đăng nhập bằng tài khoản Claude của bạn', 'ご自身の Claude アカウントでログインしています'),
-      fail: t('Chưa đăng nhập. Mở terminal và chạy lệnh claude để đăng nhập.', 'ログインしていません。ターミナルで claude を実行してログインしてください。'),
-      action: (
-        <Button
-          size="sm"
-          onClick={() =>
-            isTauri
-              ? void invoke('open_claude_login').catch((e) => showToast(`${t('Không mở được terminal', 'ターミナルを開けません')}: ${String(e)}`))
-              : showToast(t('Mô phỏng: mở terminal chạy "claude"', 'シミュレーション: ターミナルで「claude」を実行'))
-          }
-        >
-          <Terminal size={13} /> {t('Mở terminal để đăng nhập', 'ターミナルを開いてログイン')}
-        </Button>
-      ),
-    },
-    {
-      title: t('Dịch thử', 'テスト翻訳'),
-      detail: t('Chữ đầu tiên sau 1,8 giây', '最初の文字まで 1.8 秒'),
-      fail:
-        scenario === 'quota'
-          ? t('Đã hết hạn mức gói Claude, làm mới lúc 15:00.', 'Claude プランの利用枠を使い切りました。15:00 にリセットされます。')
-          : t('Không kết nối được tới Claude (network timeout).', 'Claude に接続できません（network timeout）。'),
-    },
-  ]
-
-  return (
-    <div className="flex flex-col gap-4">
-      <ul className="divide-y divide-line rounded-lg border border-line bg-surface">
-        {items.map((item, i) => (
-          <li key={item.title} className="flex items-start gap-3 px-4 py-3">
-            <StatusIcon state={states[i]} />
-            <div className="min-w-0 flex-1">
-              <div className={cx('text-[13.5px] font-medium', states[i] === 'idle' ? 'text-ink-3' : 'text-ink')}>{item.title}</div>
-              {states[i] === 'ok' && <div className="text-[12.5px] text-ink-3">{details[i] ?? item.detail}</div>}
-              {states[i] === 'fail' && (
-                <div className="mt-0.5 flex flex-col items-start gap-2">
-                  <span className="text-[12.5px] break-all text-bad">{details[i] ?? item.fail}</span>
-                  {item.action}
-                </div>
-              )}
-            </div>
-          </li>
-        ))}
-      </ul>
-      {states.includes('fail') && (
-        <div className="flex items-center gap-3">
-          <Button onClick={retry}>{t('Kiểm tra lại', 'もう一度確認')}</Button>
-          {!isTauri && (
-            <span className="text-[12.5px] text-ink-3">
-              {t('Mẹo: đổi "Trạng thái giả lập" về "Bình thường" rồi kiểm tra lại.', 'ヒント: 「シミュレーション」を「通常」に戻してから確認してください。')}
-            </span>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** Why the test translation through Claude Code failed, in the user's words; other failures keep Claude's text. */
-function claudeFailure(kind: ErrorKind, message: string, t: T): string {
-  if (kind === 'network')
-    return t(
-      'Không kết nối được tới máy chủ Claude. Kiểm tra mạng, VPN hoặc proxy của công ty rồi bấm Kiểm tra lại.',
-      'Claude のサーバーに接続できません。ネットワーク、VPN、社内プロキシを確認してから「もう一度確認」を押してください。',
-    )
-  if (kind === 'timeout')
-    return t('Claude không trả lời. Kiểm tra mạng rồi bấm Kiểm tra lại.', 'Claude から応答がありません。ネットワークを確認してから「もう一度確認」を押してください。')
-  if (kind === 'rate_limited')
-    return t('Đã hết hạn mức gói Claude. Thử lại sau khi hạn mức được làm mới.', 'Claude プランの利用枠を使い切りました。リセット後にもう一度お試しください。')
-  return message
-}
-
-function StatusIcon({ state }: { state: CheckState }) {
-  if (state === 'running') return <Loader2 size={18} className="mt-px shrink-0 animate-spin text-accent" />
-  if (state === 'ok')
-    return (
-      <span className="mt-px flex size-[18px] shrink-0 items-center justify-center rounded-full bg-good text-white">
-        <Check size={12} strokeWidth={3} />
-      </span>
-    )
-  if (state === 'fail') return <CircleAlert size={18} className="mt-px shrink-0 text-bad" />
-  return <span className="mt-px size-[18px] shrink-0 rounded-full border-2 border-line" />
 }
 
 /** Only "translate": the sample is the other side's message, so there is nothing of the user's own to check. */

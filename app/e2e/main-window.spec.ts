@@ -122,9 +122,9 @@ test('settings: checking finds a new version and installing shows progress', asy
   await expect(page.getByText('Có phiên bản mới 0.2.0')).toBeVisible()
 })
 
-test('settings: set up ChatGPT in its card, star a model, and make it the default', async ({ page }) => {
+test('settings: set up ChatGPT with an API key in its card, star a model, and make it the default', async ({ page }) => {
   await openTab(page, 'Cài đặt')
-  const card = page.getByRole('region', { name: 'ChatGPT' })
+  const card = page.getByRole('region', { name: 'ChatGPT API' })
   await card.getByRole('button', { name: /ChatGPT/ }).first().click()
   const key = card.getByRole('textbox', { name: 'API key ChatGPT' })
   await key.fill('sk-test')
@@ -137,9 +137,25 @@ test('settings: set up ChatGPT in its card, star a model, and make it the defaul
   await card.getByRole('button', { name: 'Thêm gpt-6-astra vào menu chọn nhanh' }).click()
   await expect(card.getByRole('button', { name: 'Bỏ gpt-6-astra khỏi menu chọn nhanh' })).toHaveAttribute('aria-pressed', 'true')
 
-  await card.getByRole('button', { name: 'Dùng ChatGPT' }).click()
+  await card.getByRole('button', { name: 'Dùng ChatGPT API' }).click()
   await expect(card.getByText('Đang dùng')).toBeVisible()
-  await expect(page.getByText('ChatGPT · GPT-5.6 Luna')).toBeVisible()
+  await expect(page.getByText('ChatGPT API · GPT-5.6 Luna')).toBeVisible()
+})
+
+test('settings: a ChatGPT account is set up in its card without switching to it', async ({ page }) => {
+  await openTab(page, 'Cài đặt')
+  await expect(page.getByText('Tài khoản của bạn')).toBeVisible()
+  await expect(page.getByText('Nâng cao: API key')).toBeVisible()
+  const card = page.getByRole('region', { name: 'ChatGPT', exact: true })
+  await card.getByRole('button', { name: /ChatGPT/ }).first().click()
+  await card.getByRole('button', { name: 'Thiết lập ChatGPT' }).click()
+  await expect(card.getByText(/Đã cài Codex .*, bản chính hãng của OpenAI/)).toBeVisible()
+  await expect(card.getByText(/Dịch thử thành công/)).toBeVisible()
+  // Set up, not switched to: Claude is still the AI in use, and the check does not start over.
+  await expect(page.getByRole('region', { name: 'Claude', exact: true }).getByText('Đang dùng')).toBeVisible()
+  await page.waitForTimeout(1500)
+  await expect(card.getByText(/Dịch thử thành công/)).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Dùng ChatGPT' })).toBeEnabled()
 })
 
 test('writing: what the checks found, per language and period, and advice from the AI', async ({ page }) => {

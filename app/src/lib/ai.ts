@@ -2,7 +2,7 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useEffect, useMemo, useState } from 'react'
-import type { AiProvider, Settings } from '../store'
+import type { AiProvider, ApiProvider, Settings } from '../store'
 import { isTauri } from './claude'
 import type { T } from './i18n'
 
@@ -14,22 +14,48 @@ export interface AiChoice {
 
 /** One entry of the quick switcher. */
 export interface QuickChoice extends AiChoice {
-  /** Claude always; ChatGPT and Gemini once an API key is saved. */
+  /** Claude Code always; the API providers once an API key is saved. */
   available: boolean
   /** The current default. */
   current: boolean
 }
 
-export const AI_NAMES: Record<AiProvider, string> = { claude: 'Claude', openai: 'ChatGPT', gemini: 'Gemini' }
+export const AI_NAMES: Record<AiProvider, string> = {
+  claude: 'Claude',
+  codex: 'ChatGPT',
+  anthropic: 'Claude API',
+  openai: 'ChatGPT API',
+  gemini: 'Gemini',
+}
+
+/** The vendor's name, for where it is already clear an API key is meant ("API key Claude"). */
+export function vendorName(provider: AiProvider): string {
+  return provider === 'anthropic' ? 'Claude' : provider === 'openai' ? 'ChatGPT' : AI_NAMES[provider]
+}
+
+/** Every provider, in the order menus and Settings list them. */
+export const AI_ORDER: readonly AiProvider[] = ['claude', 'codex', 'anthropic', 'openai', 'gemini']
+
+/** ChatGPT through Codex: the fastest model the ChatGPT plans offer there (2026-10), until S1 measures it. */
+export const CODEX_MODEL = 'gpt-5.6-luna'
+
+/** The providers used with an API key, in the same order. */
+export const API_PROVIDERS: readonly ApiProvider[] = ['anthropic', 'openai', 'gemini']
 
 /** Fastest general model each vendor documents (2026-10); the default until the user picks another. */
-export const RECOMMENDED_MODELS = { openai: 'gpt-5.6-luna', gemini: 'gemini-3.6-flash' } as const
+export const RECOMMENDED_MODELS: Record<ApiProvider, string> = {
+  // Sonnet, as through Claude Code: the translation quality the prompt was measured with.
+  anthropic: 'claude-sonnet-5-5',
+  openai: 'gpt-5.6-luna',
+  gemini: 'gemini-3.6-flash',
+}
 
 /** Where to create an API key, and what one looks like. */
-export const KEY_HELP = {
+export const KEY_HELP: Record<ApiProvider, { url: string; placeholder: string }> = {
+  anthropic: { url: 'https://platform.claude.com/settings/keys', placeholder: 'sk-ant-...' },
   openai: { url: 'https://platform.openai.com/api-keys', placeholder: 'sk-...' },
   gemini: { url: 'https://aistudio.google.com/apikey', placeholder: 'AIza...' },
-} as const
+}
 
 /** The answer of `ai_test`: one short translation with a key and a model. */
 export interface TestResult {
@@ -50,26 +76,37 @@ export function testFailure(errorKind: string | null, t: T): string {
       ? t('Hết hạn mức hoặc chưa nạp tiền', '利用枠の上限、または残高がありません')
       : errorKind === 'network'
         ? t('Không kết nối được', '接続できません')
-        : t('Không dịch được', '翻訳できませんでした')
+        : errorKind === 'not_logged_in'
+          ? t('Chưa đăng nhập hoặc đăng nhập đã hết hạn', '未ログイン、またはログインの期限切れです')
+          : errorKind === 'not_installed'
+            ? t('Chưa cài công cụ của hãng', '提供元のツールが未インストールです')
+            : t('Không dịch được', '翻訳できませんでした')
 }
 
 /** The settings field holding a provider's default model. */
-export function modelField(provider: AiProvider): 'model' | 'openaiModel' | 'geminiModel' {
-  return provider === 'openai' ? 'openaiModel' : provider === 'gemini' ? 'geminiModel' : 'model'
+export function modelField(provider: AiProvider): 'model' | 'codexModel' | 'anthropicModel' | 'openaiModel' | 'geminiModel' {
+  return provider === 'claude' ? 'model' : `${provider}Model`
 }
 
 /** The default AI and model from the settings. */
 export function defaultChoice(settings: Settings): AiChoice {
   const provider = settings.aiProvider
   if (provider === 'claude') return { provider, model: settings.model }
+  if (provider === 'codex') return { provider, model: settings.codexModel || CODEX_MODEL }
   return { provider, model: settings[modelField(provider)] || RECOMMENDED_MODELS[provider] }
 }
 
-/** A readable model name: "Sonnet", "GPT-5.6 Luna", "Gemini 3.6 Flash". */
+/** A readable model name: "Sonnet", "Sonnet 5.5", "GPT-5.6 Luna", "Gemini 3.6 Flash". */
 export function modelName(provider: AiProvider, model: string): string {
   if (provider === 'claude') return model === 'haiku' ? 'Haiku' : 'Sonnet'
   const words = model.split('-').filter(Boolean)
-  if (provider === 'openai' && words[0]?.toLowerCase() === 'gpt') {
+  if (provider === 'anthropic' && words[0] === 'claude') {
+    // claude-sonnet-5-5 is Sonnet 5.5; a trailing date (claude-haiku-4-5-20251001) is not part of the name.
+    const [, family = '', ...version] = words
+    const digits = version.filter((w) => /^\d{1,2}$/.test(w))
+    return [capitalize(family), digits.join('.')].filter(Boolean).join(' ')
+  }
+  if ((provider === 'openai' || provider === 'codex') && words[0]?.toLowerCase() === 'gpt') {
     const [, version, ...rest] = words
     return [`GPT-${version ?? ''}`.replace(/-$/, ''), ...rest.map(capitalize)].join(' ')
   }
@@ -97,6 +134,8 @@ function choicesFromSettings(settings: Settings): QuickChoice[] {
     for (const model of [...new Set(models)]) out.push({ provider, model, available, current: sameChoice(current, { provider, model }) })
   }
   push('claude', ['sonnet', 'haiku'], true)
+  push('codex', [settings.codexModel || CODEX_MODEL], false)
+  push('anthropic', [settings.anthropicModel || RECOMMENDED_MODELS.anthropic, ...settings.aiQuickModels.anthropic], false)
   push('openai', [settings.openaiModel || RECOMMENDED_MODELS.openai, ...settings.aiQuickModels.openai], true)
   push('gemini', [settings.geminiModel || RECOMMENDED_MODELS.gemini, ...settings.aiQuickModels.gemini], false)
   return out

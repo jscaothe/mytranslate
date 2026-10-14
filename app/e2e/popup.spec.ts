@@ -200,3 +200,15 @@ test('the AI menu stays on top of the popup window and inside it', async ({ page
   await page.mouse.up()
   expect(await popup(page).boundingBox()).toEqual(before)
 })
+
+test('when Claude refuses MyTranslate, another AI translates the same text in one click', async ({ page }) => {
+  await page.locator('select').filter({ hasText: 'Bình thường' }).selectOption('blocked')
+  await composer(page).fill('仕訳の入力画面でエラーが出ています。')
+  await page.keyboard.press('Control+Alt+T')
+
+  await expect(popup(page).getByText('Claude từ chối yêu cầu từ MyTranslate')).toBeVisible()
+  await expect(popup(page).getByText(/Tài khoản Claude của bạn vẫn bình thường/)).toBeVisible()
+  await popup(page).getByRole('button', { name: 'ChatGPT API · GPT-5.6 Luna' }).click()
+  await expect(popup(page).getByText('Claude từ chối yêu cầu từ MyTranslate')).toHaveCount(0)
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
+})

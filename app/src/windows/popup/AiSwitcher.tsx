@@ -1,15 +1,17 @@
 import { Check, ChevronDown, Settings2 } from 'lucide-react'
 import { useEffect, useRef, type KeyboardEvent } from 'react'
 import { cx } from '../../components/styles'
-import { AI_NAMES, modelName, sameChoice, type AiChoice, type QuickChoice } from '../../lib/ai'
+import { AI_NAMES, AI_ORDER, modelName, sameChoice, type AiChoice, type QuickChoice } from '../../lib/ai'
 import { useT } from '../../lib/i18n'
 import type { AiProvider } from '../../store'
 
 /** Distinct at 16 px: Claude and ChatGPT share an initial. */
-const MARK_GLYPHS: Record<AiProvider, string> = { claude: 'C', openai: 'G', gemini: '✦' }
+const MARK_GLYPHS: Record<AiProvider, string> = { claude: 'C', codex: 'G', anthropic: 'C', openai: 'G', gemini: '✦' }
 
 const MARK_COLORS: Record<AiProvider, string> = {
   claude: 'bg-[#d97757]',
+  anthropic: 'bg-[#d97757]',
+  codex: 'bg-[#10a37f]',
   openai: 'bg-[#10a37f]',
   gemini: 'bg-[#4285f4]',
 }
@@ -86,7 +88,7 @@ export function AiSwitcher({
     items[next]?.focus()
   }
 
-  const groups = (['claude', 'openai', 'gemini'] as const)
+  const groups = AI_ORDER
     .map((p) => ({ provider: p, items: choices.filter((c) => c.provider === p) }))
     .filter((g) => g.items.length > 0)
 
@@ -132,7 +134,11 @@ export function AiSwitcher({
               <div className="flex items-center gap-1.5 px-3 pt-1.5 pb-1 text-[11.5px] font-semibold text-ink-3">
                 <AiMark provider={g.provider} className="size-3.5 text-[8.5px]" />
                 {AI_NAMES[g.provider]}
-                {!g.items[0].available && <span className="font-normal">· {t('chưa có API key', 'APIキー未設定')}</span>}
+                {!g.items[0].available && (
+                  <span className="font-normal">
+                    · {g.provider === 'codex' ? t('chưa thiết lập', '未設定') : t('chưa có API key', 'APIキー未設定')}
+                  </span>
+                )}
               </div>
               {g.items.map((c) => {
                 const ticked = sameChoice(c, current)

@@ -35,6 +35,9 @@ tauri-plugin-notification = "2"
 # ChatGPT and Gemini over HTTPS with streaming (already in the tree through the updater).
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "stream", "json", "http2"] }
 futures-util = "0.3"
+# Installing Codex for the user: check the download against GitHub's SHA-256, unpack the .zst build.
+sha2 = "0.10"
+ruzstd = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

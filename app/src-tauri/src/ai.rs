@@ -1,4 +1,5 @@
-//! Which AI translates: the provider chosen in Settings (Claude Code, ChatGPT or Gemini), its model and API key,
+//! Which AI translates: the provider chosen in Settings (Claude through Claude Code, or Claude, ChatGPT, Gemini
+//! through an API key), its model and API key,
 //! and the order of fallbacks. Plus the Settings commands to save keys, list models and test a provider.
 
 use std::sync::{Arc, Mutex};
@@ -16,10 +17,13 @@ use crate::provider::claude_cli::TranslateEvent;
 use crate::provider::http_api::Api;
 use crate::settings::SettingsStore;
 
-const ORDER: [&str; 3] = ["claude", "openai", "gemini"];
+/// Provider ids: `claude` is Claude Code (the user's Claude account), `codex` is ChatGPT through Codex (the user's
+/// ChatGPT account); `anthropic`, `openai` and `gemini` use an API key.
+const ORDER: [&str; 5] = ["claude", "codex", "anthropic", "openai", "gemini"];
 
 fn api(id: &str) -> Option<Api> {
     match id {
+        "anthropic" => Some(Api::Anthropic),
         "openai" => Some(Api::OpenAi),
         "gemini" => Some(Api::Gemini),
         _ => None,
@@ -33,6 +37,8 @@ fn credential_name(api: Api) -> String {
 /// The settings field holding a provider's default model.
 fn model_field(id: &str) -> &'static str {
     match id {
+        "codex" => "codexModel",
+        "anthropic" => "anthropicModel",
         "openai" => "openaiModel",
         "gemini" => "geminiModel",
         _ => "model",
@@ -41,9 +47,10 @@ fn model_field(id: &str) -> &'static str {
 
 /// The default model of a provider: from Settings, else the recommended one.
 fn default_model(settings: &Value, id: &str) -> String {
-    let fallback = match api(id) {
-        Some(api) => api.default_model(),
-        None => "sonnet",
+    let fallback = match (id, api(id)) {
+        (_, Some(api)) => api.default_model(),
+        ("codex", None) => crate::provider::codex_cli::DEFAULT_MODEL,
+        _ => "sonnet",
     };
     settings
         .get(model_field(id))
@@ -55,6 +62,11 @@ fn default_model(settings: &Value, id: &str) -> String {
 }
 
 fn route_for(settings: &Value, id: &str, model: Option<&str>) -> Route {
+    if id == "codex" {
+        return Route::Codex {
+            model: model.map(str::to_string).unwrap_or_else(|| default_model(settings, id)),
+        };
+    }
     match api(id) {
         None => Route::Claude {
             model: model.map(str::to_string),
@@ -72,32 +84,35 @@ fn route_for(settings: &Value, id: &str, model: Option<&str>) -> Route {
 }
 
 /// Other models of the same provider to try first when `model` cannot answer: Claude's other model; for ChatGPT
-/// and Gemini the default model in Settings, the favourites ticked there, then the recommended model. The router
-/// then tries every other model the key can use.
+/// (through Codex or a key), Claude through a key and Gemini the default model in Settings, the favourites ticked
+/// there, then the recommended model. The router then tries every other model a key can use.
 fn backup_models(settings: &Value, id: &str, model: &str) -> Vec<String> {
-    let mut models: Vec<String> = match api(id) {
-        None => vec![if model == "haiku" { "sonnet" } else { "haiku" }.to_string()],
-        Some(api) => std::iter::once(default_model(settings, id))
-            .chain(
-                settings["aiQuickModels"][id]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(Value::as_str)
-                    .map(str::trim)
-                    .filter(|m| !m.is_empty())
-                    .map(str::to_string),
-            )
-            .chain([api.default_model().to_string()])
-            .collect(),
+    let recommended = match (id, api(id)) {
+        (_, Some(api)) => api.default_model(),
+        ("codex", None) => crate::provider::codex_cli::DEFAULT_MODEL,
+        _ => return vec![if model == "haiku" { "sonnet" } else { "haiku" }.to_string()],
     };
+    let mut models: Vec<String> = std::iter::once(default_model(settings, id))
+        .chain(
+            settings["aiQuickModels"][id]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .map(str::to_string),
+        )
+        .chain([recommended.to_string()])
+        .collect();
     let mut seen = std::collections::HashSet::from([model.to_string()]);
     models.retain(|m| seen.insert(m.clone()));
     models
 }
 
 /// The chosen provider and model first, then that provider's other models; with fallback on, then the other
-/// providers that are set up (Claude always is; ChatGPT and Gemini once they have a key).
+/// providers that are set up (Claude Code always counts as set up, Codex once installed, the API providers once they
+/// have a key).
 pub fn routes(app: &AppHandle) -> Vec<Route> {
     routes_for(app, None)
 }
@@ -129,7 +144,12 @@ fn routes_from(settings: &Value, choice: Option<&AiChoice>) -> Vec<Route> {
     if settings.get("aiFallback").and_then(Value::as_bool).unwrap_or(false) {
         for id in ORDER.iter().filter(|id| **id != primary) {
             let route = route_for(settings, id, None);
-            if !matches!(route, Route::Api { key: None, .. }) {
+            let set_up = match &route {
+                Route::Api { key, .. } => key.is_some(),
+                Route::Codex { .. } => crate::provider::codex_cli::find_codex().is_some(),
+                Route::Claude { .. } => true,
+            };
+            if set_up {
                 routes.push(route);
             }
         }
@@ -144,7 +164,7 @@ pub struct QuickChoice {
     pub provider: String,
     pub model: String,
     pub label: String,
-    /// Usable now: Claude always; ChatGPT and Gemini once a key is saved.
+    /// Usable now: Claude Code always, Codex once installed, the API providers once a key is saved.
     pub available: bool,
     /// The current default.
     pub current: bool,
@@ -153,7 +173,9 @@ pub struct QuickChoice {
 /// Human name of a model: Claude's models by name, API models by id.
 pub fn label(provider: &str, model: &str) -> String {
     match provider {
-        "openai" => format!("ChatGPT · {model}"),
+        "codex" => format!("ChatGPT · {model}"),
+        "anthropic" => format!("Claude API · {model}"),
+        "openai" => format!("ChatGPT API · {model}"),
         "gemini" => format!("Gemini · {model}"),
         _ => match model {
             "haiku" => "Claude Haiku".into(),
@@ -162,7 +184,7 @@ pub fn label(provider: &str, model: &str) -> String {
     }
 }
 
-/// Every model offered in the quick switcher: Claude's two, and for ChatGPT and Gemini the default model plus the
+/// Every model offered in the quick switcher: Claude Code's two, and for each API provider the default model plus the
 /// favourites ticked in Settings. Kept short on purpose: the full model lists live in Settings.
 pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice> {
     let current_provider = settings
@@ -175,6 +197,7 @@ pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice
         let default = default_model(settings, id);
         let mut models = match id {
             "claude" => vec!["sonnet".to_string(), "haiku".to_string()],
+            "codex" => vec![default.clone()],
             _ => {
                 let mut m = vec![default.clone()];
                 if let Some(list) = settings["aiQuickModels"][id].as_array() {
@@ -187,6 +210,8 @@ pub fn quick_choices_from(settings: &Value, keys: &KeyStatus) -> Vec<QuickChoice
         let mut seen = std::collections::HashSet::new();
         models.retain(|m| seen.insert(m.clone()));
         let available = match id {
+            "codex" => keys.codex,
+            "anthropic" => keys.anthropic,
             "openai" => keys.openai,
             "gemini" => keys.gemini,
             _ => true,
@@ -253,6 +278,9 @@ pub fn prewarm(app: &AppHandle) {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct KeyStatus {
+    /// Not a key: whether Codex is installed, so ChatGPT through the user's account can be offered.
+    codex: bool,
+    anthropic: bool,
     openai: bool,
     gemini: bool,
 }
@@ -261,6 +289,8 @@ pub struct KeyStatus {
 #[tauri::command]
 pub fn ai_keys_status() -> KeyStatus {
     KeyStatus {
+        codex: crate::provider::codex_cli::find_codex().is_some(),
+        anthropic: credentials::get(&credential_name(Api::Anthropic)).is_some(),
         openai: credentials::get(&credential_name(Api::OpenAi)).is_some(),
         gemini: credentials::get(&credential_name(Api::Gemini)).is_some(),
     }
@@ -376,6 +406,8 @@ mod tests {
             "aiQuickModels": { "gemini": ["gemini-b", "gemini-a"], "openai": ["gpt-x"] }
         });
         let keys = KeyStatus {
+            codex: false,
+            anthropic: false,
             openai: false,
             gemini: true,
         };
@@ -389,6 +421,8 @@ mod tests {
             [
                 ("claude".into(), "sonnet".into(), true, false),
                 ("claude".into(), "haiku".into(), true, false),
+                ("codex".into(), "gpt-5.6-luna".into(), false, false),
+                ("anthropic".into(), "claude-sonnet-5-5".into(), false, false),
                 ("openai".into(), "gpt-5.6-luna".into(), false, false),
                 ("openai".into(), "gpt-x".into(), false, false),
                 ("gemini".into(), "gemini-a".into(), true, true),
@@ -396,7 +430,9 @@ mod tests {
             ]
         );
         assert_eq!(c[1].label, "Claude Haiku");
-        assert_eq!(c[5].label, "Gemini · gemini-b");
+        assert_eq!(c[7].label, "Gemini · gemini-b");
+        assert_eq!(c[2].label, "ChatGPT · gpt-5.6-luna");
+        assert_eq!(c[4].label, "ChatGPT API · gpt-5.6-luna");
     }
 
     fn plan(settings: &Value, choice: Option<&AiChoice>) -> Vec<(String, String)> {
@@ -404,6 +440,7 @@ mod tests {
             .iter()
             .map(|r| match r {
                 Route::Claude { model } => ("claude".into(), model.clone().unwrap_or_default()),
+                Route::Codex { model } => ("codex".into(), model.clone()),
                 Route::Api { api, model, .. } => (api.id().into(), model.clone()),
             })
             .collect()

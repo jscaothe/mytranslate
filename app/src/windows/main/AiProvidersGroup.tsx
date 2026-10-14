@@ -1,21 +1,25 @@
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { AlertCircle, Check, CheckCircle2, ChevronDown, KeyRound, Loader2, Search, ShieldAlert } from 'lucide-react'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Button, Segmented, Switch } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
-import { AI_NAMES, choiceLabel, defaultChoice, KEY_HELP, modelName, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
-import { claudeStatus, isTauri, type ClaudeStatus } from '../../lib/claude'
+import { AI_NAMES, AI_ORDER, API_PROVIDERS, choiceLabel, defaultChoice, KEY_HELP, modelField, modelName, RECOMMENDED_MODELS, testFailure, vendorName, type TestResult } from '../../lib/ai'
+import { AccountCheck } from '../../components/AccountCheck'
+import { ACCOUNT_TOOL, accountStatus, type Account, type AccountStatus } from '../../lib/accounts'
+import { isTauri } from '../../lib/claude'
 import { useT } from '../../lib/i18n'
-import { useStore, type AiProvider } from '../../store'
+import { useStore, type AiProvider, type ApiProvider } from '../../store'
 import { AiMark } from '../popup/AiSwitcher'
 
-const PROTOTYPE_MODELS = {
+const PROTOTYPE_MODELS: Record<ApiProvider, string[]> = {
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
   openai: ['gpt-6-astra', 'gpt-5.6-terra', 'gpt-5.6-luna'],
   gemini: ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.1-pro'],
 }
 
-type Keys = { openai: boolean; gemini: boolean }
+/** Saved API keys, and (`codex`) whether Codex is installed. */
+type Keys = Record<ApiProvider | 'codex', boolean>
 
 /**
  * Settings > Kết nối AI. One card per AI, each usable to set up that AI without making it the default: its status,
@@ -25,7 +29,7 @@ type Keys = { openai: boolean; gemini: boolean }
 export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row: RowComponent }) {
   const { settings, updateSettings } = useStore()
   const t = useT()
-  const [keys, setKeys] = useState<Keys>({ openai: !isTauri, gemini: false })
+  const [keys, setKeys] = useState<Keys>({ codex: false, anthropic: false, openai: !isTauri, gemini: false })
   const current = defaultChoice(settings)
   const [expanded, setExpanded] = useState<AiProvider | null>(current.provider)
 
@@ -64,7 +68,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         </span>
       </div>
 
-      {(['claude', 'openai', 'gemini'] as const).map((p) => (
+      <SectionLabel>{t('Tài khoản của bạn', 'ご自身のアカウント')}</SectionLabel>
+      {AI_ORDER.filter((p) => p === 'claude' || p === 'codex').map((p) => (
         <ProviderCard
           key={p}
           provider={p}
@@ -74,11 +79,22 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
           onToggle={() => setExpanded((e) => (e === p ? null : p))}
           onMakeDefault={() => updateSettings({ aiProvider: p })}
         >
-          {p === 'claude' ? (
-            <ClaudeBody />
-          ) : (
-            <ApiBody provider={p} hasKey={keys[p]} onKeySaved={(saved) => setKeys((k) => ({ ...k, [p]: saved }))} />
-          )}
+          {p === 'claude' ? <ClaudeBody /> : <AccountSection account="codex" onReady={(ok) => ok && setKeys((k) => ({ ...k, codex: true }))} />}
+        </ProviderCard>
+      ))}
+
+      <SectionLabel>{t('Nâng cao: API key', '上級者向け: APIキー')}</SectionLabel>
+      {API_PROVIDERS.map((p) => (
+        <ProviderCard
+          key={p}
+          provider={p}
+          ready={available(p)}
+          isDefault={current.provider === p}
+          open={expanded === p}
+          onToggle={() => setExpanded((e) => (e === p ? null : p))}
+          onMakeDefault={() => updateSettings({ aiProvider: p })}
+        >
+          <ApiBody provider={p} hasKey={keys[p]} onKeySaved={(saved) => setKeys((k) => ({ ...k, [p]: saved }))} />
         </ProviderCard>
       ))}
 
@@ -93,8 +109,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
           <div className="text-[13.5px] text-ink">{t('Tự chuyển sang AI khác khi lỗi', 'エラー時に別のAIに切り替える')}</div>
           <div className="mt-0.5 text-[12px] text-ink-3">
             {t(
-              'Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt (Claude, rồi ChatGPT, rồi Gemini).',
-              '使用中のAIが利用枠の上限、キーの誤り、ネットワーク切断で応答できないとき、設定済みの別のAI（Claude、ChatGPT、Gemini の順）で翻訳します。',
+              'Khi AI đang dùng hết hạn mức, sai key hoặc mất mạng trước khi kịp trả lời, dịch bằng AI khác đã cài đặt, theo thứ tự trong danh sách trên.',
+              '使用中のAIが利用枠の上限、キーの誤り、ネットワーク切断で応答できないとき、設定済みの別のAI（上の一覧の順）で翻訳します。',
             )}
           </div>
         </div>
@@ -108,8 +124,8 @@ export function AiProvidersGroup({ group: Group }: { group: GroupComponent; row:
         <ShieldAlert size={15} className="mt-0.5 shrink-0 text-warn" />
         <span>
           {t(
-            'Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của OpenAI và Google mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.',
-            'メッセージの内容は選択したAIの提供元に送信されます。会社が許可する種類のアカウントを使ってください。OpenAI と Google の有料APIは既定でデータを学習に使いませんが、Gemini の無料枠は使う場合があるため、業務のメッセージには使わないでください。',
+            'Nội dung tin nhắn được gửi tới nhà cung cấp AI đã chọn. Hãy dùng đúng loại tài khoản công ty cho phép. API trả phí của Anthropic, OpenAI và Google mặc định không dùng dữ liệu để huấn luyện; gói miễn phí của Gemini thì có thể dùng, không nên dùng cho tin nhắn của khách.',
+            'メッセージの内容は選択したAIの提供元に送信されます。会社が許可する種類のアカウントを使ってください。Anthropic、OpenAI、Google の有料APIは既定でデータを学習に使いませんが、Gemini の無料枠は使う場合があるため、業務のメッセージには使わないでください。',
           )}
         </span>
       </div>
@@ -141,7 +157,11 @@ function ProviderCard({
   const status =
     provider === 'claude'
       ? t('Claude Code trên máy này', 'このPCの Claude Code')
-      : ready
+      : provider === 'codex'
+        ? ready
+          ? t('Tài khoản ChatGPT qua Codex', 'Codex 経由の ChatGPT アカウント')
+          : t('Chưa thiết lập', '未設定')
+        : ready
         ? t('Đã có API key', 'APIキー設定済み')
         : t('Chưa có API key', 'APIキー未設定')
   return (
@@ -175,6 +195,11 @@ function ProviderCard({
   )
 }
 
+/** A heading between the groups of AIs. */
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <div className="px-4 pt-3.5 pb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{children}</div>
+}
+
 function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <div className="flex items-start gap-4 py-2">
@@ -190,16 +215,6 @@ function Field({ label, hint, children }: { label: string; hint?: ReactNode; chi
 function ClaudeBody() {
   const { settings, updateSettings } = useStore()
   const t = useT()
-  const [status, setStatus] = useState<ClaudeStatus | null>(null)
-  useEffect(() => {
-    let alive = true
-    void claudeStatus()
-      .then((s) => alive && setStatus(s))
-      .catch((e) => alive && setStatus({ path: '', version: null, error: String(e) }))
-    return () => {
-      alive = false
-    }
-  }, [])
   return (
     <>
       <Field label={t('Model', 'モデル')} hint={t('Sonnet dịch tốt hơn, Haiku nhanh và tiết kiệm hạn mức hơn.', 'Sonnet は高品質、Haiku は高速で利用枠を節約できます。')}>
@@ -213,39 +228,76 @@ function ClaudeBody() {
           ]}
         />
       </Field>
-      <Field label="Claude Code">
-        {!status ? (
-          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-ink-2">
-            <Loader2 size={15} className="animate-spin" /> {t('Đang kiểm tra…', '確認中…')}
-          </span>
-        ) : status.version ? (
-          <span className="flex items-center gap-1.5 pt-1 text-[13px] text-good" title={status.path}>
-            <CheckCircle2 size={15} /> {status.version}
-          </span>
-        ) : (
-          <span className="flex items-center gap-2">
-            <span className="flex min-w-0 items-center gap-1.5 truncate text-[13px] text-bad" title={status.error ?? ''}>
-              <AlertCircle size={15} className="shrink-0" /> {t('Không chạy được claude', 'claude を実行できません')}
-            </span>
-            <Button size="sm" onClick={() => void invoke('open_claude_login')}>
-              {t('Mở Claude Code', 'Claude Code を開く')}
-            </Button>
-          </span>
-        )}
-      </Field>
+      <AccountSection account="claude" />
     </>
   )
 }
 
-function ApiBody({ provider, hasKey, onKeySaved }: { provider: 'openai' | 'gemini'; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
+/**
+ * The user's own account through the vendor's tool: what is on this PC now, and one button that runs the same
+ * self-running setup as the guide (install, sign in, test translation) without switching to this AI.
+ */
+function AccountSection({ account, onReady }: { account: Account; onReady?: (ready: boolean) => void }) {
+  const { scenario } = useStore()
+  const t = useT()
+  const { tool, name } = ACCOUNT_TOOL[account]
+  const [status, setStatus] = useState<AccountStatus | null>(null)
+  const [checking, setChecking] = useState(0)
+  useEffect(() => {
+    let alive = true
+    void accountStatus(account, scenario)
+      .then((s) => alive && setStatus(s))
+      .catch(() => alive && setStatus({ installed: false, version: null, loggedIn: null }))
+    return () => {
+      alive = false
+    }
+  }, [account, scenario])
+  // The check restarts when its callback changes; the parent's is new on every render, so keep the latest in a ref.
+  const onReadyRef = useRef(onReady)
+  useEffect(() => {
+    onReadyRef.current = onReady
+  })
+  const done = useCallback((ok: boolean) => onReadyRef.current?.(ok), [])
+
+  return (
+    <Field label={tool}>
+      <div className="flex flex-col gap-2.5">
+        {checking === 0 && (
+          <span className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-1 text-[13px]">
+            {!status ? (
+              <span className="flex items-center gap-1.5 text-ink-2">
+                <Loader2 size={15} className="animate-spin" /> {t('Đang kiểm tra…', '確認中…')}
+              </span>
+            ) : status.installed ? (
+              <span className="flex items-center gap-1.5 text-good">
+                <CheckCircle2 size={15} /> {status.version}
+                {status.loggedIn === false && <span className="text-warn">· {t('chưa đăng nhập', '未ログイン')}</span>}
+              </span>
+            ) : (
+              <span className="text-ink-2">{t('Chưa cài trên máy này.', 'このPCには未インストールです。')}</span>
+            )}
+            <Button size="sm" variant={status?.installed && status.loggedIn ? 'secondary' : 'primary'} onClick={() => setChecking(1)}>
+              {status?.installed && status.loggedIn
+                ? t('Kiểm tra và dịch thử', '確認してテスト翻訳')
+                : t(`Thiết lập ${name}`, `${name} を設定`)}
+            </Button>
+          </span>
+        )}
+        {checking > 0 && <AccountCheck key={checking} account={account} onReady={done} makeDefault={false} />}
+      </div>
+    </Field>
+  )
+}
+
+function ApiBody({ provider, hasKey, onKeySaved }: { provider: ApiProvider; hasKey: boolean; onKeySaved: (saved: boolean) => void }) {
   const { settings, updateSettings, showToast } = useStore()
   const t = useT()
   const [draft, setDraft] = useState('')
   const [fetched, setFetched] = useState<string[] | null>(null)
   const [filter, setFilter] = useState('')
   const [test, setTest] = useState<{ state: 'idle' | 'running' } | { state: 'done'; result: TestResult }>({ state: 'idle' })
-  const name = AI_NAMES[provider]
-  const field = provider === 'openai' ? 'openaiModel' : 'geminiModel'
+  const name = vendorName(provider)
+  const field = modelField(provider)
   const model = settings[field] || RECOMMENDED_MODELS[provider]
   const favourites = settings.aiQuickModels[provider]
 

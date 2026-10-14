@@ -61,6 +61,8 @@ export type ErrorKind =
   /** The vendor rejected the API key. */
   | 'bad_key'
   | 'network'
+  /** The vendor refuses MyTranslate's use of Claude Code or Codex; the account itself is fine. */
+  | 'blocked'
 
 export type TranslateEvent =
   | { type: 'started'; warm: boolean }
@@ -107,10 +109,12 @@ export interface ClaudeStatus {
   path: string
   version: string | null
   error: string | null
+  /** From `claude auth status`; null when Claude Code is missing or could not tell. */
+  loggedIn: boolean | null
 }
 
 export async function claudeStatus(): Promise<ClaudeStatus> {
-  if (!isTauri) return { path: 'claude.exe (mock)', version: '2.x (mock)', error: null }
+  if (!isTauri) return { path: 'claude.exe (mock)', version: '2.x (mock)', error: null, loggedIn: true }
   return invoke<ClaudeStatus>('claude_status')
 }
 
