@@ -50,7 +50,7 @@ const conf = readJson('tauri.conf.json')
 let config = arg('--config') ? JSON.parse(arg('--config')) : null
 if (staging) {
   const commits = execFileSync('git', ['rev-list', '--count', 'HEAD'], { cwd: app, encoding: 'utf8' }).trim()
-  const { $schema, ...overlay } = readJson('tauri.staging.conf.json')
+  const { $schema: _schema, ...overlay } = readJson('tauri.staging.conf.json')
   config = { ...overlay, version: `${conf.version}-staging.${commits}`, ...config }
 }
 const extraConfig = config ? JSON.stringify(config) : undefined
