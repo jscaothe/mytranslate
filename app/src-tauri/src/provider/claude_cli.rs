@@ -27,6 +27,8 @@ use crate::prompt::{self, TranslateRequest};
 /// A spare older than this is replaced in the background, so a stale login or a stuck process never meets a user.
 const SPARE_MAX_AGE: Duration = Duration::from_secs(20 * 60);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(90);
+/// Claude Code's 4th retry of an unsent request comes about 5 s in; a blip is over by then, a blocked network is not.
+const NETWORK_ATTEMPTS: u64 = 4;
 /// Windows: do not flash a console window for the child process.
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -349,6 +351,11 @@ impl ClaudeCli {
                     }
                 }
                 Some("rate_limit_event") => rate_limit = Some(parse_rate_limit(&msg["rate_limit_info"])),
+                Some("system") => {
+                    if let Some(message) = unreachable(&msg) {
+                        break Err((ErrorKind::Network, message));
+                    }
+                }
                 Some("result") => {
                     if msg["is_error"].as_bool().unwrap_or(false) || msg["subtype"] != "success" {
                         let text = msg["result"].as_str().unwrap_or("Claude returned an error").to_string();
@@ -461,6 +468,24 @@ fn parse_rate_limit(v: &Value) -> RateLimit {
         resets_at: v["resetsAt"].as_i64(),
         limit_type: v["rateLimitType"].as_str().map(str::to_string),
     }
+}
+
+/// Claude Code retries a request it could not send for minutes, silently. When the server stays out of reach (no
+/// HTTP answer at all, or a proxy asking for credentials) for a few attempts, the network is the problem: say so
+/// now instead of after the request timeout. Server errors (overloaded, 5xx) are left to Claude Code's retries.
+fn unreachable(msg: &Value) -> Option<String> {
+    if msg["subtype"] != "api_retry" || msg["attempt"].as_u64().unwrap_or(0) < NETWORK_ATTEMPTS {
+        return None;
+    }
+    let status = msg["error_status"].as_u64();
+    if status.is_some_and(|s| s != 407) {
+        return None;
+    }
+    let error = msg["error"].as_str().unwrap_or("unknown");
+    Some(match status {
+        Some(s) => format!("Could not reach Claude: proxy answered {s} ({error})"),
+        None => format!("Could not reach Claude ({error})"),
+    })
 }
 
 fn classify_failure(text: &str) -> (ErrorKind, String) {
@@ -576,5 +601,25 @@ mod tests {
             ErrorKind::RateLimited
         );
         assert_eq!(classify_failure("").0, ErrorKind::Cli);
+    }
+
+    #[test]
+    fn gives_up_early_only_when_the_server_is_out_of_reach() {
+        // As Claude Code 2.1 reports retries in stream-json.
+        let retry = |attempt: u64, status: Value| {
+            serde_json::json!({ "type": "system", "subtype": "api_retry", "attempt": attempt, "max_retries": 10,
+                                "error_status": status, "error": "unknown" })
+        };
+        assert_eq!(unreachable(&retry(3, Value::Null)), None);
+        assert_eq!(
+            unreachable(&retry(4, Value::Null)).as_deref(),
+            Some("Could not reach Claude (unknown)")
+        );
+        assert!(unreachable(&retry(4, 407.into())).is_some());
+        assert_eq!(unreachable(&retry(6, 529.into())), None);
+        assert_eq!(
+            unreachable(&serde_json::json!({ "type": "system", "subtype": "status", "attempt": 9 })),
+            None
+        );
     }
 }

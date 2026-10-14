@@ -5,7 +5,7 @@ import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../component
 import { cx, inputClass } from '../../components/styles'
 import { invoke } from '@tauri-apps/api/core'
 import { AI_NAMES, KEY_HELP, RECOMMENDED_MODELS, testFailure, type TestResult } from '../../lib/ai'
-import { claudeStatus, isTauri, startTranslation } from '../../lib/claude'
+import { claudeStatus, isTauri, startTranslation, type ErrorKind } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { otherLang, readDirection, useLang, useT, type Lang, type T } from '../../lib/i18n'
 import { useStore, type AiProvider, type QuickActionId } from '../../store'
@@ -458,7 +458,7 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
         }
         if (e.type === 'error' && e.kind !== 'cancelled') {
           if (e.kind === 'not_logged_in') set(['ok', 'fail', 'idle'], found)
-          else set(['ok', 'ok', 'fail'], { ...found, 2: e.message })
+          else set(['ok', 'ok', 'fail'], { ...found, 2: claudeFailure(e.kind, e.message, t) })
           onReady(false)
         }
       })
@@ -499,13 +499,13 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
 
   const items: { title: string; detail: string; fail: string; action?: ReactNode }[] = [
     {
-      title: t('Đã cài Claude Code', 'Claude Code がインストール済み'),
+      title: t('Claude Code trên máy', 'このPCの Claude Code'),
       detail: t('Tìm thấy claude 2.x trong PATH', 'PATH に claude 2.x が見つかりました'),
       fail: t('Không tìm thấy lệnh claude', 'claude コマンドが見つかりません'),
     },
     {
-      title: t('Đã đăng nhập tài khoản Claude', 'Claude アカウントにログイン済み'),
-      detail: t('Đăng nhập bằng tài khoản Claude của bạn', 'ご自身の Claude アカウントでログインしています'),
+      title: t('Tài khoản Claude', 'Claude アカウント'),
+      detail: t('Đã đăng nhập bằng tài khoản Claude của bạn', 'ご自身の Claude アカウントでログインしています'),
       fail: t('Chưa đăng nhập. Mở terminal và chạy lệnh claude để đăng nhập.', 'ログインしていません。ターミナルで claude を実行してログインしてください。'),
       action: (
         <Button
@@ -521,7 +521,7 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
       ),
     },
     {
-      title: t('Gọi thử thành công', 'テスト翻訳に成功'),
+      title: t('Dịch thử', 'テスト翻訳'),
       detail: t('Chữ đầu tiên sau 1,8 giây', '最初の文字まで 1.8 秒'),
       fail:
         scenario === 'quota'
@@ -561,6 +561,20 @@ function ClaudeCheck({ onReady }: { onReady: (ready: boolean) => void }) {
       )}
     </div>
   )
+}
+
+/** Why the test translation through Claude Code failed, in the user's words; other failures keep Claude's text. */
+function claudeFailure(kind: ErrorKind, message: string, t: T): string {
+  if (kind === 'network')
+    return t(
+      'Không kết nối được tới máy chủ Claude. Kiểm tra mạng, VPN hoặc proxy của công ty rồi bấm Kiểm tra lại.',
+      'Claude のサーバーに接続できません。ネットワーク、VPN、社内プロキシを確認してから「もう一度確認」を押してください。',
+    )
+  if (kind === 'timeout')
+    return t('Claude không trả lời. Kiểm tra mạng rồi bấm Kiểm tra lại.', 'Claude から応答がありません。ネットワークを確認してから「もう一度確認」を押してください。')
+  if (kind === 'rate_limited')
+    return t('Đã hết hạn mức gói Claude. Thử lại sau khi hạn mức được làm mới.', 'Claude プランの利用枠を使い切りました。リセット後にもう一度お試しください。')
+  return message
 }
 
 function StatusIcon({ state }: { state: CheckState }) {
