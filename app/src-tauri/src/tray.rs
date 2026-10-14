@@ -103,7 +103,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             MENU_UPDATE => install_update(app),
             MENU_AI_SETTINGS => {
                 show_main(app);
-                let _ = app.emit("ui:open-tab", "settings");
+                let _ = app.emit("ui:open-tab", "settings:ai");
             }
             id if id.starts_with(MENU_AI) => {
                 let mut parts = id[MENU_AI.len()..].splitn(2, '|');

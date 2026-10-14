@@ -281,6 +281,12 @@ test('selecting text with the mouse shows the quick toolbar', async ({ page }) =
   await page.mouse.up()
   const bar = page.locator('[data-quick-bar]')
   await expect(bar).toBeVisible()
+  // Resting on a button teaches its shortcut, so next time the mouse is not needed.
+  await expect(bar.getByRole('tooltip')).toHaveCount(0)
+  await bar.getByRole('button', { name: /Dịch/ }).first().hover()
+  await expect(bar.getByRole('tooltip')).toHaveText('Phím tắtCtrlAltT')
+  await bar.getByRole('button', { name: /Kiểm tra/ }).hover()
+  await expect(bar.getByRole('tooltip')).toHaveText('Phím tắtCtrlAltC')
   await bar.getByRole('button', { name: /Dịch/ }).first().click()
   await expect(popup(page)).toBeVisible()
 })

@@ -320,7 +320,7 @@ function Taskbar() {
               <div className="my-1 h-px bg-line" />
               {item(t('Cài đặt', '設定'), () => openMain('settings'))}
               {item(t('Chạy lại onboarding', '初期設定ガイドをもう一度'), () => setScreen('onboarding'))}
-              {item(t('Kiểm tra cập nhật', 'アップデートを確認'), () => openMain('settings'))}
+              {item(t('Kiểm tra cập nhật', 'アップデートを確認'), () => openMain('settings', 'updates'))}
               {item(t('Thoát', '終了'), () => showToast(t('Prototype: thoát app sẽ tắt toàn bộ phím tắt', 'プロトタイプ: 終了するとすべてのショートカットが止まります')))}
             </div>
           )}

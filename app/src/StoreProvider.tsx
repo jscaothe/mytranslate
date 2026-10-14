@@ -6,7 +6,7 @@ import { mockData } from './data/mock'
 import { DEFAULT_HOTKEYS, knownHotkeys } from './lib/hotkeys'
 import { isTauri } from './lib/claude'
 import { pick, systemLang } from './lib/i18n'
-import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, knownQuickActions, StoreContext, type MainTab, type PopupGeometry, type Screen, type Settings, type Store, type Toast } from './store'
+import { DEFAULT_POPUP_WIDTH, DEFAULT_QUICK_ACTION_APPS, DEFAULT_QUICK_ACTION_ITEMS, knownQuickActions, StoreContext, type MainTab, type PopupGeometry, type SettingsSection, type Screen, type Settings, type Store, type Toast } from './store'
 import type { Scenario } from './types'
 
 const defaultSettings: Settings = {
@@ -48,6 +48,7 @@ const mock = mockData(defaultSettings.language)
 export function StoreProvider({ children, initialScreen = 'playground', initialMainTab = 'glossary' }: { children: ReactNode; initialScreen?: Screen; initialMainTab?: MainTab }) {
   const [screen, setScreen] = useState<Screen>(initialScreen)
   const [mainTab, setMainTab] = useState<MainTab>(initialMainTab)
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('ai')
   const [scenario, setScenario] = useState<Scenario>('normal')
   const [glossary, setGlossary] = useState(isTauri ? [] : mock.glossary)
   const [settings, setSettings] = useState(defaultSettings)
@@ -62,8 +63,9 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     toastTimer.current = window.setTimeout(() => setToast(null), 2400)
   }, [])
 
-  const openMain = useCallback((tab?: MainTab) => {
+  const openMain = useCallback((tab?: MainTab, section?: SettingsSection) => {
     if (tab) setMainTab(tab)
+    if (section) setSettingsSection(section)
     setScreen('main')
   }, [])
 
@@ -106,10 +108,15 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
     document.documentElement.lang = settings.language
   }, [settings.language])
 
-  // Real app: the tray menu and the popup can ask the main window to open a tab (for example Settings).
+  // Real app: the tray menu and the popup can ask the main window to open a tab, and a part of Settings with
+  // "settings:<part>" (for example "settings:ai").
   useEffect(() => {
     if (!isTauri) return
-    const off = listen<MainTab>('ui:open-tab', (e) => setMainTab(e.payload))
+    const off = listen<string>('ui:open-tab', (e) => {
+      const [tab, section] = e.payload.split(':') as [MainTab, SettingsSection | undefined]
+      setMainTab(tab)
+      if (section) setSettingsSection(section)
+    })
     return () => void off.then((f) => f())
   }, [])
 
@@ -151,6 +158,8 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       mainTab,
       openMain,
       setMainTab,
+      settingsSection,
+      setSettingsSection,
       scenario,
       setScenario,
       glossary,
@@ -163,7 +172,7 @@ export function StoreProvider({ children, initialScreen = 'playground', initialM
       popupGeometry,
       setPopupGeometry,
     }),
-    [screen, mainTab, openMain, scenario, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
+    [screen, mainTab, openMain, settingsSection, scenario, glossary, settings, settingsReady, updateSettings, toast, showToast, popupGeometry],
   )
 
   return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
