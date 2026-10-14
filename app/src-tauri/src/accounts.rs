@@ -143,7 +143,10 @@ async fn install_claude() -> Result<(), String> {
     if why.is_empty() {
         why = String::from_utf8_lossy(&out.stdout).trim().to_string();
     }
-    Err(format!("The Claude Code installer failed: {}", why.chars().take(400).collect::<String>()))
+    Err(format!(
+        "The Claude Code installer failed: {}",
+        why.chars().take(400).collect::<String>()
+    ))
 }
 
 /// The release file for this PC: the compressed Windows build, the smallest of OpenAI's downloads.
@@ -198,7 +201,9 @@ async fn install_codex(target: &Path, progress: impl Fn(Option<u8>)) -> Result<(
     }
     let got = hex(&hasher.finalize());
     if got != digest {
-        return Err(format!("The Codex download is damaged (SHA-256 {got}, expected {digest})"));
+        return Err(format!(
+            "The Codex download is damaged (SHA-256 {got}, expected {digest})"
+        ));
     }
 
     let dir = target.parent().ok_or("bad install path")?;
@@ -235,7 +240,11 @@ fn pick_asset(release: &serde_json::Value, name: &str) -> Result<(String, u64, S
         .as_str()
         .and_then(|d| d.strip_prefix("sha256:"))
         .ok_or("The release does not publish a SHA-256 for Codex")?;
-    Ok((url.to_string(), asset["size"].as_u64().unwrap_or(0), digest.to_lowercase()))
+    Ok((
+        url.to_string(),
+        asset["size"].as_u64().unwrap_or(0),
+        digest.to_lowercase(),
+    ))
 }
 
 fn hex(bytes: &[u8]) -> String {

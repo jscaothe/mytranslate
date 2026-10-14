@@ -152,7 +152,12 @@ mod tests {
         let page: HelpPage = serde_json::from_value("gemini_keys".into()).unwrap();
         assert_eq!(page, HelpPage::GeminiKeys);
         assert!(serde_json::from_value::<HelpPage>("https://example.com".into()).is_err());
-        for p in [HelpPage::ClaudeCode, HelpPage::AnthropicKeys, HelpPage::OpenaiKeys, HelpPage::GeminiKeys] {
+        for p in [
+            HelpPage::ClaudeCode,
+            HelpPage::AnthropicKeys,
+            HelpPage::OpenaiKeys,
+            HelpPage::GeminiKeys,
+        ] {
             assert!(p.url().starts_with("https://"));
         }
     }

@@ -195,8 +195,8 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
           <p className="flex gap-2 rounded-lg bg-accent-soft px-3.5 py-2.5 text-[12.5px] leading-relaxed text-accent">
             <CircleAlert size={15} className="mt-0.5 shrink-0" />
             {t(
-              'Gói ChatGPT miễn phí không dùng được Codex. Nếu chưa có gói trả phí, chọn "Tôi chưa có tài khoản AI".',
-              '無料の ChatGPT プランでは Codex を使えません。有料プランがない場合は「AIのアカウントを持っていない」を選んでください。',
+              'Gói ChatGPT miễn phí không dùng được Codex. Nếu chưa có gói trả phí, hãy dùng tài khoản Claude hoặc API key (Nâng cao).',
+              '無料の ChatGPT プランでは Codex を使えません。有料プランがない場合は、Claude アカウントか APIキー（上級者向け）をお使いください。',
             )}
           </p>
         )}
@@ -249,11 +249,8 @@ function ConnectAi({ onReady }: { onReady: (ready: boolean) => void }) {
           provider="cloud"
           wide
           title={t('Tôi chưa có tài khoản AI', 'AIのアカウントを持っていない')}
-          detail={t(
-            'Dùng AI của MyTranslate: miễn phí 7 ngày, không cần thẻ; sau đó trả phí hằng tháng.',
-            'MyTranslate のAIを使います。7日間無料（カード不要）、その後は月額制です。',
-          )}
-          badge={{ kind: 'soon', text: t('Sắp có', '近日対応') }}
+          detail={t('Dùng AI của MyTranslate, không cần tài khoản AI riêng.', 'MyTranslate のAIを使います。AIのアカウントは不要です。')}
+          badge={{ kind: 'dev', text: t('Đang phát triển', '開発中') }}
         />
       </div>
       <button type="button" onClick={() => go('apikey')} className="flex items-center gap-1.5 self-start text-[13px] text-accent hover:underline">
@@ -284,7 +281,7 @@ function WayCard({
   provider: AiProvider | 'cloud'
   title: string
   detail: string
-  badge?: { kind: 'ready' | 'soon'; text: string }
+  badge?: { kind: 'ready' | 'dev'; text: string }
   wide?: boolean
   onClick?: () => void
 }) {

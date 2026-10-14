@@ -188,6 +188,11 @@ impl HttpApis {
                         && !id.contains("image")
                         && !id.contains("tts")
                         && !id.contains("embedding")
+                        && !id.contains("transcribe")
+                        && !id.contains("computer-use")
+                        && !id.contains("robotics")
+                        && !id.contains("customtools")
+                        && !id.contains("banana")
                 })
                 .collect(),
         };
@@ -416,9 +421,8 @@ fn read_usage(api: Api, msg: &Value) -> Option<Tokens> {
                 let u = &msg["message"]["usage"];
                 let cached = u["cache_read_input_tokens"].as_u64().unwrap_or(0);
                 // Claude counts the cached and the newly cached part apart from `input_tokens`.
-                let input = u["input_tokens"].as_u64()?
-                    + cached
-                    + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
+                let input =
+                    u["input_tokens"].as_u64()? + cached + u["cache_creation_input_tokens"].as_u64().unwrap_or(0);
                 Some(Tokens {
                     input: Some(input),
                     cached: Some(cached),
@@ -601,7 +605,8 @@ mod tests {
         assert!(matches!(read_event(Api::Anthropic, &delta), Piece::Text(t) if t == "<translation>確認"));
         let thinking = json!({ "type": "content_block_delta", "delta": { "type": "thinking_delta", "thinking": "" } });
         assert!(matches!(read_event(Api::Anthropic, &thinking), Piece::Thinking));
-        let refusal = json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" }, "usage": { "output_tokens": 3 } });
+        let refusal =
+            json!({ "type": "message_delta", "delta": { "stop_reason": "refusal" }, "usage": { "output_tokens": 3 } });
         assert!(matches!(read_event(Api::Anthropic, &refusal), Piece::Failed(_)));
         let overloaded = json!({ "type": "error", "error": { "type": "overloaded_error", "message": "Overloaded" } });
         assert!(matches!(read_event(Api::Anthropic, &overloaded), Piece::Failed(m) if m == "Overloaded"));

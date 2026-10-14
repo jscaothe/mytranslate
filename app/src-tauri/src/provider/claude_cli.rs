@@ -483,9 +483,16 @@ fn parse_rate_limit(v: &Value) -> RateLimit {
 /// Whether the vendor's answer says this use of its tool is not allowed (as opposed to a signed-out account). The
 /// exact wording is not documented; these are the phrases such refusals have used.
 pub fn refused_by_vendor(lower: &str) -> bool {
-    ["third-party", "third party", "not permitted", "only authorized for use", "not allowed to use", "unauthorized client"]
-        .iter()
-        .any(|p| lower.contains(p))
+    [
+        "third-party",
+        "third party",
+        "not permitted",
+        "only authorized for use",
+        "not allowed to use",
+        "unauthorized client",
+    ]
+    .iter()
+    .any(|p| lower.contains(p))
 }
 
 /// Claude Code retries a request it could not send for minutes, silently. When the server stays out of reach (no
@@ -622,7 +629,10 @@ mod tests {
         );
         assert_eq!(classify_failure("").0, ErrorKind::Cli);
         assert_eq!(
-            classify_failure("This credential is only authorized for use with Claude Code and cannot be used for other API requests.").0,
+            classify_failure(
+                "This credential is only authorized for use with Claude Code and cannot be used for other API requests."
+            )
+            .0,
             ErrorKind::Blocked
         );
     }

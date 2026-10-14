@@ -79,7 +79,10 @@ impl CodexCli {
         let mut index = self.effort.lock().unwrap().get(model).copied().unwrap_or(0);
         emit(TranslateEvent::Started { warm: false });
         loop {
-            match self.attempt(&exe, model, EFFORTS[index], req, start, &mut cancel, emit).await {
+            match self
+                .attempt(&exe, model, EFFORTS[index], req, start, &mut cancel, emit)
+                .await
+            {
                 Ok(()) => {
                     self.effort.lock().unwrap().insert(model.to_string(), index);
                     return;
@@ -295,10 +298,15 @@ fn classify(message: &str) -> (ErrorKind, String) {
         || lower.contains("401")
     {
         ErrorKind::NotLoggedIn
-    } else if lower.contains("usage limit") || lower.contains("rate limit") || lower.contains("quota") || lower.contains("429")
+    } else if lower.contains("usage limit")
+        || lower.contains("rate limit")
+        || lower.contains("quota")
+        || lower.contains("429")
     {
         ErrorKind::RateLimited
-    } else if lower.contains("stream disconnected") || lower.contains("error sending request") || lower.contains("connect")
+    } else if lower.contains("stream disconnected")
+        || lower.contains("error sending request")
+        || lower.contains("connect")
     {
         ErrorKind::Network
     } else {
@@ -388,7 +396,11 @@ async fn run(exe: &Path, args: &[&str]) -> Result<String, String> {
         .await
         .map_err(|_| "timed out".to_string())?
         .map_err(|e| e.to_string())?;
-    let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
     if out.status.success() { Ok(text) } else { Err(text) }
 }
 
@@ -400,7 +412,10 @@ mod tests {
     #[test]
     fn reads_the_events_a_translation_needs() {
         let message = json!({ "type": "item.completed", "item": { "id": "item_1", "type": "agent_message", "text": "<translation>Xin chào</translation>" } });
-        assert_eq!(read_event(&message), Event::Message("<translation>Xin chào</translation>".into()));
+        assert_eq!(
+            read_event(&message),
+            Event::Message("<translation>Xin chào</translation>".into())
+        );
         let reasoning = json!({ "type": "item.started", "item": { "id": "item_0", "type": "reasoning", "text": "" } });
         assert_eq!(read_event(&reasoning), Event::Thinking);
         let usage = json!({ "type": "turn.completed", "usage": { "input_tokens": 1500, "cached_input_tokens": 1000, "output_tokens": 80 } });
@@ -413,8 +428,14 @@ mod tests {
             })
         );
         let failed = json!({ "type": "turn.failed", "error": { "message": "You've hit your usage limit." } });
-        assert_eq!(read_event(&failed), Event::Failed("You've hit your usage limit.".into()));
-        assert_eq!(read_event(&json!({ "type": "thread.started", "thread_id": "t" })), Event::Nothing);
+        assert_eq!(
+            read_event(&failed),
+            Event::Failed("You've hit your usage limit.".into())
+        );
+        assert_eq!(
+            read_event(&json!({ "type": "thread.started", "thread_id": "t" })),
+            Event::Nothing
+        );
     }
 
     #[test]
@@ -423,10 +444,18 @@ mod tests {
             classify("Your access token could not be refreshed. Please log out and sign in again.").0,
             ErrorKind::NotLoggedIn
         );
-        assert_eq!(classify("You've hit your usage limit. Try again in 3 hours.").0, ErrorKind::RateLimited);
+        assert_eq!(
+            classify("You've hit your usage limit. Try again in 3 hours.").0,
+            ErrorKind::RateLimited
+        );
         assert_eq!(classify("stream disconnected before completion").0, ErrorKind::Network);
-        assert_eq!(classify("This client is not permitted to use ChatGPT plans").0, ErrorKind::Blocked);
-        assert!(rejects_effort("Unsupported value: 'none' is not supported with this model for reasoning.effort"));
+        assert_eq!(
+            classify("This client is not permitted to use ChatGPT plans").0,
+            ErrorKind::Blocked
+        );
+        assert!(rejects_effort(
+            "Unsupported value: 'none' is not supported with this model for reasoning.effort"
+        ));
         assert!(!rejects_effort("You've hit your usage limit."));
     }
 
@@ -460,7 +489,13 @@ mod tests {
     #[test]
     fn runs_read_only_without_the_users_config_and_takes_the_prompt_on_stdin() {
         let args = exec_args("gpt-x", "minimal", Path::new("C:/work"));
-        for flag in ["--json", "--ephemeral", "--ignore-user-config", "--ignore-rules", "read-only"] {
+        for flag in [
+            "--json",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--ignore-rules",
+            "read-only",
+        ] {
             assert!(args.iter().any(|a| a == flag), "{flag}");
         }
         assert!(args.windows(2).any(|w| w == ["--model", "gpt-x"]));

@@ -47,6 +47,7 @@ impl Route {
     fn model(&self) -> Option<&str> {
         match self {
             Route::Claude { model } => model.as_deref(),
+            Route::Codex { model } => Some(model),
             Route::Api { model, .. } => Some(model),
         }
     }
@@ -204,7 +205,7 @@ impl Router {
                     }
                     Route::Codex { model } => {
                         let Some(rx) = self.register_cancel(request_id) else {
-                            emit(cancelled(route));
+                            emit(cancelled(&route));
                             return;
                         };
                         self.codex.translate(model, &req, rx, &forward).await;
@@ -218,7 +219,7 @@ impl Router {
                         }),
                         Some(key) => {
                             let Some(rx) = self.register_cancel(request_id) else {
-                                emit(cancelled(route));
+                                emit(cancelled(&route));
                                 return;
                             };
                             self.http.translate(*api, model, key, &req, rx, &forward).await;

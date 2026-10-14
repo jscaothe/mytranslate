@@ -440,6 +440,7 @@ mod tests {
             .iter()
             .map(|r| match r {
                 Route::Claude { model } => ("claude".into(), model.clone().unwrap_or_default()),
+                Route::Codex { model } => ("codex".into(), model.clone()),
                 Route::Api { api, model, .. } => (api.id().into(), model.clone()),
             })
             .collect()
