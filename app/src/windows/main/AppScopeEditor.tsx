@@ -1,10 +1,10 @@
 import { AlertTriangle, ChevronDown, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { cx, inputClass } from '../../components/styles'
-import { Button, IconButton } from '../../components/ui'
+import { Button, IconButton, Segmented } from '../../components/ui'
 import { runningApps } from '../../data/mock'
 import { useT } from '../../lib/i18n'
-import type { AppRef } from '../../store'
+import { useStore, type AppRef } from '../../store'
 
 const iconColors = ['#0f766e', '#c2410c', '#1d4ed8', '#be185d', '#15803d', '#7c3aed']
 
@@ -37,6 +37,40 @@ export function AppIcon({ app }: { app: AppRef }) {
 }
 
 const sameExe = (a: string, b: string) => a.toLowerCase() === b.toLowerCase()
+
+/** "Hiện trong ứng dụng nào": every app, or only the listed ones. Shared by Settings and the first-run guide. */
+export function AppScopeSetting() {
+  const { settings, updateSettings, showToast } = useStore()
+  const t = useT()
+  const qa = settings.quickActions
+  const label = t('Hiện trong ứng dụng nào', '表示するアプリ')
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <div className="min-w-0">
+          <div className="text-[13.5px] text-ink">{label}</div>
+          <div className="mt-0.5 text-[12px] text-ink-3">
+            {qa.appScope === 'all'
+              ? t('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Phím tắt.', 'すべてのアプリ（「ショートカット」で除外したアプリを除く）。')
+              : t('Chỉ các ứng dụng trong danh sách dưới đây.', '下のリストのアプリだけ。')}
+          </div>
+        </div>
+        <Segmented
+          label={label}
+          value={qa.appScope}
+          onChange={(appScope) => updateSettings({ quickActions: { ...qa, appScope } })}
+          options={[
+            { value: 'all', label: t('Mọi ứng dụng', 'すべてのアプリ') },
+            { value: 'selected', label: t('Ứng dụng đã chọn', '選んだアプリ') },
+          ]}
+        />
+      </div>
+      {qa.appScope === 'selected' && (
+        <AppScopeEditor apps={qa.apps} onChange={(apps) => updateSettings({ quickActions: { ...qa, apps } })} onError={showToast} />
+      )}
+    </div>
+  )
+}
 
 /** The apps the quick toolbar is limited to: picked from running apps, or typed as an executable name. */
 export function AppScopeEditor({

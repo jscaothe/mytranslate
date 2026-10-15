@@ -10,6 +10,7 @@ import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { otherLang, readDirection, useLang, useT, type Lang, type T } from '../../lib/i18n'
 import { useStore, type AiProvider, type ApiProvider, type QuickActionId } from '../../store'
+import { AppScopeSetting } from '../main/AppScopeEditor'
 import { AiMark } from '../popup/AiSwitcher'
 import { Popup } from '../popup/Popup'
 import { AccountCheck } from '../../components/AccountCheck'
@@ -539,7 +540,7 @@ function TryIt() {
   const items = settings.quickActions.items.filter((i) => tryItActions.includes(i.id))
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex min-h-full flex-col gap-4">
       <div>
         <h2 className="text-[17px] font-semibold">{t('Thử ngay', '試してみる')}</h2>
         <p className="mt-1 text-[13.5px] text-ink-2">
@@ -585,6 +586,18 @@ function TryIt() {
             {t('Trong Teams và Slack cũng làm y như vậy. Bấm Hoàn tất để bắt đầu dùng.', 'Teams や Slack でも同じ操作です。「完了」を押して使い始めましょう。')}
           </p>
         </>
+      )}
+      {/* At the bottom of the step, so the practice popup opens in the space above it. */}
+      {settings.quickActions.enabled && (
+        <section className="mt-auto border-t border-line pt-4">
+          <h3 className="text-[14px] font-semibold text-ink">{t('Thanh thao tác nhanh', 'クイック操作')}</h3>
+          <p className="text-[12.5px] text-ink-3">
+            {t('Đổi lại bất cứ lúc nào trong Cài đặt > Thanh thao tác nhanh.', 'あとから「設定 > クイック操作」でいつでも変更できます。')}
+          </p>
+          <div className="mt-2.5 rounded-lg border border-line bg-surface px-4 py-3.5">
+            <AppScopeSetting />
+          </div>
+        </section>
       )}
     </div>
   )

@@ -11,7 +11,7 @@ import { isTauri } from '../../lib/claude'
 import { comboFromEvent } from '../../lib/hotkeys'
 import { useT, type T } from '../../lib/i18n'
 import { DEFAULT_QUICK_ACTION_ITEMS, useStore, type HotkeyMap, type SettingsSection } from '../../store'
-import { AppScopeEditor } from './AppScopeEditor'
+import { AppScopeSetting } from './AppScopeEditor'
 import { QuickActionOrderEditor } from './QuickActionOrderEditor'
 import { AiProvidersGroup } from './AiProvidersGroup'
 
@@ -248,27 +248,8 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
         </Row>
         {qa.enabled && (
           <>
-            <div className="flex flex-col gap-3 px-4 py-3.5">
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-[13.5px] text-ink">{t('Hiện trong ứng dụng nào', '表示するアプリ')}</div>
-                  <div className="mt-0.5 text-[12px] text-ink-3">
-                    {qa.appScope === 'all'
-                      ? t('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Phím tắt.', 'すべてのアプリ（「ショートカット」で除外したアプリを除く）。')
-                      : t('Chỉ các ứng dụng trong danh sách dưới đây.', '下のリストのアプリだけ。')}
-                  </div>
-                </div>
-                <Segmented
-                  label={t('Hiện trong ứng dụng nào', '表示するアプリ')}
-                  value={qa.appScope}
-                  onChange={(v) => setQa({ appScope: v })}
-                  options={[
-                    { value: 'selected', label: t('Ứng dụng đã chọn', '選んだアプリ') },
-                    { value: 'all', label: t('Mọi ứng dụng', 'すべてのアプリ') },
-                  ]}
-                />
-              </div>
-              {qa.appScope === 'selected' && <AppScopeEditor apps={qa.apps} onChange={(apps) => setQa({ apps })} onError={showToast} />}
+            <div className="px-4 py-3.5">
+              <AppScopeSetting />
             </div>
             <div className="px-4 pt-3.5 pb-1">
               <div className="flex items-center justify-between gap-4">
