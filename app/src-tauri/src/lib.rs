@@ -386,6 +386,14 @@ fn history_feedback(history: State<'_, History>, message_id: i64, bad: bool) -> 
     history.set_feedback(message_id, bad).map_err(|e| e.to_string())
 }
 
+/// A keigo level picked in the popup, kept for the conversation's next translations.
+#[tauri::command]
+fn conversation_keigo_set(history: State<'_, History>, conversation_id: i64, keigo: Keigo) -> Result<(), String> {
+    history
+        .set_conversation_keigo(conversation_id, keigo)
+        .map_err(|e| e.to_string())
+}
+
 /// Asks where to save, then writes a copy of the whole history. `None` when cancelled.
 #[tauri::command]
 async fn data_backup(app: AppHandle) -> Result<Option<String>, String> {
@@ -889,6 +897,7 @@ pub fn run() {
             glossary_delete,
             glossary_team,
             history_feedback,
+            conversation_keigo_set,
             data_backup,
             data_restore,
             data_wipe,

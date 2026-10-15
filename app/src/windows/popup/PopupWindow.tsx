@@ -4,7 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Popup } from './Popup'
 import type { PopupRequest, WindowedHost } from './types'
-import type { Direction } from '../../types'
+import type { Direction, Keigo } from '../../types'
 
 /** What the Rust side sends when a hotkey fires (see `popup.rs`). */
 interface OpenPayload {
@@ -19,6 +19,8 @@ interface OpenPayload {
   error: string | null
   conversationId: number | null
   threadId: number | null
+  /** The keigo level last picked in this conversation. */
+  keigo: Keigo | null
 }
 
 interface GeometryInfo {
@@ -37,6 +39,7 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
   inMessageBox: p.inMessageBox,
   conversation: p.conversation,
   app: p.app,
+  keigo: p.keigo,
   window: {
     conversation: p.conversation,
     workspace: p.workspace,
@@ -128,6 +131,10 @@ export function PopupWindow() {
       onApply={(text, options) => void invoke('popup_apply', { text, keep: options?.keep ?? false })}
       onPinnedChange={(p) => {
         pinned.current = p
+      }}
+      onKeigo={(keigo) => {
+        const conversationId = request.window?.conversationId
+        if (conversationId != null) void invoke('conversation_keigo_set', { conversationId, keigo })
       }}
     />
   )

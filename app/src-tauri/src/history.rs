@@ -8,6 +8,7 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use crate::lang::Lang;
+use crate::prompt::Keigo;
 use crate::review::{AdviceItem, Issue};
 
 /// Bump with a new entry in `MIGRATIONS` whenever the schema changes.
@@ -199,6 +200,8 @@ impl MessageInfo {
 pub struct ConversationInfo {
     /// The channel or chat: a direct message is named after the person.
     pub name: String,
+    /// The keigo level the user last picked here; `None` until they pick one.
+    pub keigo: Option<Keigo>,
 }
 
 pub struct NewMessage<'a> {
@@ -419,10 +422,23 @@ impl History {
 
     pub fn conversation(&self, id: i64) -> rusqlite::Result<Option<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT name FROM conversations WHERE id = ?1", [id], |r| {
-            Ok(ConversationInfo { name: r.get(0)? })
+        conn.query_row("SELECT name, keigo FROM conversations WHERE id = ?1", [id], |r| {
+            Ok(ConversationInfo {
+                name: r.get(0)?,
+                keigo: Keigo::from_name(&r.get::<_, String>(1)?),
+            })
         })
         .optional()
+    }
+
+    /// Remembers the keigo level picked in a conversation, for its next translations.
+    pub fn set_conversation_keigo(&self, id: i64, keigo: Keigo) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE conversations SET keigo = ?2 WHERE id = ?1",
+            params![id, keigo.name()],
+        )?;
+        Ok(())
     }
 
     /// The last `limit` messages of a thread, oldest first.
@@ -847,6 +863,20 @@ mod tests {
         let c = h.upsert_conversation("teams", "", "CustomerX", "dev-qa").unwrap();
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn a_conversation_keeps_the_keigo_level_picked_in_it() {
+        let h = History::in_memory();
+        let a = h.upsert_conversation("slack", "", "CustomerX", "dev-qa").unwrap();
+        let b = h.upsert_conversation("slack", "", "CustomerX", "general").unwrap();
+        assert_eq!(h.conversation(a).unwrap().unwrap().keigo, None);
+        h.set_conversation_keigo(a, Keigo::Casual).unwrap();
+        h.set_conversation_keigo(a, Keigo::Polite).unwrap();
+        // Seen again: still the level picked last.
+        assert_eq!(h.upsert_conversation("slack", "", "CustomerX", "dev-qa").unwrap(), a);
+        assert_eq!(h.conversation(a).unwrap().unwrap().keigo, Some(Keigo::Polite));
+        assert_eq!(h.conversation(b).unwrap().unwrap().keigo, None);
     }
 
     #[test]

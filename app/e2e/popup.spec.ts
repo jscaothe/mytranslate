@@ -247,6 +247,34 @@ test('Tab changes the keigo level and translates again', async ({ page }) => {
   await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
 })
 
+test('the keigo level picked in a chat is kept for its next translations, not for other chats', async ({ page }) => {
+  const keigo = popup(page).getByRole('radiogroup', { name: 'Mức kính ngữ' })
+  const draft = popup(page).locator('textarea[data-role=draft]')
+  const translate = async (text: string) => {
+    await composer(page).fill(text)
+    await composer(page).focus()
+    await page.keyboard.press('Control+Alt+T')
+    await expect(draft).toBeVisible()
+  }
+
+  await translate('Cảm ơn anh')
+  await expect(keigo.getByRole('radio', { checked: true })).toHaveText('Trang trọng')
+  await keigo.getByRole('radio', { name: 'Thân mật' }).click()
+  await expect(draft).toBeVisible()
+  await draft.focus()
+  await page.keyboard.press('Enter')
+  await expect(popup(page)).toBeHidden()
+
+  await translate('Em đã sửa xong rồi ạ')
+  await expect(keigo.getByRole('radio', { checked: true })).toHaveText('Thân mật')
+  await popup(page).getByRole('button', { name: 'Đóng' }).click()
+
+  // Another chat starts from the default level.
+  await page.getByRole('button', { name: 'general', exact: true }).click()
+  await translate('Cảm ơn anh')
+  await expect(keigo.getByRole('radio', { checked: true })).toHaveText('Trang trọng')
+})
+
 test('the popup names the chat it reads from, with no thread to pick', async ({ page }) => {
   await composer(page).fill('Cảm ơn anh')
   await page.keyboard.press('Control+Alt+T')
