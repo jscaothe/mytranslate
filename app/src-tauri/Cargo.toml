@@ -1,6 +1,6 @@
 [package]
 name = "mytranslate"
-version = "0.5.8"
+version = "0.5.9"
 description = "Japanese-Vietnamese chat translator powered by Claude"
 authors = ["thecm"]
 license = ""
