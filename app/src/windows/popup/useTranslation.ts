@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { emptySections, isTauri, startTranslation, type ErrorKind, type RateLimit, type Sections } from '../../lib/claude'
-import { useLang } from '../../lib/i18n'
+import { useLang, writeDirection } from '../../lib/i18n'
 import type { Direction, Keigo, Scenario } from '../../types'
 
 export type TranslationPhase = 'waiting' | 'thinking' | 'streaming' | 'done' | 'error'
@@ -64,7 +64,10 @@ export function useTranslation({
 }) {
   const lang = useLang()
   const aiKey = ai ? `${ai.provider}:${ai.model}` : ''
-  const key = enabled ? `${runKey}|${direction}|${keigo}|${aiKey}|${lang}|${text}` : null
+  // Only what the user sends to the other side is written at a keigo level: a new level translates it again, while
+  // reading the other side's message or checking a reply does not depend on it.
+  const keigoKey = direction === writeDirection(lang) ? keigo : ''
+  const key = enabled ? `${runKey}|${direction}|${keigoKey}|${aiKey}|${lang}|${text}` : null
   const [state, setState] = useState<{ key: string | null; value: TranslationState }>({ key: null, value: initial })
 
   useEffect(() => {
@@ -103,7 +106,8 @@ export function useTranslation({
       alive = false
       cancel?.()
     }
-    // `history` and `keigoChosen` are read when a run starts (a keigo change restarts it anyway). `ai` is in `key`.
+    // `history` and `keigoChosen` are read when a run starts (a keigo change that matters restarts it anyway). `ai`
+    // is in `key`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
 
