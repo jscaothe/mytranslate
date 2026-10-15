@@ -915,6 +915,7 @@ pub fn run() {
             quickbar::quickbar_fit,
             quickbar::quickbar_hide,
             quickbar::quickbar_action,
+            quickbar::running_apps,
             clipboard_write,
         ])
         .run(context)

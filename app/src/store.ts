@@ -100,10 +100,30 @@ export interface QuickActionSettings {
   /** `all`: every app (except blocked ones); `selected`: only the apps in `apps`. */
   appScope: 'all' | 'selected'
   apps: AppRef[]
+  /** Apps the user turned the toolbar off in from its close menu, while it shows in every app. */
+  hiddenApps: AppRef[]
   /** Buttons show an icon with a label, or only an icon (label in the tooltip). */
   display: 'iconText' | 'iconOnly'
   /** Buttons in display order. */
   items: QuickActionItem[]
+}
+
+const sameApp = (a: AppRef, b: AppRef) => a.exe.toLowerCase() === b.exe.toLowerCase()
+
+/**
+ * "Tắt trong <app>" from the toolbar's close menu. Limited to chosen apps, the app leaves the list; in every app,
+ * it joins the apps the toolbar is turned off in.
+ */
+export function hideQuickBarIn(qa: QuickActionSettings, app: AppRef): QuickActionSettings {
+  if (qa.appScope === 'selected') return { ...qa, apps: qa.apps.filter((a) => !sameApp(a, app)) }
+  if (qa.hiddenApps.some((a) => sameApp(a, app))) return qa
+  return { ...qa, hiddenApps: [...qa.hiddenApps, app] }
+}
+
+/** Whether the toolbar shows in the app with this executable (the Rust side decides the same way). */
+export function quickBarShowsIn(qa: QuickActionSettings, exe: string): boolean {
+  const app = { exe, name: '' }
+  return qa.enabled && !qa.hiddenApps.some((a) => sameApp(a, app)) && (qa.appScope === 'all' || qa.apps.some((a) => sameApp(a, app)))
 }
 
 /** Popup size and place, remembered until the app quits. `position: null` follows the cursor. */

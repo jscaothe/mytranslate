@@ -1,13 +1,20 @@
 //! Which app and conversation the user is in, read from the foreground window when a hotkey fires.
 //! Only the window title and process name are read; nothing is logged.
 
+use std::collections::HashSet;
+
 use serde::Serialize;
-use windows::Win32::Foundation::{CloseHandle, HWND};
+use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
-use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
-use windows::core::PWSTR;
+use windows::Win32::UI::WindowsAndMessaging::{
+    EnumWindows, GW_OWNER, GWL_EXSTYLE, GetClassNameW, GetForegroundWindow, GetWindow, GetWindowLongPtrW,
+    GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindowVisible, WS_EX_APPWINDOW, WS_EX_TOOLWINDOW,
+};
+use windows::core::{BOOL, HSTRING, PWSTR, w};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +69,10 @@ pub fn foreground() -> Context {
 }
 
 fn process_name(hwnd: HWND) -> Option<String> {
+    process_path(hwnd).and_then(|path| path.rsplit(['\\', '/']).next().map(str::to_string))
+}
+
+fn process_path(hwnd: HWND) -> Option<String> {
     unsafe {
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -70,11 +81,106 @@ fn process_name(hwnd: HWND) -> Option<String> {
         let mut len = buf.len() as u32;
         let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
         let _ = CloseHandle(process);
-        if !ok {
+        ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+/// The apps open on the desktop now, as the taskbar shows them: one window and the executable name per program,
+/// in window order (most recently used first).
+pub fn app_windows() -> Vec<(isize, String)> {
+    unsafe extern "system" fn collect(hwnd: HWND, found: LPARAM) -> BOOL {
+        let found = unsafe { &mut *(found.0 as *mut Vec<HWND>) };
+        if unsafe { is_app_window(hwnd) } {
+            found.push(hwnd);
+        }
+        true.into()
+    }
+    let mut found: Vec<HWND> = Vec::new();
+    unsafe {
+        let _ = EnumWindows(Some(collect), LPARAM(&raw mut found as isize));
+    }
+    let mut seen = HashSet::new();
+    found
+        .into_iter()
+        .filter_map(|hwnd| process_name(hwnd).map(|exe| (hwnd.0 as isize, exe)))
+        // Store apps all run in ApplicationFrameHost.exe, which would name none of them.
+        .filter(|(_, exe)| !exe.eq_ignore_ascii_case("ApplicationFrameHost.exe"))
+        .filter(|(_, exe)| seen.insert(exe.to_ascii_lowercase()))
+        .collect()
+}
+
+/// A window with a taskbar button: shown, with a title, not owned by another window, not a tool window, not
+/// cloaked (a suspended Store app, or one on another virtual desktop), and not the desktop itself.
+unsafe fn is_app_window(hwnd: HWND) -> bool {
+    unsafe {
+        if !IsWindowVisible(hwnd).as_bool() || GetWindowTextLengthW(hwnd) == 0 {
+            return false;
+        }
+        if GetWindow(hwnd, GW_OWNER).is_ok_and(|owner| !owner.is_invalid()) {
+            return false;
+        }
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        if ex & WS_EX_TOOLWINDOW.0 != 0 && ex & WS_EX_APPWINDOW.0 == 0 {
+            return false;
+        }
+        let mut cloaked = 0u32;
+        if DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, (&raw mut cloaked).cast(), 4).is_ok() && cloaked != 0 {
+            return false;
+        }
+        let mut class = [0u16; 32];
+        let n = GetClassNameW(hwnd, &mut class);
+        String::from_utf16_lossy(&class[..n.max(0) as usize]) != "Progman"
+    }
+}
+
+/// The name the app in the window goes by, as Windows shows it in Task Manager ("Slack", "Microsoft Edge"):
+/// the description in its program file, else the file name without ".exe".
+pub fn app_name(hwnd: isize, exe: &str) -> String {
+    process_path(HWND(hwnd as *mut _))
+        .and_then(|path| file_description(&path))
+        .unwrap_or_else(|| exe_stem(exe))
+}
+
+fn exe_stem(exe: &str) -> String {
+    let lower = exe.to_ascii_lowercase();
+    match lower.strip_suffix(".exe") {
+        Some(stem) => exe[..stem.len()].to_string(),
+        None => exe.to_string(),
+    }
+}
+
+/// `FileDescription` from a program's version resource, in the first language the file has.
+fn file_description(path: &str) -> Option<String> {
+    unsafe {
+        let file = HSTRING::from(path);
+        let size = GetFileVersionInfoSizeW(&file, None);
+        if size == 0 {
             return None;
         }
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit(['\\', '/']).next().map(str::to_string)
+        let mut data = vec![0u8; size as usize];
+        GetFileVersionInfoW(&file, None, size, data.as_mut_ptr().cast()).ok()?;
+        let mut ptr = std::ptr::null_mut();
+        let mut len = 0u32;
+        if !VerQueryValueW(
+            data.as_ptr().cast(),
+            w!("\\VarFileInfo\\Translation"),
+            &mut ptr,
+            &mut len,
+        )
+        .as_bool()
+            || len < 4
+        {
+            return None;
+        }
+        let pair = ptr as *const u16;
+        let (lang, codepage) = (*pair, *pair.add(1));
+        let key = HSTRING::from(format!("\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription"));
+        if !VerQueryValueW(data.as_ptr().cast(), &key, &mut ptr, &mut len).as_bool() || len == 0 {
+            return None;
+        }
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr as *const u16, len as usize));
+        let text = text.trim_end_matches('\0').trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 }
 
@@ -137,6 +243,32 @@ pub fn parse_title(exe: &str, title: &str) -> Place {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lists what is open on this PC. `cargo test -- --ignored live_app_windows --nocapture`
+    #[test]
+    #[ignore = "needs a desktop"]
+    fn live_app_windows_are_the_taskbar_apps() {
+        let apps = app_windows();
+        for (hwnd, exe) in &apps {
+            eprintln!("{exe}: {}", app_name(*hwnd, exe));
+        }
+        assert!(!apps.is_empty());
+        let mut exes: Vec<_> = apps.iter().map(|(_, e)| e.to_ascii_lowercase()).collect();
+        exes.dedup();
+        assert_eq!(exes.len(), apps.len());
+    }
+
+    #[test]
+    fn reads_the_name_windows_shows_for_a_program() {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+        // "Notepad", or "メモ帳" on a Japanese Windows: the name in the language the file lists first.
+        let name = file_description(&format!(r"{windir}\notepad.exe")).unwrap();
+        assert!(
+            ["Notepad", "メモ帳", "Notepad (Windows)"].contains(&name.as_str()),
+            "{name}"
+        );
+        assert_eq!(file_description(r"C:\no\such.exe"), None);
+    }
 
     #[test]
     fn slack_dm_title() {

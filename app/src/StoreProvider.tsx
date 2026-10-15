@@ -25,8 +25,9 @@ const defaultSettings: Settings = {
   hotkeys: DEFAULT_HOTKEYS,
   quickActions: {
     enabled: true,
-    appScope: 'selected',
+    appScope: 'all',
     apps: DEFAULT_QUICK_ACTION_APPS,
+    hiddenApps: [],
     display: 'iconText',
     items: DEFAULT_QUICK_ACTION_ITEMS,
   },
