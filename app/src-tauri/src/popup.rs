@@ -440,7 +440,11 @@ fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Res
     let width = if geometry.user_width {
         geometry.width
     } else {
-        placement::auto_width(&payload.text, payload.direction == Direction::ViJa)
+        // Reading or writing, a translation has the keigo choice: in its footer, or in the reply's.
+        placement::auto_width(
+            &payload.text,
+            matches!(payload.direction, Direction::JaVi | Direction::ViJa),
+        )
     };
     // A Japanese result shows a second block: the reading back, or the suggestion's meaning.
     let with_back = payload.direction != Direction::JaVi;

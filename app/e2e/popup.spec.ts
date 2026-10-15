@@ -94,7 +94,7 @@ test('Ctrl+Enter in the reply skips looking: the Vietnamese reply is translated 
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
   await reply.fill('Em đã sửa xong rồi ạ')
-  await expect(popup(page).getByRole('button', { name: /Sao chép ngay/ })).toBeEnabled()
+  await expect(popup(page).getByRole('button', { name: /^Copy/ })).toBeEnabled()
   await reply.press('Control+Enter')
   await expect(popup(page)).toBeHidden()
   expect(await clipboard(page)).toMatch(/[ぁ-んァ-ン一-龯]/)

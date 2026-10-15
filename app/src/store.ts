@@ -114,7 +114,8 @@ export interface PopupGeometry {
   position: { left: number; top: number } | null
 }
 
-export const DEFAULT_POPUP_WIDTH = 440
+/** Like the real app's narrowest translation popup (`MIN_WIDTH_WITH_KEIGO` in placement.rs): the keigo row fits. */
+export const DEFAULT_POPUP_WIDTH = 500
 
 export interface Toast {
   id: number
