@@ -340,6 +340,43 @@ test('selecting text with the mouse shows the quick toolbar', async ({ page }) =
   await expect(popup(page)).toBeVisible()
 })
 
+async function dragOverFirstMessage(page: Page) {
+  const message = page.locator('p[lang=ja]').first()
+  const box = (await message.boundingBox())!
+  await page.mouse.move(box.x + 4, box.y + box.height / 2)
+  await page.mouse.down()
+  await page.mouse.move(box.x + Math.min(box.width - 4, 220), box.y + box.height / 2, { steps: 8 })
+  await page.mouse.up()
+}
+
+test('the toolbar can be turned off in the app it is in from its close button, and on again in Settings', async ({ page }) => {
+  await dragOverFirstMessage(page)
+  const bar = page.locator('[data-quick-bar]')
+  const close = bar.getByRole('button', { name: 'Ẩn thanh thao tác' })
+  await close.click()
+  await expect(close).toHaveAttribute('aria-expanded', 'true')
+  await expect(bar.getByText('Bật lại trong Cài đặt > Thanh thao tác nhanh')).toBeVisible()
+  await bar.getByRole('menuitem', { name: 'Tắt trong Slack' }).click()
+  await expect(bar).toBeHidden()
+
+  // Not in Slack any more.
+  await dragOverFirstMessage(page)
+  await page.waitForTimeout(200)
+  await expect(bar).toBeHidden()
+
+  await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
+  await page.getByRole('button', { name: 'Cài đặt' }).click()
+  await page.getByRole('button', { name: 'Thanh thao tác nhanh' }).click()
+  const hidden = page.getByRole('list', { name: 'Ứng dụng đã tắt thanh thao tác' })
+  await expect(hidden.getByText('slack.exe')).toBeVisible()
+  await hidden.getByRole('button', { name: 'Bật lại trong Slack' }).click()
+  await expect(hidden).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Mô phỏng sử dụng' }).click()
+  await dragOverFirstMessage(page)
+  await expect(bar).toBeVisible()
+})
+
 test('the AI can be switched from the popup, which translates again with it', async ({ page }) => {
   await composer(page).fill('Cảm ơn anh')
   await page.keyboard.press('Control+Alt+T')

@@ -3,11 +3,12 @@
 
 use serde::Serialize;
 use windows::Win32::Foundation::{CloseHandle, HWND};
+use windows::Win32::Storage::FileSystem::{GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId};
-use windows::core::PWSTR;
+use windows::core::{HSTRING, PWSTR, w};
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -62,6 +63,10 @@ pub fn foreground() -> Context {
 }
 
 fn process_name(hwnd: HWND) -> Option<String> {
+    process_path(hwnd).and_then(|path| path.rsplit(['\\', '/']).next().map(str::to_string))
+}
+
+fn process_path(hwnd: HWND) -> Option<String> {
     unsafe {
         let mut pid = 0u32;
         GetWindowThreadProcessId(hwnd, Some(&mut pid));
@@ -70,11 +75,58 @@ fn process_name(hwnd: HWND) -> Option<String> {
         let mut len = buf.len() as u32;
         let ok = QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut len).is_ok();
         let _ = CloseHandle(process);
-        if !ok {
+        ok.then(|| String::from_utf16_lossy(&buf[..len as usize]))
+    }
+}
+
+/// The name the app in the window goes by, as Windows shows it in Task Manager ("Slack", "Microsoft Edge"):
+/// the description in its program file, else the file name without ".exe".
+pub fn app_name(hwnd: isize, exe: &str) -> String {
+    process_path(HWND(hwnd as *mut _))
+        .and_then(|path| file_description(&path))
+        .unwrap_or_else(|| exe_stem(exe))
+}
+
+fn exe_stem(exe: &str) -> String {
+    let lower = exe.to_ascii_lowercase();
+    match lower.strip_suffix(".exe") {
+        Some(stem) => exe[..stem.len()].to_string(),
+        None => exe.to_string(),
+    }
+}
+
+/// `FileDescription` from a program's version resource, in the first language the file has.
+fn file_description(path: &str) -> Option<String> {
+    unsafe {
+        let file = HSTRING::from(path);
+        let size = GetFileVersionInfoSizeW(&file, None);
+        if size == 0 {
             return None;
         }
-        let path = String::from_utf16_lossy(&buf[..len as usize]);
-        path.rsplit(['\\', '/']).next().map(str::to_string)
+        let mut data = vec![0u8; size as usize];
+        GetFileVersionInfoW(&file, None, size, data.as_mut_ptr().cast()).ok()?;
+        let mut ptr = std::ptr::null_mut();
+        let mut len = 0u32;
+        if !VerQueryValueW(
+            data.as_ptr().cast(),
+            w!("\\VarFileInfo\\Translation"),
+            &mut ptr,
+            &mut len,
+        )
+        .as_bool()
+            || len < 4
+        {
+            return None;
+        }
+        let pair = ptr as *const u16;
+        let (lang, codepage) = (*pair, *pair.add(1));
+        let key = HSTRING::from(format!("\\StringFileInfo\\{lang:04x}{codepage:04x}\\FileDescription"));
+        if !VerQueryValueW(data.as_ptr().cast(), &key, &mut ptr, &mut len).as_bool() || len == 0 {
+            return None;
+        }
+        let text = String::from_utf16_lossy(std::slice::from_raw_parts(ptr as *const u16, len as usize));
+        let text = text.trim_end_matches('\0').trim();
+        (!text.is_empty()).then(|| text.to_string())
     }
 }
 
@@ -137,6 +189,18 @@ pub fn parse_title(exe: &str, title: &str) -> Place {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reads_the_name_windows_shows_for_a_program() {
+        let windir = std::env::var("WINDIR").unwrap_or_else(|_| r"C:\Windows".into());
+        // "Notepad", or "メモ帳" on a Japanese Windows: the name in the language the file lists first.
+        let name = file_description(&format!(r"{windir}\notepad.exe")).unwrap();
+        assert!(
+            ["Notepad", "メモ帳", "Notepad (Windows)"].contains(&name.as_str()),
+            "{name}"
+        );
+        assert_eq!(file_description(r"C:\no\such.exe"), None);
+    }
 
     #[test]
     fn slack_dm_title() {

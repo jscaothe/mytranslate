@@ -1,9 +1,10 @@
 //! The quick toolbar shown next to text the user selected with the mouse or with Ctrl+A. It never takes the focus from the chat app: the
 //! window is "no-activate", shown without activation, and a button press acts on the window that was in front.
 
+use std::collections::HashMap;
 use std::sync::Mutex;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
@@ -25,6 +26,27 @@ const DEFAULT_SIZE: (f64, f64) = (300.0, 40.0);
 #[derive(Default)]
 pub struct QuickbarState {
     inner: Mutex<Inner>,
+    /// App names by executable, read once from the program file.
+    names: Mutex<HashMap<String, String>>,
+}
+
+impl QuickbarState {
+    fn app_name(&self, hwnd: isize, exe: &str) -> String {
+        let key = exe.to_ascii_lowercase();
+        if let Some(name) = self.names.lock().unwrap().get(&key) {
+            return name.clone();
+        }
+        let name = context::app_name(hwnd, exe);
+        self.names.lock().unwrap().insert(key, name.clone());
+        name
+    }
+}
+
+/// The app the toolbar was shown in, for the page.
+#[derive(Serialize, Clone)]
+struct Shown {
+    exe: String,
+    name: String,
 }
 
 #[derive(Default)]
@@ -136,6 +158,9 @@ struct QuickActionSettings {
     app_scope: String,
     #[serde(default)]
     apps: Vec<AppRef>,
+    /// Apps the user turned the toolbar off in, from its close menu.
+    #[serde(default)]
+    hidden_apps: Vec<AppRef>,
 }
 
 #[derive(Deserialize)]
@@ -153,6 +178,7 @@ fn allowed(store: &SettingsStore, exe: &str) -> bool {
     qa.enabled
         && !store.hotkeys_paused()
         && !store.is_blocked(exe)
+        && !qa.hidden_apps.iter().any(|a| a.exe.eq_ignore_ascii_case(exe))
         && (qa.app_scope == "all" || qa.apps.iter().any(|a| a.exe.eq_ignore_ascii_case(exe)))
 }
 
@@ -206,6 +232,10 @@ fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
     };
 
     let state = app.state::<QuickbarState>();
+    let shown = Shown {
+        name: state.app_name(ctx.hwnd, &ctx.exe),
+        exe: ctx.exe.clone(),
+    };
     let (w, h) = state.inner.lock().unwrap().size.unwrap_or(DEFAULT_SIZE);
     let (w, h) = (w * scale, h * scale);
     let anchor = bar_anchor(work, scale, y, start_y, h);
@@ -223,8 +253,8 @@ fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
             let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         }
     }
-    // The page starts its idle timer.
-    let _ = window.emit("quickbar:shown", ());
+    // The page starts a fresh bar, and its close menu names the app.
+    let _ = window.emit("quickbar:shown", shown);
     log::info!(
         "quickbar shown in {exe}",
         exe = state
@@ -371,5 +401,21 @@ mod tests {
             store(serde_json::json!({ "quickActions": { "enabled": true, "appScope": "all" }, "hotkeysPaused": true }));
         assert!(!allowed(&paused, "chrome.exe"));
         assert!(!allowed(&store(serde_json::Value::Null), "slack.exe"));
+    }
+
+    #[test]
+    fn not_in_apps_it_was_turned_off_in() {
+        let s = store(serde_json::json!({
+            "quickActions": { "enabled": true, "appScope": "all", "apps": [],
+                "hiddenApps": [{ "exe": "msedge.exe", "name": "Microsoft Edge" }] }
+        }));
+        assert!(!allowed(&s, "MSEdge.exe"));
+        assert!(allowed(&s, "chrome.exe"));
+    }
+
+    #[test]
+    fn app_names_fall_back_to_the_file_name() {
+        assert_eq!(context::app_name(0, "Zalo.EXE"), "Zalo");
+        assert_eq!(context::app_name(0, "tool"), "tool");
     }
 }

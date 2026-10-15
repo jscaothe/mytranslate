@@ -27,6 +27,7 @@ const defaultSettings: Settings = {
     enabled: true,
     appScope: 'all',
     apps: DEFAULT_QUICK_ACTION_APPS,
+    hiddenApps: [],
     display: 'iconText',
     items: DEFAULT_QUICK_ACTION_ITEMS,
   },

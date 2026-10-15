@@ -68,6 +68,29 @@ export function AppScopeSetting() {
       {qa.appScope === 'selected' && (
         <AppScopeEditor apps={qa.apps} onChange={(apps) => updateSettings({ quickActions: { ...qa, apps } })} onError={showToast} />
       )}
+      {qa.appScope === 'all' && qa.hiddenApps.length > 0 && (
+        <div>
+          <div className="text-[12.5px] text-ink-2">{t('Đã tắt trong các ứng dụng này', '表示しないアプリ')}</div>
+          <ul className="mt-1.5 divide-y divide-line rounded-md border border-line" aria-label={t('Ứng dụng đã tắt thanh thao tác', 'ツールバーを表示しないアプリ')}>
+            {qa.hiddenApps.map((app) => (
+              <li key={app.exe} className="flex items-center gap-3 px-3 py-2">
+                <AppIcon app={app} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13.5px] text-ink">{app.name}</div>
+                  <div className="truncate font-mono text-[11.5px] text-ink-3">{app.exe}</div>
+                </div>
+                <Button
+                  size="sm"
+                  aria-label={t(`Bật lại trong ${app.name}`, `${app.name} で再び表示`)}
+                  onClick={() => updateSettings({ quickActions: { ...qa, hiddenApps: qa.hiddenApps.filter((a) => a.exe !== app.exe) } })}
+                >
+                  {t('Bật lại', '再び表示')}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   )
 }

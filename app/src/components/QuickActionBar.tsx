@@ -1,4 +1,4 @@
-import { X } from 'lucide-react'
+import { EyeOff, X } from 'lucide-react'
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useLang, useT } from '../lib/i18n'
 import { useStore, type QuickActionId, type QuickActionItem } from '../store'
@@ -21,6 +21,7 @@ export function QuickActionBar({
   display = 'iconText',
   onAction,
   onDismiss,
+  hideIn,
   style,
   className,
   bare = false,
@@ -31,6 +32,8 @@ export function QuickActionBar({
   display?: 'iconText' | 'iconOnly'
   onAction: (a: QuickActionId) => void
   onDismiss?: () => void
+  /** The app the bar is shown in: the close button opens a menu to turn the bar off there. */
+  hideIn?: { name: string; onHide: () => void }
   style?: CSSProperties
   className?: string
   /** In its own window, Windows draws the border and rounded corners. */
@@ -55,6 +58,7 @@ export function QuickActionBar({
     window.clearTimeout(timer.current)
     setHinted(null)
   }
+  const [menuOpen, setMenuOpen] = useState(false)
 
   return (
     <div
@@ -81,7 +85,7 @@ export function QuickActionBar({
                 leave()
                 onAction(id)
               }}
-              onHover={() => enter(id)}
+              onHover={() => !menuOpen && enter(id)}
               icon={<Icon size={11} strokeWidth={2.2} />}
               primary={action.primary}
               iconOnly={iconOnly}
@@ -97,16 +101,41 @@ export function QuickActionBar({
             <button
               type="button"
               aria-label={t('Ẩn thanh thao tác', 'ツールバーを隠す')}
+              aria-haspopup={hideIn ? 'menu' : undefined}
+              aria-expanded={hideIn ? menuOpen : undefined}
               onMouseEnter={leave}
-              onClick={onDismiss}
-              className={cx('flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 hover:bg-hover hover:text-ink', pressable)}
+              onClick={hideIn ? () => setMenuOpen((o) => !o) : onDismiss}
+              className={cx(
+                'flex size-6 shrink-0 items-center justify-center rounded-[5px] hover:bg-hover hover:text-ink',
+                menuOpen ? 'bg-hover text-ink' : 'text-ink-3',
+                pressable,
+              )}
             >
               <X size={10} strokeWidth={2.2} />
             </button>
           </>
         )}
       </div>
-      {hinted && (
+      {/* Part of the bar like the shortcut line: in its own small window a floating menu would be cut off. */}
+      {hideIn && menuOpen && (
+        <div className="mt-1 border-t border-line pt-1">
+          <div role="menu" aria-label={t('Ẩn thanh thao tác', 'ツールバーを隠す')}>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={hideIn.onHide}
+              className={cx('flex h-7 w-full items-center gap-2 rounded-[5px] px-2 text-[12.5px] whitespace-nowrap text-ink hover:bg-hover', pressable)}
+            >
+              <EyeOff size={13} className="shrink-0 text-ink-2" />
+              {t(`Tắt trong ${hideIn.name}`, `${hideIn.name} では表示しない`)}
+            </button>
+          </div>
+          <p className="px-2 pt-0.5 pb-1 text-[11px] whitespace-nowrap text-ink-3">
+            {t('Bật lại trong Cài đặt > Thanh thao tác nhanh', '「設定 > クイック操作」で元に戻せます')}
+          </p>
+        </div>
+      )}
+      {hinted && !menuOpen && (
         <div role="tooltip" className="mt-1 flex items-center gap-1 border-t border-line px-1 pt-1.5 pb-0.5 text-[11.5px] whitespace-nowrap text-ink-2">
           {iconOnly && <span className="mr-0.5 font-semibold text-ink">{meta[hinted].label}</span>}
           <span className="mr-0.5">{t('Phím tắt', 'ショートカット')}</span>

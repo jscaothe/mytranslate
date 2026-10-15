@@ -6,7 +6,7 @@ import { cx } from '../components/styles'
 import { mockData } from '../data/mock'
 import { comboFromEvent } from '../lib/hotkeys'
 import { locale, route, useLang, useT, type Action, type Lang } from '../lib/i18n'
-import { useStore, type QuickActionId } from '../store'
+import { hideQuickBarIn, quickBarShowsIn, useStore, type AppRef, type QuickActionId } from '../store'
 import type { ChatApp as ChatAppKind, ChatChannel, Keigo } from '../types'
 import { Popup } from '../windows/popup/Popup'
 import type { PopupRequest } from '../windows/popup/types'
@@ -34,10 +34,12 @@ function firstChannels(lang: Lang): Record<ChatAppKind, string> {
 }
 
 export function Playground() {
-  const { settings, showToast } = useStore()
+  const { settings, updateSettings, showToast } = useStore()
   const t = useT()
   const lang = useLang()
   const [app, setApp] = useState<ChatAppKind>('slack')
+  // The real app checks the process of the window under the cursor; here it is the simulated chat app.
+  const chatApp: AppRef = app === 'slack' ? { exe: 'slack.exe', name: 'Slack' } : { exe: 'ms-teams.exe', name: 'Microsoft Teams' }
   const [channels, setChannels] = useState<Record<ChatAppKind, ChatChannel[]>>(() => mockData(lang).chatChannels)
   const [activeId, setActiveId] = useState<Record<ChatAppKind, string>>(() => firstChannels(lang))
   const [composer, setComposer] = useState('')
@@ -152,11 +154,8 @@ export function Playground() {
     if (target.closest('[data-popup], [data-guide], [data-quick-bar]')) return
     const qa = settings.quickActions
     if (!qa.enabled || settings.hotkeysPaused || e.button !== 0) return
-    // The real app checks the process of the window under the cursor; here it is the simulated chat app.
-    const exe = app === 'slack' ? 'slack.exe' : 'ms-teams.exe'
-    const listed = (list: { exe: string }[]) => list.some((a) => a.exe.toLowerCase() === exe)
-    if (qa.appScope === 'selected' && !listed(qa.apps)) return
-    if (settings.blockedApps.some((b) => b.toLowerCase() === exe)) return
+    if (!quickBarShowsIn(qa, chatApp.exe)) return
+    if (settings.blockedApps.some((b) => b.toLowerCase() === chatApp.exe)) return
     // Let the browser finish updating the selection first.
     window.setTimeout(() => {
       const got = capture()
@@ -419,6 +418,13 @@ export function Playground() {
           display={settings.quickActions.display}
           onAction={runQuick}
           onDismiss={() => setQuick(null)}
+          hideIn={{
+            name: chatApp.name,
+            onHide: () => {
+              updateSettings({ quickActions: hideQuickBarIn(settings.quickActions, chatApp) })
+              setQuick(null)
+            },
+          }}
           className="absolute z-30"
           style={{
             left: Math.max(8, Math.min(quick.x - 16, size.width - (settings.quickActions.display === 'iconOnly' ? 170 : 400))),
