@@ -1,7 +1,7 @@
 //! Builds what is sent to Claude. The system prompt is fixed for the life of a CLI process (it is a launch
 //! argument), so everything that varies per request (people, glossary, thread context, task) goes in the user message.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::lang::Lang;
 
@@ -44,12 +44,29 @@ pub enum Direction {
     WritingAdvice,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Keigo {
     Casual,
     Polite,
     Formal,
+}
+
+impl Keigo {
+    const ALL: [Keigo; 3] = [Keigo::Casual, Keigo::Polite, Keigo::Formal];
+
+    /// As in the prompt and the history.
+    pub fn name(self) -> &'static str {
+        match self {
+            Keigo::Casual => "casual",
+            Keigo::Polite => "polite",
+            Keigo::Formal => "formal",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.name() == name)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -179,7 +196,7 @@ pub fn user_message(req: &TranslateRequest) -> String {
     // marked as such only when a person's note could set another one.
     let keigo = format!(
         "keigo=\"{}\"{}",
-        keigo_name(req.keigo),
+        req.keigo.name(),
         if req.keigo_chosen || req.people.is_empty() {
             ""
         } else {
@@ -208,14 +225,6 @@ pub fn user_message(req: &TranslateRequest) -> String {
     out.push_str(&escape(req.text.trim()));
     out.push_str("</task>");
     out
-}
-
-fn keigo_name(k: Keigo) -> &'static str {
-    match k {
-        Keigo::Casual => "casual",
-        Keigo::Polite => "polite",
-        Keigo::Formal => "formal",
-    }
 }
 
 /// Attribute values additionally must not end the attribute.

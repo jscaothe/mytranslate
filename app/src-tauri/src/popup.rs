@@ -15,6 +15,7 @@ use crate::context::{self, ChatApp, Context};
 use crate::history::{self, History};
 use crate::lang::Lang;
 use crate::placement::{self, Anchor, Rect};
+use crate::prompt::Keigo;
 use crate::settings::SettingsStore;
 use crate::threads::{self, Candidate};
 
@@ -86,6 +87,8 @@ pub struct OpenPayload {
     /// one). The app files the translation there and reads the thread's latest messages as context.
     pub conversation_id: Option<i64>,
     pub thread_id: Option<i64>,
+    /// The keigo level the user last picked in this conversation: the popup starts from it.
+    pub keigo: Option<Keigo>,
 }
 
 /// Threads untouched for this long are not considered.
@@ -321,6 +324,9 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
         } else {
             (None, None)
         };
+        let keigo = conversation_id
+            .and_then(|id| history.conversation(id).ok().flatten())
+            .and_then(|c| c.keigo);
 
         let state = app.state::<PopupState>();
         let id = {
@@ -341,6 +347,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
             error,
             conversation_id,
             thread_id,
+            keigo,
         };
         if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");

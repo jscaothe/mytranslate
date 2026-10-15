@@ -69,11 +69,13 @@ export interface PopupProps {
   onApply?: (text: string, options?: { keep?: boolean }) => void
   /** Pinned popups stay open when the user clicks elsewhere. */
   onPinnedChange?: (pinned: boolean) => void
+  /** Remembers a keigo level picked here, so the chat's next popups start from it. */
+  onKeigo?: (keigo: Keigo) => void
   /** Set when the popup is its own OS window (Tauri) instead of a box drawn on a page. */
   windowed?: WindowedHost
 }
 
-export function Popup({ request, container, onClose, onApply, onPinnedChange, windowed }: PopupProps) {
+export function Popup({ request, container, onClose, onApply, onPinnedChange, onKeigo, windowed }: PopupProps) {
   const store = useStore()
   const { scenario, settings, showToast } = store
   const lang = useLang()
@@ -82,9 +84,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
   const [tipOpen, setTipOpen] = useState(() => !settings.popupTipShown && request.origin !== 'onboarding')
 
   const { direction, source, origin } = request
-  // The user's default keigo until they change it here. Only a level they chose overrides a person's note in the Glossary.
-  const [keigo, setKeigo] = useState<Keigo>(settings.defaultKeigo)
-  const [keigoChosen, setKeigoChosen] = useState(false)
+  // The level last picked in this chat, else the user's default. Only a level they picked (here or earlier in this
+  // chat) overrides a person's note in the Glossary.
+  const [keigo, setKeigo] = useState<Keigo>(request.keigo ?? settings.defaultKeigo)
+  const [keigoChosen, setKeigoChosen] = useState(request.keigo != null)
   const [runKey, setRunKey] = useState(0)
   const [pinned, setPinned] = useState(false)
   // The AI switcher: a choice made here translates again with it (and becomes the default).
@@ -257,6 +260,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, wi
     setKeigo(k)
     setKeigoChosen(true)
     setRunKey((r) => r + 1)
+    onKeigo?.(k)
   }
 
   const cycleKeigo = () => changeKeigo(keigoOrder[(keigoOrder.indexOf(keigo) + 1) % keigoOrder.length])

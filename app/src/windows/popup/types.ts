@@ -1,4 +1,4 @@
-import type { ChatApp, Direction } from '../../types'
+import type { ChatApp, Direction, Keigo } from '../../types'
 
 /** Where the text came from in the real app (filled by the Rust side from the foreground window). */
 export interface WindowContext {
@@ -35,6 +35,8 @@ export interface PopupRequest {
   /** The chat the text came from, as shown in the popup's title bar (the prototype; the real app uses `window`). */
   conversation: string
   app: ChatApp | 'other'
+  /** The keigo level the user last picked in this chat; `null` (or absent) when they never did. */
+  keigo?: Keigo | null
   window?: WindowContext
   /** Point in the host container the popup attaches to. */
   anchor: { x: number; y: number }
