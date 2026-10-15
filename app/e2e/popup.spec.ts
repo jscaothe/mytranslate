@@ -123,7 +123,7 @@ test('the reply has the keigo choice: Tab in the reply box changes it and transl
   await expect(popup(page).locator('p[lang=vi]').first()).toHaveText(reading)
 })
 
-test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the Hủy link leaves the reply', async ({ page }) => {
+test('Shift+Enter starts a new line in the reply; Escape leaves nothing, and there is no button to leave it', async ({ page }) => {
   await readFirstMessage(page)
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
@@ -135,9 +135,7 @@ test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the H�
   await reply.press('Escape')
   await expect(reply).toHaveValue('Dòng một\nDòng hai')
   await expect(popup(page).getByText('Esc', { exact: true })).toHaveCount(0)
-  await popup(page).getByRole('button', { name: 'Hủy', exact: true }).click()
-  await expect(reply).toHaveCount(0)
-  await popup(page).press('Escape')
+  await expect(popup(page).getByRole('button', { name: 'Hủy', exact: true })).toHaveCount(0)
   await expect(popup(page)).toBeVisible()
 })
 

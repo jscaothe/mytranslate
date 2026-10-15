@@ -287,12 +287,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
     setReplyMode(true)
   }
 
-  const cancelReply = () => {
-    setReplyMode(false)
-    setReplyRun(null)
-    rootRef.current?.focus()
-  }
-
   const deliverReply = (text: string) => {
     if (replyReplaces) onApply!(text, { keep: request.inMessageBox === null })
     else void copy(text, t('Đã sao chép câu trả lời', '返信をコピーしました'))
@@ -662,10 +656,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
             <div className="flex flex-wrap items-center gap-2">
-              {/* Leaving the reply is a quiet link rather than a third button, so the two actions keep one row. */}
-              <button type="button" onClick={cancelReply} className={cx('rounded px-1 text-[12.5px] text-ink-3 hover:text-ink', pressable)}>
-                {t('Hủy', 'キャンセル')}
-              </button>
               {/* A reply in the user's language is translated at this level, like a message written to the other side. */}
               <KeigoChoice keigo={keigo} onKeigo={changeKeigo} />
               <div className="ml-auto flex shrink-0 items-center gap-2">
