@@ -45,6 +45,9 @@ enum Event {
     Message(String),
     Thinking,
     Usage(Tokens),
+    /// A warning Codex shows on the way; the turn carries on (e.g. "Code Mode is unavailable" when the
+    /// optional `codex-code-mode-host.exe` is not next to `codex.exe`, which a translation never uses).
+    Notice(String),
     Failed(String),
     Nothing,
 }
@@ -179,6 +182,7 @@ impl CodexCli {
                     thought = true;
                 }
                 Event::Usage(t) => tokens = t,
+                Event::Notice(message) => log::warn!("codex {model}: {message}"),
                 Event::Failed(message) => {
                     if first_token_ms.is_none() && rejects_effort(&message) {
                         return Err(Failure::EffortRejected);
@@ -258,7 +262,8 @@ fn read_event(msg: &Value) -> Event {
                 _ => Event::Nothing,
             },
             "reasoning" => Event::Thinking,
-            "error" => Event::Failed(item["message"].as_str().unwrap_or("Codex error").to_string()),
+            // An error item does not end the turn; a failure comes as `turn.failed` or `error`.
+            "error" => Event::Notice(item["message"].as_str().unwrap_or_default().to_string()),
             _ => Event::Nothing,
         },
         "turn.completed" => {
@@ -432,6 +437,12 @@ mod tests {
             read_event(&failed),
             Event::Failed("You've hit your usage limit.".into())
         );
+        let error = json!({ "type": "error", "message": "stream disconnected" });
+        assert_eq!(read_event(&error), Event::Failed("stream disconnected".into()));
+        // Codex 0.162 says this before every turn when the optional code-mode host is missing, then answers.
+        let notice = json!({ "type": "item.completed", "item": { "id": "item_0", "type": "error",
+            "message": "Code Mode is unavailable because failed to spawn code-mode host C:\\tools\\codex-code-mode-host.exe: host executable was not found." } });
+        assert!(matches!(read_event(&notice), Event::Notice(m) if m.starts_with("Code Mode is unavailable")));
         assert_eq!(
             read_event(&json!({ "type": "thread.started", "thread_id": "t" })),
             Event::Nothing
