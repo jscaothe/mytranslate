@@ -663,7 +663,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
                 {!replyChecked && (
                   <Button size="sm" disabled={!replyText.trim() || replyBusy} onClick={sendReplyNow}>
                     {replyReplaces ? <Replace size={14} /> : <Copy size={14} />}{' '}
-                    {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Sao chép ngay', 'すぐコピー')} <Kbd>Ctrl+↵</Kbd>
+                    {replyReplaces ? t('Thay ngay', 'すぐ貼り付け') : t('Copy', 'コピー')} <Kbd>Ctrl+↵</Kbd>
                   </Button>
                 )}
                 <Button size="sm" variant="primary" disabled={!replyText.trim() || replyBusy} onClick={nextReplyStep}>
