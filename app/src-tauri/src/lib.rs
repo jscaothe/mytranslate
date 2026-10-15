@@ -380,12 +380,6 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
     }
 }
 
-/// "Dịch chưa tốt" in the popup, kept with the message to improve the prompt later.
-#[tauri::command]
-fn history_feedback(history: State<'_, History>, message_id: i64, bad: bool) -> Result<(), String> {
-    history.set_feedback(message_id, bad).map_err(|e| e.to_string())
-}
-
 /// A keigo level picked in the popup, kept for the conversation's next translations.
 #[tauri::command]
 fn conversation_keigo_set(history: State<'_, History>, conversation_id: i64, keigo: Keigo) -> Result<(), String> {
@@ -896,7 +890,6 @@ pub fn run() {
             glossary_update,
             glossary_delete,
             glossary_team,
-            history_feedback,
             conversation_keigo_set,
             data_backup,
             data_restore,

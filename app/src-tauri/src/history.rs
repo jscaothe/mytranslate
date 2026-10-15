@@ -330,15 +330,6 @@ impl History {
         Ok(n)
     }
 
-    pub fn set_feedback(&self, message_id: i64, bad: bool) -> rusqlite::Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE messages SET feedback = ?2 WHERE id = ?1",
-            params![message_id, if bad { -1 } else { 0 }],
-        )?;
-        Ok(())
-    }
-
     /// The conversation at this place, created on first use. A Teams channel takes over the conversation an
     /// older version filed its team's messages under (see the migration), keeping its threads.
     pub fn upsert_conversation(&self, app: &str, org: &str, workspace: &str, name: &str) -> rusqlite::Result<i64> {
@@ -1205,8 +1196,7 @@ mod tests {
         let h = History::in_memory();
         let conv = h.upsert_conversation("teams", "", "", "Tanaka").unwrap();
         let t = h.create_thread(conv, "Spec").unwrap();
-        let m = h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
-        h.set_feedback(m, true).unwrap();
+        h.add_message(t, &msg("ja_vi", "a", "b")).unwrap();
         h.add_glossary_term("仕訳", "bút toán", "", TermKind::Term).unwrap();
         h.backup_to(&backup).unwrap();
 

@@ -15,7 +15,6 @@ import {
   RotateCcw,
   Settings,
   SpellCheck,
-  ThumbsDown,
   Undo2,
   WifiOff,
   X,
@@ -23,11 +22,10 @@ import {
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { AppBadge } from '../../components/AppBadge'
 import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
-import { cx, pressable } from '../../components/styles'
+import { cx } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { diffChars, diffWords } from '../../lib/diff'
 import { isMostlyJapanese, locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
-import { setFeedback } from '../../lib/history'
 import { useStore } from '../../store'
 import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, modelField, useQuickChoices, type AiChoice, type QuickChoice } from '../../lib/ai'
 import { ACCOUNT_TOOL, loginAccount, type Account } from '../../lib/accounts'
@@ -103,7 +101,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   /** User edits of the finished result, tied to the stream run they belong to. */
   const [edit, setEdit] = useState<{ key: string | null; text: string } | null>(null)
   const [longConfirmed, setLongConfirmed] = useState(request.source.length <= LONG_TEXT_LIMIT)
-  const [feedback, setFeedbackSent] = useState(false)
   const rootRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -561,20 +558,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
             draft={draft}
             onDraft={setDraft}
             back={live.sections.backTranslation || undefined}
-            aside={
-              <button
-                type="button"
-                disabled={feedback}
-                onClick={() => {
-                  setFeedbackSent(true)
-                  if (windowed && saved) void setFeedback(saved.messageId, true)
-                  showToast(t('Cảm ơn bạn, bản dịch này sẽ được xem xét để cải thiện prompt', 'ありがとうございます。この翻訳はプロンプト改善の参考にします'))
-                }}
-                className={cx('-mr-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[12px] text-ink-3 hover:bg-hover hover:text-ink disabled:hover:bg-transparent', pressable)}
-              >
-                <ThumbsDown size={12} /> {feedback ? t('Đã gửi phản hồi', 'フィードバック送信済み') : t('Dịch chưa tốt', '翻訳がよくない')}
-              </button>
-            }
           />
         )}
         {replyMode && replyRun && (
@@ -884,7 +867,6 @@ function TranslationBody({
   draft,
   onDraft,
   back,
-  aside,
 }: {
   direction: 'ja_vi' | 'vi_ja'
   role: Role
@@ -893,8 +875,6 @@ function TranslationBody({
   onDraft: (v: string) => void
   /** The result read back in the user's language, so they can check the meaning before sending. */
   back?: string
-  /** Shown under the finished translation: the "not a good translation" feedback. */
-  aside?: ReactNode
 }) {
   const t = useT()
   const userLang = useLang()
@@ -917,7 +897,6 @@ function TranslationBody({
             <InkText text={stream.text} />
           </p>
         )}
-        {stream.done && aside && <div className="mt-1 flex justify-end">{aside}</div>}
       </Section>
       {stream.done && role === 'write' && back && (
         <Section className="bg-subtle">
