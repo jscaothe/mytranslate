@@ -31,6 +31,29 @@ test('the main window has the Glossary, writing skills and Settings: threads and
   await expect(page.getByRole('button', { name: 'Người liên hệ', exact: true })).toHaveCount(0)
 })
 
+test('the toolbar can be limited to apps picked from the ones running, and says when none is left', async ({ page }) => {
+  await openSettings(page, 'Thanh thao tác nhanh')
+  await page.getByRole('radiogroup', { name: 'Hiện trong ứng dụng nào' }).getByRole('radio', { name: 'Ứng dụng đã chọn' }).click()
+  const list = page.getByRole('list', { name: 'Ứng dụng hiện thanh thao tác' })
+  await expect(list.getByRole('listitem')).toHaveCount(2)
+
+  const add = page.getByRole('button', { name: 'Thêm ứng dụng đang chạy' })
+  await add.click()
+  const menu = page.getByRole('menu', { name: 'Ứng dụng đang chạy' })
+  // Apps already in the list are not offered again.
+  await expect(menu.getByRole('menuitem', { name: /Slack/ })).toHaveCount(0)
+  await menu.getByRole('menuitem', { name: /Zalo/ }).click()
+  await expect(list.getByText('Zalo.exe')).toBeVisible()
+
+  // Once every running app is in the list, the menu says so instead of being empty.
+  await add.click()
+  while ((await menu.getByRole('menuitem').count()) > 0) {
+    await menu.getByRole('menuitem').first().click()
+    await add.click()
+  }
+  await expect(menu).toContainText('Không có ứng dụng đang mở nào khác.')
+})
+
 test('glossary: a person is added with a prompt for the AI, filtered by kind and edited in place', async ({ page }) => {
   await openTab(page, 'Glossary')
   const add = page.getByRole('form', { name: 'Thêm vào glossary' })

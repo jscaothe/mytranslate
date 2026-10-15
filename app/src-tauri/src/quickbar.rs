@@ -42,11 +42,40 @@ impl QuickbarState {
     }
 }
 
-/// The app the toolbar was shown in, for the page.
+/// An app by its executable and the name it goes by: the one the toolbar was shown in, or one open on the desktop.
 #[derive(Serialize, Clone)]
-struct Shown {
+pub struct Shown {
     exe: String,
     name: String,
+}
+
+/// The apps open on the desktop now, for "Thêm ứng dụng đang chạy" in Settings, by name. MyTranslate itself is
+/// left out: the toolbar never shows in it.
+#[tauri::command]
+pub async fn running_apps(app: AppHandle) -> Vec<Shown> {
+    let own = own_exe();
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<QuickbarState>();
+        let mut apps: Vec<Shown> = context::app_windows()
+            .into_iter()
+            .filter(|(_, exe)| !exe.eq_ignore_ascii_case(&own))
+            .map(|(hwnd, exe)| Shown {
+                name: state.app_name(hwnd, &exe),
+                exe,
+            })
+            .collect();
+        apps.sort_by_key(|a| a.name.to_lowercase());
+        apps
+    })
+    .await
+    .unwrap_or_default()
+}
+
+fn own_exe() -> String {
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
+        .unwrap_or_default()
 }
 
 #[derive(Default)]
@@ -209,10 +238,7 @@ pub fn offer_span(app: &AppHandle, span: popup::Span) {
 /// settings allow it in the app in front. Physical pixels.
 fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
     let ctx = context::foreground();
-    let own = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()))
-        .unwrap_or_default();
+    let own = own_exe();
     if ctx.exe.is_empty() || ctx.exe.eq_ignore_ascii_case(&own) || !allowed(&app.state::<SettingsStore>(), &ctx.exe) {
         return;
     }

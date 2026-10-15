@@ -1,8 +1,10 @@
-import { AlertTriangle, ChevronDown, Plus, X } from 'lucide-react'
+import { invoke } from '@tauri-apps/api/core'
+import { AlertTriangle, ChevronDown, Loader2, Plus, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { cx, inputClass } from '../../components/styles'
 import { Button, IconButton, Segmented } from '../../components/ui'
 import { runningApps } from '../../data/mock'
+import { isTauri } from '../../lib/claude'
 import { useT } from '../../lib/i18n'
 import { useStore, type AppRef } from '../../store'
 
@@ -109,8 +111,20 @@ export function AppScopeEditor({
   const [menuOpen, setMenuOpen] = useState(false)
   const [exe, setExe] = useState('')
   const menuRef = useRef<HTMLDivElement>(null)
+  // The real app asks Windows each time the menu opens; the prototype has a sample list. `null` while asking.
+  const [running, setRunning] = useState<AppRef[] | null>(isTauri ? null : runningApps)
 
-  const candidates = runningApps.filter((r) => !apps.some((a) => sameExe(a.exe, r.exe)))
+  const candidates = (running ?? []).filter((r) => !apps.some((a) => sameExe(a.exe, r.exe)))
+
+  const openMenu = () => {
+    if (menuOpen) return setMenuOpen(false)
+    setMenuOpen(true)
+    if (!isTauri) return
+    setRunning(null)
+    invoke<AppRef[]>('running_apps')
+      .then(setRunning)
+      .catch(() => setRunning([]))
+  }
 
   useEffect(() => {
     if (!menuOpen) return
@@ -131,7 +145,7 @@ export function AppScopeEditor({
       onError(t(`${value} đã có trong danh sách`, `${value} はすでにリストにあります`))
       return
     }
-    const known = runningApps.find((r) => sameExe(r.exe, value))
+    const known = running?.find((r) => sameExe(r.exe, value))
     onChange([...apps, known ?? { exe: value, name: value.replace(/\.exe$/i, '') }])
     setExe('')
   }
@@ -162,14 +176,26 @@ export function AppScopeEditor({
 
       <div className="flex items-center gap-2">
         <div ref={menuRef} className="relative">
-          <Button size="sm" disabled={candidates.length === 0} onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen}>
+          <Button size="sm" onClick={openMenu} aria-expanded={menuOpen}>
             <Plus size={14} /> {t('Thêm ứng dụng đang chạy', '実行中のアプリを追加')} <ChevronDown size={13} className="text-ink-3" />
           </Button>
           {menuOpen && (
             <ul
               role="menu"
+              aria-label={t('Ứng dụng đang chạy', '実行中のアプリ')}
+              aria-busy={running === null}
               className="anim-popup scroll-thin absolute top-full left-0 z-20 mt-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-line bg-surface py-1 shadow-popup"
             >
+              {running === null && (
+                <li className="flex items-center gap-2 px-3 py-2 text-[12.5px] text-ink-3">
+                  <Loader2 size={13} className="animate-spin" /> {t('Đang tìm ứng dụng đang mở...', '開いているアプリを探しています...')}
+                </li>
+              )}
+              {running !== null && candidates.length === 0 && (
+                <li className="px-3 py-2 text-[12.5px] text-ink-3">
+                  {t('Không có ứng dụng đang mở nào khác. Mở ứng dụng đó rồi thử lại, hoặc gõ tên file.', 'ほかに開いているアプリはありません。そのアプリを開いてからもう一度試すか、ファイル名を入力してください。')}
+                </li>
+              )}
               {candidates.map((app) => (
                 <li key={app.exe}>
                   <button
