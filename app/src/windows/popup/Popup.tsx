@@ -256,10 +256,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
     onClose()
   }
 
+  // A new level translates again what is written at it: the translation to send, or a reply's (see useTranslation).
   const changeKeigo = (k: Keigo) => {
     setKeigo(k)
     setKeigoChosen(true)
-    setRunKey((r) => r + 1)
     onKeigo?.(k)
   }
 
@@ -285,12 +285,6 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
 
   const startReply = () => {
     setReplyMode(true)
-  }
-
-  const cancelReply = () => {
-    setReplyMode(false)
-    setReplyRun(null)
-    rootRef.current?.focus()
   }
 
   const deliverReply = (text: string) => {
@@ -361,6 +355,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
       return
     }
     if (inReply) {
+      if (e.key === 'Tab' && !e.nativeEvent.isComposing) {
+        e.preventDefault()
+        cycleKeigo()
+        return
+      }
       // Enter while an input method (the Japanese IME) is composing confirms the word; Shift+Enter is a new line.
       if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
         e.preventDefault()
@@ -657,10 +656,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
               className="w-full resize-none rounded-md border border-line bg-surface px-2.5 py-2 text-[13.5px] text-ink placeholder:text-ink-3 focus:border-accent focus:outline-none"
             />
             <div className="flex flex-wrap items-center gap-2">
-              {/* Leaving the reply is a quiet link rather than a third button, so the two actions keep one row. */}
-              <button type="button" onClick={cancelReply} className={cx('rounded px-1 text-[12.5px] text-ink-3 hover:text-ink', pressable)}>
-                {t('Hủy', 'キャンセル')}
-              </button>
+              {/* A reply in the user's language is translated at this level, like a message written to the other side. */}
+              <KeigoChoice keigo={keigo} onKeigo={changeKeigo} />
               <div className="ml-auto flex shrink-0 items-center gap-2">
                 {/* Until a step's result is on screen, Ctrl+Enter skips looking at it; afterwards Enter does the same. */}
                 {!replyChecked && (
@@ -1285,6 +1282,22 @@ function ErrorBanner({
   )
 }
 
+/** The keigo level of what the user writes to the other side; Tab cycles it. */
+function KeigoChoice({ keigo, onKeigo }: { keigo: Keigo; onKeigo: (k: Keigo) => void }) {
+  const t = useT()
+  const lang = useLang()
+  return (
+    <span title={t('Tab để đổi mức kính ngữ', 'Tab で丁寧さを切り替え')} className="inline-flex">
+      <Segmented
+        label={t('Mức kính ngữ', '丁寧さ')}
+        value={keigo}
+        onChange={onKeigo}
+        options={keigoOrder.map((k) => ({ value: k, label: keigoLabel(k, lang) }))}
+      />
+    </span>
+  )
+}
+
 function FooterActions({
   role,
   origin,
@@ -1305,7 +1318,6 @@ function FooterActions({
   onReply: () => void
 }) {
   const t = useT()
-  const lang = useLang()
   const enterKbd = <Kbd>↵</Kbd>
 
   if (role === 'read') {
@@ -1327,14 +1339,7 @@ function FooterActions({
     return (
       // Wraps instead of overflowing when the popup is made narrow: the actions move under the keigo choice.
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <span title={t('Tab để đổi mức kính ngữ', 'Tab で丁寧さを切り替え')} className="inline-flex">
-          <Segmented
-            label={t('Mức kính ngữ', '丁寧さ')}
-            value={keigo}
-            onChange={onKeigo}
-            options={keigoOrder.map((k) => ({ value: k, label: keigoLabel(k, lang) }))}
-          />
-        </span>
+        <KeigoChoice keigo={keigo} onKeigo={onKeigo} />
         <div className="ml-auto flex items-center gap-2">
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>

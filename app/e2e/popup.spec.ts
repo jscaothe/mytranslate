@@ -100,7 +100,30 @@ test('Ctrl+Enter in the reply skips looking: the Vietnamese reply is translated 
   expect(await clipboard(page)).toMatch(/[ぁ-んァ-ン一-龯]/)
 })
 
-test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the Hủy link leaves the reply', async ({ page }) => {
+test('the reply has the keigo choice: Tab in the reply box changes it and translates the reply again', async ({ page }) => {
+  await readFirstMessage(page)
+  const reading = await popup(page).locator('p[lang=vi]').first().innerText()
+  await popup(page).press('Control+Enter')
+  const keigo = popup(page).getByRole('radiogroup', { name: 'Mức kính ngữ' })
+  await expect(keigo.getByRole('radio', { checked: true })).toHaveText('Trang trọng')
+
+  const reply = popup(page).locator('textarea[data-role=reply]')
+  await reply.fill('Em đã sửa xong rồi ạ')
+  await reply.press('Enter')
+  const japanese = popup(page).locator('[data-reply-result] p[lang=ja]')
+  await expect(japanese).toBeVisible()
+  const formal = await japanese.innerText()
+
+  await reply.press('Tab')
+  await expect(keigo.getByRole('radio', { checked: true })).toHaveText('Thân mật')
+  await expect(reply).toBeFocused()
+  await expect(japanese).not.toHaveText(formal)
+  await expect(popup(page).getByRole('button', { name: /^Sao chép/ })).toBeEnabled()
+  // Only the reply is translated again: the message being read does not depend on the level.
+  await expect(popup(page).locator('p[lang=vi]').first()).toHaveText(reading)
+})
+
+test('Shift+Enter starts a new line in the reply; Escape leaves nothing, and there is no button to leave it', async ({ page }) => {
   await readFirstMessage(page)
   await popup(page).press('Control+Enter')
   const reply = popup(page).locator('textarea[data-role=reply]')
@@ -112,9 +135,7 @@ test('Shift+Enter starts a new line in the reply; Escape leaves nothing, the H�
   await reply.press('Escape')
   await expect(reply).toHaveValue('Dòng một\nDòng hai')
   await expect(popup(page).getByText('Esc', { exact: true })).toHaveCount(0)
-  await popup(page).getByRole('button', { name: 'Hủy', exact: true }).click()
-  await expect(reply).toHaveCount(0)
-  await popup(page).press('Escape')
+  await expect(popup(page).getByRole('button', { name: 'Hủy', exact: true })).toHaveCount(0)
   await expect(popup(page)).toBeVisible()
 })
 
