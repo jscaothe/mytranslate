@@ -288,7 +288,8 @@ mod tests {
 
     #[test]
     fn teams_channel_title() {
-        let title = "チームとチャネル | ALPHA_PROJECT_BOOK | General | acme.example | someone@acme.example | Microsoft Teams";
+        let title =
+            "チームとチャネル | ALPHA_PROJECT_BOOK | General | acme.example | someone@acme.example | Microsoft Teams";
         let p = parse_title("ms-teams.exe", title);
         assert_eq!(
             p,

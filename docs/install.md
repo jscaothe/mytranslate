@@ -105,5 +105,5 @@ Muốn kiểm tra ngay: Cài đặt > Cập nhật > Kiểm tra ngay.
 | Popup báo "Chưa chọn đoạn văn bản nào" | Bôi đen lại tin cần dịch; muốn dịch chữ trong ô chat thì đặt con trỏ trong ô có chữ rồi nhấn `Ctrl+Alt+T` |
 | Popup báo "Claude Code chưa đăng nhập" | Mở terminal, chạy `claude`, đăng nhập, rồi bấm "Thử lại" |
 | Popup báo hết hạn mức | Gói Claude đã dùng hết hạn mức của kỳ; chờ đến giờ làm mới ghi trong thông báo |
-| Bản dịch hơi chậm (4-7 giây) thỉnh thoảng | Model đôi khi "suy nghĩ" trước khi trả lời; hiện chưa tắt được qua Claude Code (xem `spikes/sp1-latency/README.md`) |
+| Bản dịch hơi chậm (4-7 giây) thỉnh thoảng | Model đôi khi "suy nghĩ" trước khi trả lời; hiện chưa tắt được qua Claude Code |
 | Muốn làm lại các bước ban đầu | Cài đặt > Chung > Hướng dẫn ban đầu > Xem lại |

@@ -1,7 +1,7 @@
 //! SP5: runs a fixed set of sentences through the app's real prompt and Claude Code setup, and writes a
 //! Markdown sheet for a BrSE to score (1-5) each result. Every case is one request on the user's Claude plan.
 //!
-//!   cargo run --example prompt_eval -- ../../spikes/sp5-prompt-quality/cases.json ../../spikes/sp5-prompt-quality/results.md
+//!   cargo run --example prompt_eval -- cases.json results.md
 //!   PROVIDER=gemini GEMINI_API_KEY=... cargo run --example prompt_eval -- cases.json results-gemini.md
 
 use std::sync::{Arc, Mutex};

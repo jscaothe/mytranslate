@@ -29,7 +29,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const EFFORTS: [&str; 3] = ["none", "minimal", "low"];
 
 /// Model used until the user picks one: the fastest the ChatGPT plans offer in Codex (2026-10). An assumption until
-/// S1 is measured with a ChatGPT account (docs/tasks.md T3.3).
+/// S1 is measured with a ChatGPT account.
 pub const DEFAULT_MODEL: &str = "gpt-5.6-luna";
 
 pub struct CodexCli {

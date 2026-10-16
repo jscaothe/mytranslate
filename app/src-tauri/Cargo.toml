@@ -2,9 +2,9 @@
 name = "mytranslate"
 version = "0.5.15"
 description = "Japanese-Vietnamese chat translator powered by Claude"
-authors = ["thecm"]
-license = ""
-repository = ""
+authors = ["jscaothe"]
+license = "MIT"
+repository = "https://github.com/jscaothe/mytranslate"
 edition = "2024"
 rust-version = "1.90"
 

@@ -1,6 +1,8 @@
-# Checks every push and pull request, and builds the Windows installers (unsigned until a signing
-# certificate is set up, see docs/tasks.md T2.7). On staging, and in pull requests into it, the installer is
-# "MyTranslate Staging" (src-tauri/tauri.staging.conf.json), which installs beside the stable app; see docs/branches.md.
+# Checks every push and pull request, and builds the Windows installers (not code-signed: there is no signing
+# certificate yet). On staging, and in pull requests into it, the installer is "MyTranslate Staging"
+# (src-tauri/tauri.staging.conf.json), which installs beside the stable app.
+# Update packages are signed with the updater key, a secret only this repository has: pull requests from forks
+# build without it, so they get installers to try but no update packages.
 name: CI
 
 on:
@@ -66,6 +68,7 @@ jobs:
     runs-on: windows-latest
     env:
       STAGING: ${{ github.ref == 'refs/heads/staging' || github.base_ref == 'staging' }}
+      SIGNED: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -81,16 +84,18 @@ jobs:
         with:
           workspaces: app/src-tauri
       - run: npm ci
-      # Signs the update packages; set the repository secret to the content of the updater private key
-      # (see docs/release.md). Without it the build fails, so installed apps never get an unsigned update.
-      - if: env.STAGING != 'true'
+      # Signs the update packages with the repository secret holding the updater private key.
+      - if: env.STAGING != 'true' && env.SIGNED == 'true'
         run: npx tauri build
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           MYTRANSLATE_UPDATE_URL: ${{ vars.MYTRANSLATE_UPDATE_URL }}
+      # Without the key (a pull request from a fork): the same installers, without update packages.
+      - if: env.SIGNED != 'true'
+        run: npx tauri build --config src-tauri/tauri.unsigned.conf.json
       # The staging app, with its staging version and update address, exactly as a staging release builds it.
-      - if: env.STAGING == 'true'
+      - if: env.STAGING == 'true' && env.SIGNED == 'true'
         run: node scripts/release.mjs --channel staging
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}

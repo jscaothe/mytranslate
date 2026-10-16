@@ -14,7 +14,7 @@ ICON = Image.open(APP / 'src-tauri' / 'icons' / 'icon.png').convert('RGBA')
 FONTS = Path('C:/Windows/Fonts')
 S = 4
 
-# The home page colors (site/public/styles.css).
+# The colors of the home page, https://mytranslate.pages.dev.
 MIST = (237, 240, 247)
 INK = (19, 26, 53)
 MUTED = (91, 101, 128)

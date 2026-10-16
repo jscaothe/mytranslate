@@ -1,6 +1,6 @@
 //! Translates through the user's own Claude Code login (`claude` CLI).
 //!
-//! SP1 (spikes/sp1-latency) showed where the time goes and how to avoid it:
+//! A latency study (SP1) showed where the time goes and how to avoid it:
 //! - starting `claude.exe` takes ~3.5 s, so one process is always booted ahead of time (the "spare");
 //! - a process is used for exactly one request and then killed, because a shared process keeps growing its
 //!   conversation context and there is no supported way to clear it;
