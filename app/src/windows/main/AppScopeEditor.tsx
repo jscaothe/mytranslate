@@ -53,7 +53,7 @@ export function AppScopeSetting() {
           <div className="text-[13.5px] text-ink">{label}</div>
           <div className="mt-0.5 text-[12px] text-ink-3">
             {qa.appScope === 'all'
-              ? t('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Phím tắt.', 'すべてのアプリ（「ショートカット」で除外したアプリを除く）。')
+              ? t('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Chung.', 'すべてのアプリ（「一般」で除外したアプリを除く）。')
               : t('Chỉ các ứng dụng trong danh sách dưới đây.', '下のリストのアプリだけ。')}
           </div>
         </div>

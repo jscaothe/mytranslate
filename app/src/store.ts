@@ -5,7 +5,7 @@ import type { GlossaryTerm, Keigo, Scenario } from './types'
 export type Screen = 'playground' | 'main' | 'onboarding'
 export type MainTab = 'glossary' | 'writing' | 'settings'
 /** The parts of Settings, each with its own page. AI comes first: users change the AI and model the most. */
-export type SettingsSection = 'ai' | 'general' | 'translate' | 'keys' | 'toolbar' | 'updates' | 'data'
+export type SettingsSection = 'ai' | 'general' | 'quick' | 'updates' | 'data'
 export type ThemePref = 'system' | 'light' | 'dark'
 
 /**

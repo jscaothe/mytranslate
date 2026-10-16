@@ -101,9 +101,9 @@ Muốn kiểm tra ngay: Cài đặt > Cập nhật > Kiểm tra ngay.
 
 | Hiện tượng | Cách xử lý |
 | --- | --- |
-| Nhấn phím tắt không có gì xảy ra | Kiểm tra icon MyTranslate ở khay còn không; chuột phải icon, bỏ chọn "Tạm dừng phím tắt"; tổ hợp có thể bị app khác chiếm, đổi trong Cài đặt > Phím tắt |
+| Nhấn phím tắt không có gì xảy ra | Kiểm tra icon MyTranslate ở khay còn không; chuột phải icon, bỏ chọn "Tạm dừng phím tắt"; tổ hợp có thể bị app khác chiếm, đổi trong Cài đặt > Thao tác nhanh |
 | Popup báo "Chưa chọn đoạn văn bản nào" | Bôi đen lại tin cần dịch; muốn dịch chữ trong ô chat thì đặt con trỏ trong ô có chữ rồi nhấn `Ctrl+Alt+T` |
 | Popup báo "Claude Code chưa đăng nhập" | Mở terminal, chạy `claude`, đăng nhập, rồi bấm "Thử lại" |
 | Popup báo hết hạn mức | Gói Claude đã dùng hết hạn mức của kỳ; chờ đến giờ làm mới ghi trong thông báo |
 | Bản dịch hơi chậm (4-7 giây) thỉnh thoảng | Model đôi khi "suy nghĩ" trước khi trả lời; hiện chưa tắt được qua Claude Code (xem `spikes/sp1-latency/README.md`) |
-| Muốn làm lại các bước ban đầu | Cài đặt > Dữ liệu > Hướng dẫn ban đầu > Xem lại |
+| Muốn làm lại các bước ban đầu | Cài đặt > Chung > Hướng dẫn ban đầu > Xem lại |

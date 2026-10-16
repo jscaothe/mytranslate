@@ -131,7 +131,7 @@ export function QuickActionBar({
             </button>
           </div>
           <p className="px-2 pt-0.5 pb-1 text-[11px] whitespace-nowrap text-ink-3">
-            {t('Bật lại trong Cài đặt > Thanh thao tác nhanh', '「設定 > クイック操作」で元に戻せます')}
+            {t('Bật lại trong Cài đặt > Thao tác nhanh', '「設定 > クイック操作」で元に戻せます')}
           </p>
         </div>
       )}

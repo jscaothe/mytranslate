@@ -355,7 +355,7 @@ test('the toolbar can be turned off in the app it is in from its close button, a
   const close = bar.getByRole('button', { name: 'Ẩn thanh thao tác' })
   await close.click()
   await expect(close).toHaveAttribute('aria-expanded', 'true')
-  await expect(bar.getByText('Bật lại trong Cài đặt > Thanh thao tác nhanh')).toBeVisible()
+  await expect(bar.getByText('Bật lại trong Cài đặt > Thao tác nhanh')).toBeVisible()
   await bar.getByRole('menuitem', { name: 'Tắt trong Slack' }).click()
   await expect(bar).toBeHidden()
 
@@ -366,7 +366,7 @@ test('the toolbar can be turned off in the app it is in from its close button, a
 
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   await page.getByRole('button', { name: 'Cài đặt' }).click()
-  await page.getByRole('button', { name: 'Thanh thao tác nhanh' }).click()
+  await page.getByRole('button', { name: 'Thao tác nhanh', exact: true }).click()
   const hidden = page.getByRole('list', { name: 'Ứng dụng đã tắt thanh thao tác' })
   await expect(hidden.getByText('slack.exe')).toBeVisible()
   await hidden.getByRole('button', { name: 'Bật lại trong Slack' }).click()
@@ -406,6 +406,16 @@ test('the AI menu stays on top of the popup window and inside it', async ({ page
   await popup(page).getByRole('button', { name: /^AI dịch/ }).click()
 
   const menu = popup(page).getByRole('menu', { name: 'Chọn AI dịch' })
+  await expect(menu).toBeVisible()
+  // Measure once the popup and the menu have finished moving in: on a busy machine a box read mid-animation is off.
+  await popup(page).evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
   const item = (await menu.getByRole('menuitemradio', { name: 'Haiku' }).boundingBox())!
   const hit = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[role=menu]'), [item.x + 20, item.y + item.height / 2])
   expect(hit).toBe(true)

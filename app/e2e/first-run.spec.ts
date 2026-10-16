@@ -56,7 +56,7 @@ test('the guide shows where the toolbar appears: every app by default, or a chos
 
   const scope = page.getByRole('radiogroup', { name: 'Hiện trong ứng dụng nào' })
   await expect(scope.getByRole('radio', { name: 'Mọi ứng dụng' })).toHaveAttribute('aria-checked', 'true')
-  await expect(page.getByText('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Phím tắt.')).toBeVisible()
+  await expect(page.getByText('Mọi ứng dụng, trừ các ứng dụng bị chặn ở mục Chung.')).toBeVisible()
 
   await scope.getByRole('radio', { name: 'Ứng dụng đã chọn' }).click()
   const list = page.getByRole('list', { name: 'Ứng dụng hiện thanh thao tác' })
@@ -66,7 +66,7 @@ test('the guide shows where the toolbar appears: every app by default, or a chos
   await page.getByRole('button', { name: 'Hoàn tất, thu nhỏ về khay' }).click()
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   await page.getByRole('button', { name: 'Cài đặt' }).click()
-  await page.getByRole('button', { name: 'Thanh thao tác nhanh' }).click()
+  await page.getByRole('button', { name: 'Thao tác nhanh', exact: true }).click()
   await expect(
     page.getByRole('radiogroup', { name: 'Hiện trong ứng dụng nào' }).getByRole('radio', { name: 'Ứng dụng đã chọn' }),
   ).toHaveAttribute('aria-checked', 'true')

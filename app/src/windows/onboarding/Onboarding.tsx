@@ -600,7 +600,7 @@ function TryIt() {
           <TaskHeading n={2} title={t('Chọn nơi thanh thao tác hiện', 'ツールバーを表示する場所を選ぶ')}>
             <p>
               {t(
-                'Thanh nhỏ bạn vừa dùng sẽ hiện khi bôi đen chữ trong các ứng dụng này. Đổi lại bất cứ lúc nào trong Cài đặt > Thanh thao tác nhanh.',
+                'Thanh nhỏ bạn vừa dùng sẽ hiện khi bôi đen chữ trong các ứng dụng này. Đổi lại bất cứ lúc nào trong Cài đặt > Thao tác nhanh.',
                 '選択したときに、さきほどの小さなツールバーをどのアプリで表示するか選びます。あとから「設定 > クイック操作」でいつでも変更できます。',
               )}
             </p>
