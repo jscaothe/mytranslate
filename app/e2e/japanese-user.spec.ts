@@ -106,12 +106,12 @@ test('the language can be switched in Settings, and the whole app follows', asyn
 
   await page.getByRole('radiogroup', { name: 'あなたの言語' }).getByRole('radio', { name: 'Tiếng Việt' }).click()
   await expect(page.getByRole('heading', { name: 'Chung' })).toBeVisible()
-  await part('Phím tắt').click()
+  await part('Thao tác nhanh').click()
   await expect(page.getByRole('button', { name: 'Phím tắt: Dịch (tự chọn ngôn ngữ đích)' })).toHaveText('CtrlAltT')
 
   await part('Chung').click()
   await page.getByRole('radiogroup', { name: 'Ngôn ngữ của bạn' }).getByRole('radio', { name: '日本語' }).click()
-  await part('ショートカット').click()
+  await part('クイック操作').click()
   await expect(page.getByRole('button', { name: 'ショートカット: 翻訳（翻訳先の言語を自動で判断）' })).toHaveText('CtrlAltT')
 })
 

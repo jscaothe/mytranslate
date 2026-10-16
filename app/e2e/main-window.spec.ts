@@ -32,7 +32,7 @@ test('the main window has the Glossary, writing skills and Settings: threads and
 })
 
 test('the toolbar can be limited to apps picked from the ones running, and says when none is left', async ({ page }) => {
-  await openSettings(page, 'Thanh thao tác nhanh')
+  await openSettings(page, 'Thao tác nhanh')
   await page.getByRole('radiogroup', { name: 'Hiện trong ứng dụng nào' }).getByRole('radio', { name: 'Ứng dụng đã chọn' }).click()
   const list = page.getByRole('list', { name: 'Ứng dụng hiện thanh thao tác' })
   await expect(list.getByRole('listitem')).toHaveCount(2)
@@ -129,8 +129,22 @@ test('settings open on AI, split into parts listed beside the page', async ({ pa
   await openTab(page, 'Cài đặt')
   await expect(page.getByRole('heading', { name: 'AI dịch', exact: true })).toBeVisible()
   const parts = page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button')
-  await expect(parts).toHaveText(['AI dịch', 'Chung', 'Dịch', 'Phím tắt', 'Thanh thao tác nhanh', 'Cập nhật', 'Dữ liệu'])
+  await expect(parts).toHaveText(['AI dịch', 'Chung', 'Thao tác nhanh', 'Cập nhật', 'Dữ liệu'])
   await expect(parts.first()).toHaveAttribute('aria-current', 'page')
+  // How to translate sits with the AIs that translate.
+  await expect(page.getByRole('radiogroup', { name: 'Mức kính ngữ mặc định' })).toBeVisible()
+
+  await parts.filter({ hasText: 'Chung' }).click()
+  await expect(page.getByText('Ứng dụng bị chặn', { exact: true })).toBeVisible()
+  await expect(page.getByText('Hướng dẫn ban đầu', { exact: true })).toBeVisible()
+
+  // The hotkeys and the selection toolbar, together.
+  await parts.filter({ hasText: 'Thao tác nhanh' }).click()
+  await expect(page.getByRole('button', { name: 'Phím tắt: Dịch (tự chọn ngôn ngữ đích)' })).toBeVisible()
+  await expect(page.getByRole('switch', { name: 'Hiện thanh thao tác khi bôi đen bằng chuột' })).toBeVisible()
+
+  await parts.filter({ hasText: 'Dữ liệu' }).click()
+  await expect(page.getByText('Hướng dẫn ban đầu', { exact: true })).toHaveCount(0)
 })
 
 test('settings search finds rows without Vietnamese marks, a whole part by its subject, or says nothing matches', async ({ page }) => {
@@ -148,7 +162,7 @@ test('settings search finds rows without Vietnamese marks, a whole part by its s
   await expect(page.getByText('Không có mục cài đặt nào khớp.')).toBeVisible()
 
   // Picking a part leaves the search.
-  await page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button', { name: 'Phím tắt', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Mục cài đặt' }).getByRole('button', { name: 'Thao tác nhanh', exact: true }).click()
   await expect(search).toHaveValue('')
   await expect(page.getByRole('button', { name: 'Phím tắt: Dịch (tự chọn ngôn ngữ đích)' })).toHaveText('CtrlAltT')
 })

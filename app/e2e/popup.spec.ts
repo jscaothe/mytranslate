@@ -355,7 +355,7 @@ test('the toolbar can be turned off in the app it is in from its close button, a
   const close = bar.getByRole('button', { name: 'Ẩn thanh thao tác' })
   await close.click()
   await expect(close).toHaveAttribute('aria-expanded', 'true')
-  await expect(bar.getByText('Bật lại trong Cài đặt > Thanh thao tác nhanh')).toBeVisible()
+  await expect(bar.getByText('Bật lại trong Cài đặt > Thao tác nhanh')).toBeVisible()
   await bar.getByRole('menuitem', { name: 'Tắt trong Slack' }).click()
   await expect(bar).toBeHidden()
 
@@ -366,7 +366,7 @@ test('the toolbar can be turned off in the app it is in from its close button, a
 
   await page.getByRole('button', { name: 'Cửa sổ chính' }).click()
   await page.getByRole('button', { name: 'Cài đặt' }).click()
-  await page.getByRole('button', { name: 'Thanh thao tác nhanh' }).click()
+  await page.getByRole('button', { name: 'Thao tác nhanh', exact: true }).click()
   const hidden = page.getByRole('list', { name: 'Ứng dụng đã tắt thanh thao tác' })
   await expect(hidden.getByText('slack.exe')).toBeVisible()
   await hidden.getByRole('button', { name: 'Bật lại trong Slack' }).click()

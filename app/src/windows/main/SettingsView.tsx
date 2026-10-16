@@ -18,13 +18,19 @@ import { AiProvidersGroup } from './AiProvidersGroup'
 /** The parts of Settings in the order listed, with words that find a whole part when searched. */
 function sections(t: T): { id: SettingsSection; name: string; words: string }[] {
   return [
-    { id: 'ai', name: t('AI dịch', '翻訳AI'), words: 'ai model claude chatgpt gpt gemini codex api key ' + t('tài khoản mô hình', 'モデル アカウント キー') },
-    { id: 'general', name: t('Chung', '一般'), words: t('ngôn ngữ giao diện', '言語 表示') },
-    { id: 'translate', name: t('Dịch', '翻訳'), words: t('kính ngữ', '丁寧さ 敬語') },
-    { id: 'keys', name: t('Phím tắt', 'ショートカット'), words: t('bàn phím', 'キーボード') },
-    { id: 'toolbar', name: t('Thanh thao tác nhanh', 'クイック操作'), words: t('bôi đen nút thứ tự xem trước icon', '選択 ボタン 順番 プレビュー アイコン') },
+    {
+      id: 'ai',
+      name: t('AI dịch', '翻訳AI'),
+      words: 'ai model claude chatgpt gpt gemini codex api key ' + t('tài khoản mô hình dịch kính ngữ', 'モデル アカウント キー 翻訳 丁寧さ 敬語'),
+    },
+    { id: 'general', name: t('Chung', '一般'), words: t('ngôn ngữ giao diện chặn hướng dẫn', '言語 表示 除外 ガイド') },
+    {
+      id: 'quick',
+      name: t('Thao tác nhanh', 'クイック操作'),
+      words: t('phím tắt bàn phím thanh bôi đen nút thứ tự xem trước icon', 'ショートカット キーボード ツールバー 選択 ボタン 順番 プレビュー アイコン'),
+    },
     { id: 'updates', name: t('Cập nhật', 'アップデート'), words: t('phiên bản', 'バージョン') },
-    { id: 'data', name: t('Dữ liệu', 'データ'), words: t('lịch sử sao lưu khôi phục xóa hướng dẫn', '履歴 バックアップ 復元 削除 ガイド') },
+    { id: 'data', name: t('Dữ liệu', 'データ'), words: t('lịch sử sao lưu khôi phục xóa', '履歴 バックアップ 復元 削除') },
   ]
 }
 
@@ -86,6 +92,20 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
     ai: (
       <>
       <AiProvidersGroup group={Group} row={Row} />
+
+      <Group title={t('Dịch', '翻訳')}>
+        <Row
+          label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
+          hint={t('Dùng khi dịch câu bạn viết sang tiếng Nhật.', 'ベトナム語で送るときの言葉づかいです。')}
+        >
+          <Segmented
+            label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
+            value={settings.defaultKeigo}
+            onChange={(k) => updateSettings({ defaultKeigo: k })}
+            options={(['casual', 'polite', 'formal'] as const).map((k) => ({ value: k, label: keigoLabel(k, settings.language) }))}
+          />
+        </Row>
+      </Group>
       </>
     ),
     general: (
@@ -126,27 +146,60 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
         <Row label={t('Khởi động cùng Windows', 'Windows 起動時に開始')}>
           <Switch label={t('Khởi động cùng Windows', 'Windows 起動時に開始')} checked={settings.autostart} onChange={(v) => updateSettings({ autostart: v })} />
         </Row>
+        <Row label={t('Ứng dụng bị chặn', '除外するアプリ')} hint={t('Phím tắt và thanh thao tác không hoạt động trong các ứng dụng này.', 'これらのアプリではショートカットとツールバーが動作しません。')}>
+          <div className="flex w-80 flex-col gap-2">
+            <div className="flex flex-wrap gap-1.5">
+              {settings.blockedApps.map((a) => (
+                <span key={a} className="inline-flex items-center gap-1 rounded-full border border-line bg-surface py-0.5 pr-1 pl-2.5 text-[12.5px]">
+                  {a}
+                  <button
+                    type="button"
+                    aria-label={t(`Bỏ chặn ${a}`, `${a} の除外を解除`)}
+                    onClick={() => updateSettings({ blockedApps: settings.blockedApps.filter((x) => x !== a) })}
+                    className={cx('flex size-4 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink', pressable)}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <form
+              className="flex gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const v = newBlocked.trim()
+                if (v && !settings.blockedApps.includes(v)) updateSettings({ blockedApps: [...settings.blockedApps, v] })
+                setNewBlocked('')
+              }}
+            >
+              <input
+                className={cx(inputClass, 'flex-1')}
+                placeholder={t('vd: Bitwarden.exe', '例: Bitwarden.exe')}
+                value={newBlocked}
+                onChange={(e) => setNewBlocked(e.target.value)}
+              />
+              <Button type="submit" disabled={!newBlocked.trim()}>
+                {t('Thêm', '追加')}
+              </Button>
+            </form>
+          </div>
+        </Row>
       </Group>
-      </>
-    ),
-    translate: (
-      <>
-      <Group title={t('Dịch', '翻訳')}>
+
+      <Group title={t('Trợ giúp', 'ヘルプ')}>
         <Row
-          label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
-          hint={t('Dùng khi dịch câu bạn viết sang tiếng Nhật.', 'ベトナム語で送るときの言葉づかいです。')}
+          label={t('Hướng dẫn ban đầu', '初期設定ガイド')}
+          hint={t(
+            'Làm lại các bước đầu: kết nối AI, thử dịch và chọn nơi thanh thao tác hiện.',
+            'AIへの接続、翻訳のお試し、ツールバーを表示するアプリの選択をもう一度行います。',
+          )}
         >
-          <Segmented
-            label={t('Mức kính ngữ mặc định', '丁寧さ（既定）')}
-            value={settings.defaultKeigo}
-            onChange={(k) => updateSettings({ defaultKeigo: k })}
-            options={(['casual', 'polite', 'formal'] as const).map((k) => ({ value: k, label: keigoLabel(k, settings.language) }))}
-          />
+          <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>{t('Xem lại', 'もう一度見る')}</Button>
         </Row>
       </Group>
       </>
     ),
-    keys: (
+    quick: (
       <>
       <Group
         title={t('Phím tắt', 'ショートカット')}
@@ -189,51 +242,10 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
             </button>
           </Row>
         ))}
-        <Row label={t('Ứng dụng bị chặn', '除外するアプリ')} hint={t('Phím tắt và thanh thao tác không hoạt động trong các ứng dụng này.', 'これらのアプリではショートカットとツールバーが動作しません。')}>
-          <div className="flex w-80 flex-col gap-2">
-            <div className="flex flex-wrap gap-1.5">
-              {settings.blockedApps.map((a) => (
-                <span key={a} className="inline-flex items-center gap-1 rounded-full border border-line bg-surface py-0.5 pr-1 pl-2.5 text-[12.5px]">
-                  {a}
-                  <button
-                    type="button"
-                    aria-label={t(`Bỏ chặn ${a}`, `${a} の除外を解除`)}
-                    onClick={() => updateSettings({ blockedApps: settings.blockedApps.filter((x) => x !== a) })}
-                    className={cx('flex size-4 items-center justify-center rounded-full text-ink-3 hover:bg-hover hover:text-ink', pressable)}
-                  >
-                    <X size={11} />
-                  </button>
-                </span>
-              ))}
-            </div>
-            <form
-              className="flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault()
-                const v = newBlocked.trim()
-                if (v && !settings.blockedApps.includes(v)) updateSettings({ blockedApps: [...settings.blockedApps, v] })
-                setNewBlocked('')
-              }}
-            >
-              <input
-                className={cx(inputClass, 'flex-1')}
-                placeholder={t('vd: Bitwarden.exe', '例: Bitwarden.exe')}
-                value={newBlocked}
-                onChange={(e) => setNewBlocked(e.target.value)}
-              />
-              <Button type="submit" disabled={!newBlocked.trim()}>
-                {t('Thêm', '追加')}
-              </Button>
-            </form>
-          </div>
-        </Row>
       </Group>
-      </>
-    ),
-    toolbar: (
-      <>
+
       <Group
-        title={t('Thao tác nhanh khi bôi đen', '選択時のクイック操作')}
+        title={t('Thanh thao tác khi bôi đen', '選択時のツールバー')}
         hint={t(
           'Bôi đen chữ bằng chuột sẽ hiện một thanh nhỏ để chọn luôn thao tác, không cần chuyển sang bàn phím.',
           'マウスで文字を選択すると小さなツールバーが表示され、キーボードを使わずに操作できます。',
@@ -318,9 +330,6 @@ export function SettingsView({ updates }: { updates: ReturnType<typeof useUpdate
             : t('Toàn bộ lịch sử dịch nằm trên máy này.', '翻訳履歴はすべてこのPCにあります。')
         }
       >
-        <Row label={t('Hướng dẫn ban đầu', '初期設定ガイド')} hint={t('Kiểm tra lại kết nối Claude Code và thử dịch.', 'Claude Code との接続を確認し、翻訳を試します。')}>
-          <Button onClick={() => (isTauri ? updateSettings({ onboarded: false }) : setScreen('onboarding'))}>{t('Xem lại', 'もう一度見る')}</Button>
-        </Row>
         <Row
           label={t('Giữ lịch sử', '履歴の保存期間')}
           hint={t(
