@@ -406,6 +406,16 @@ test('the AI menu stays on top of the popup window and inside it', async ({ page
   await popup(page).getByRole('button', { name: /^AI dịch/ }).click()
 
   const menu = popup(page).getByRole('menu', { name: 'Chọn AI dịch' })
+  await expect(menu).toBeVisible()
+  // Measure once the popup and the menu have finished moving in: on a busy machine a box read mid-animation is off.
+  await popup(page).evaluate((el) =>
+    Promise.all(
+      el
+        .getAnimations({ subtree: true })
+        .filter((a) => a.effect?.getTiming().iterations !== Infinity)
+        .map((a) => a.finished),
+    ),
+  )
   const item = (await menu.getByRole('menuitemradio', { name: 'Haiku' }).boundingBox())!
   const hit = await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y)?.closest('[role=menu]'), [item.x + 20, item.y + item.height / 2])
   expect(hit).toBe(true)
