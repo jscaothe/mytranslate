@@ -1,7 +1,7 @@
 # MyTranslate - Hướng dẫn cài đặt và sử dụng
 
 MyTranslate dịch Nhật - Việt ngay tại ô chat Teams/Slack bằng phím tắt, dùng tài khoản Claude của chính bạn.
-Tài liệu này dành cho người dùng trong team; thiết kế chi tiết ở [design.md](design.md).
+Tài liệu này dành cho người dùng.
 Người dùng Nhật xem bản tiếng Nhật: [install-ja.md](install-ja.md).
 App hiện tiếng Nhật khi Windows dùng tiếng Nhật; đổi ở Cài đặt > Ngôn ngữ, đổi ngôn ngữ thì hướng "đọc" và "viết" cũng đổi theo.
 

@@ -1,7 +1,6 @@
 # MyTranslate
 
 App Tauri v2: `src/` là giao diện React, `src-tauri/` là lõi Rust.
-Thiết kế: [docs/design.md](../docs/design.md).
 
 ## Chạy app thật (Tauri)
 

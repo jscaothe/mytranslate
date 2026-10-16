@@ -50,14 +50,13 @@ cargo test
 ```
 
 Chi tiết về cấu trúc app và bản prototype chạy trên trình duyệt: [app/README.md](app/README.md).
-Thiết kế sản phẩm và kiến trúc: [docs/design.md](docs/design.md).
 
 | Thư mục | Nội dung |
 | --- | --- |
 | `app/src` | Giao diện React: popup dịch, cửa sổ chính, onboarding |
 | `app/src-tauri` | Lõi Rust (Tauri 2): phím tắt, đọc cửa sổ chat, gọi AI, lịch sử SQLite, cập nhật |
 | `app/e2e` | Test Playwright |
-| `docs` | Hướng dẫn sử dụng và tài liệu thiết kế |
+| `docs` | Hướng dẫn cài đặt và sử dụng |
 
 ## Đóng góp
 
