@@ -1,5 +1,5 @@
 import { Check, ChevronLeft, CircleAlert, ExternalLink, Keyboard, KeyRound, Loader2, ShieldAlert } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { QuickActionBar } from '../../components/QuickActionBar'
 import { AppMark, Button, Hotkey, Segmented, WindowFrame } from '../../components/ui'
 import { cx, inputClass } from '../../components/styles'
@@ -539,66 +539,92 @@ function TryIt() {
 
   const items = settings.quickActions.items.filter((i) => tryItActions.includes(i.id))
 
+  // Two things to do on this page, numbered and one under the other, so the second is not missed before "Hoàn tất".
+  const withScope = settings.quickActions.enabled
   return (
-    <div className="flex min-h-full flex-col gap-4">
-      <div>
-        <h2 className="text-[17px] font-semibold">{t('Thử ngay', '試してみる')}</h2>
-        <p className="mt-1 text-[13.5px] text-ink-2">
-          {lang === 'ja' ? (
+    <div className="flex flex-col gap-6">
+      <h2 className="text-[17px] font-semibold">{t('Thử ngay', '試してみる')}</h2>
+      <section className="flex flex-col gap-3">
+        <TaskHeading n={withScope ? 1 : null} title={t('Thử dịch một tin nhắn', 'メッセージを翻訳してみる')}>
+          <p>
+            {lang === 'ja' ? (
+              <>
+                下のベトナム語の文をマウスで選択し、表示された小さなツールバーの <span className="font-semibold text-ink">翻訳</span> をクリックしてください。
+              </>
+            ) : (
+              <>
+                Dùng chuột bôi đen câu tiếng Nhật dưới đây, rồi bấm <span className="font-semibold text-ink">Dịch</span> trên thanh nhỏ hiện ra.
+              </>
+            )}
+          </p>
+          <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12.5px] text-ink-3">
+            <Keyboard size={15} /> {t('Hoặc bôi đen rồi nhấn', 'または選択して')} <Hotkey combo={settings.hotkeys.auto} />
+            {lang === 'ja' ? ' を押します' : ''}
+          </p>
+        </TaskHeading>
+        <div className={cx('flex flex-col gap-3', withScope && 'pl-7.5')}>
+          <div ref={areaRef} className="relative" onMouseDown={(e) => !(e.target as HTMLElement).closest('[data-quick-bar]') && setBar(null)}>
+            <p
+              ref={sampleRef}
+              lang={otherLang(lang)}
+              onMouseUp={onMouseUp}
+              className="cursor-text rounded-lg border border-line bg-surface px-4 py-3 text-[15px] leading-relaxed selection:bg-[#b4d5fe] dark:selection:bg-[#3b5a8c]"
+            >
+              {sample}
+            </p>
+            {bar && !request && (
+              <QuickActionBar
+                items={items}
+                display={settings.quickActions.display}
+                onAction={() => open(readDirection(lang), bar.text)}
+                onDismiss={() => setBar(null)}
+                className="absolute z-10"
+                style={{ left: bar.x, top: bar.y }}
+              />
+            )}
+          </div>
+          {request && (
             <>
-              下のベトナム語の文をマウスで選択し、表示された小さなツールバーの <span className="font-semibold text-ink">翻訳</span> をクリックしてください。
-            </>
-          ) : (
-            <>
-              Dùng chuột bôi đen câu tiếng Nhật dưới đây, rồi bấm <span className="font-semibold text-ink">Dịch</span> trên thanh nhỏ hiện ra.
+              <Popup key={request.id} request={request} onClose={() => setRequest(null)} />
+              <p className="text-[12.5px] text-ink-2">
+                {withScope
+                  ? t('Trong Teams và Slack cũng làm y như vậy.', 'Teams や Slack でも同じ操作です。')
+                  : t('Trong Teams và Slack cũng làm y như vậy. Bấm Hoàn tất để bắt đầu dùng.', 'Teams や Slack でも同じ操作です。「完了」を押して使い始めましょう。')}
+              </p>
             </>
           )}
-        </p>
-        <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[12.5px] text-ink-3">
-          <Keyboard size={15} /> {t('Hoặc bôi đen rồi nhấn', 'または選択して')} <Hotkey combo={settings.hotkeys.auto} />
-          {lang === 'ja' ? ' を押します' : ''}
-        </p>
-      </div>
-      <div ref={areaRef} className="relative" onMouseDown={(e) => !(e.target as HTMLElement).closest('[data-quick-bar]') && setBar(null)}>
-        <p
-          ref={sampleRef}
-          lang={otherLang(lang)}
-          onMouseUp={onMouseUp}
-          className="cursor-text rounded-lg border border-line bg-surface px-4 py-3 text-[15px] leading-relaxed selection:bg-[#b4d5fe] dark:selection:bg-[#3b5a8c]"
-        >
-          {sample}
-        </p>
-        {bar && !request && (
-          <QuickActionBar
-            items={items}
-            display={settings.quickActions.display}
-            onAction={() => open(readDirection(lang), bar.text)}
-            onDismiss={() => setBar(null)}
-            className="absolute z-10"
-            style={{ left: bar.x, top: bar.y }}
-          />
-        )}
-      </div>
-      {request && (
-        <>
-          <Popup key={request.id} request={request} onClose={() => setRequest(null)} />
-          <p className="text-[12.5px] text-ink-2">
-            {t('Trong Teams và Slack cũng làm y như vậy. Bấm Hoàn tất để bắt đầu dùng.', 'Teams や Slack でも同じ操作です。「完了」を押して使い始めましょう。')}
-          </p>
-        </>
-      )}
-      {/* At the bottom of the step, so the practice popup opens in the space above it. */}
-      {settings.quickActions.enabled && (
-        <section className="mt-auto border-t border-line pt-4">
-          <h3 className="text-[14px] font-semibold text-ink">{t('Thanh thao tác nhanh', 'クイック操作')}</h3>
-          <p className="text-[12.5px] text-ink-3">
-            {t('Đổi lại bất cứ lúc nào trong Cài đặt > Thanh thao tác nhanh.', 'あとから「設定 > クイック操作」でいつでも変更できます。')}
-          </p>
-          <div className="mt-2.5 rounded-lg border border-line bg-surface px-4 py-3.5">
+        </div>
+      </section>
+      {withScope && (
+        <section className="flex flex-col gap-3">
+          <TaskHeading n={2} title={t('Chọn nơi thanh thao tác hiện', 'ツールバーを表示する場所を選ぶ')}>
+            <p>
+              {t(
+                'Thanh nhỏ bạn vừa dùng sẽ hiện khi bôi đen chữ trong các ứng dụng này. Đổi lại bất cứ lúc nào trong Cài đặt > Thanh thao tác nhanh.',
+                '選択したときに、さきほどの小さなツールバーをどのアプリで表示するか選びます。あとから「設定 > クイック操作」でいつでも変更できます。',
+              )}
+            </p>
+          </TaskHeading>
+          <div className="ml-7.5 rounded-lg border border-line bg-surface px-4 py-3.5">
             <AppScopeSetting />
           </div>
         </section>
       )}
+    </div>
+  )
+}
+
+/** One of the things to do on the "Thử ngay" page, with its number when there is more than one. */
+function TaskHeading({ n, title, children }: { n: number | null; title: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-2.5">
+      {n !== null && (
+        <span className="mt-px flex size-5 shrink-0 items-center justify-center rounded-full bg-accent-soft text-[11.5px] font-bold text-accent">{n}</span>
+      )}
+      <div className="min-w-0 text-[13.5px] text-ink-2">
+        <h3 className="text-[14px] font-semibold text-ink">{title}</h3>
+        <div className="mt-0.5">{children}</div>
+      </div>
     </div>
   )
 }
