@@ -7,7 +7,8 @@ import { hideQuickBarIn, useStore, type AppRef } from '../../store'
 /**
  * The page in the "quickbar" window: the toolbar shown next to a mouse selection in a chat app.
  * The language of the selection is not known until a button is pressed, so the translate button says "Dịch"
- * ("翻訳" for a Japanese user).
+ * ("翻訳" for a Japanese user). Only whether it has Japanese may be known, from UI Automation: then the reading
+ * button shows or not.
  * It stays until the user clicks somewhere else (or presses one of its buttons).
  */
 export function QuickbarWindow() {
@@ -15,9 +16,12 @@ export function QuickbarWindow() {
   const barRef = useRef<HTMLDivElement>(null)
   // A fresh bar each time it is shown: a shortcut hint or close menu left open when it was hidden does not come
   // back with it. It also says which app the bar is in, for "Tắt trong <app>".
-  const [shown, setShown] = useState<{ n: number; app: AppRef | null }>({ n: 0, app: null })
+  const [shown, setShown] = useState<{ n: number; app: AppRef | null; japanese: boolean | null }>({ n: 0, app: null, japanese: null })
   useEffect(() => {
-    const off = listen<AppRef>('quickbar:shown', (e) => setShown((s) => ({ n: s.n + 1, app: e.payload })))
+    const off = listen<AppRef & { japanese: boolean | null }>('quickbar:shown', (e) => {
+      const { japanese, ...app } = e.payload
+      setShown((s) => ({ n: s.n + 1, app, japanese }))
+    })
     return () => void off.then((f) => f())
   }, [])
   const app = shown.app
@@ -43,6 +47,7 @@ export function QuickbarWindow() {
         bare
         items={settings.quickActions.items}
         display={settings.quickActions.display}
+        japanese={shown.japanese}
         onAction={(action) => void invoke('quickbar_action', { action })}
         onDismiss={() => void invoke('quickbar_hide')}
         hideIn={

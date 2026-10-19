@@ -20,6 +20,8 @@ use crate::popup::Span;
 
 /// Text controls are rarely deep below the element under the pointer; stop looking after this many parents.
 const MAX_PARENTS: usize = 25;
+/// Characters of a selection read to tell its language.
+const SELECTION_SAMPLE: i32 = 400;
 
 pub struct SelectionProbe {
     uia: IUIAutomation,
@@ -43,6 +45,35 @@ impl SelectionProbe {
     /// Whether the text control at (x, y), physical pixels, has a non-empty selection.
     pub fn has_selection_at(&self, x: i32, y: i32) -> bool {
         unsafe { self.check(x, y).unwrap_or(false) }
+    }
+
+    /// The selected text of the text control at (x, y), physical pixels, else of the focused control; `None` when
+    /// neither says what it is. Only its start is read: enough to tell its language.
+    pub fn selected_text_at(&self, x: i32, y: i32) -> Option<String> {
+        unsafe {
+            self.uia
+                .ElementFromPoint(POINT { x, y })
+                .ok()
+                .and_then(|e| self.selected_text(e))
+                .or_else(|| self.focused_selected_text())
+        }
+    }
+
+    /// The selected text of the focused control, as `selected_text_at`.
+    pub fn focused_selected_text(&self) -> Option<String> {
+        unsafe { self.selected_text(self.uia.GetFocusedElement().ok()?) }
+    }
+
+    unsafe fn selected_text(&self, element: IUIAutomationElement) -> Option<String> {
+        unsafe {
+            let (text, _) = self.text_control(element).ok()??;
+            let ranges = text.GetSelection().ok()?;
+            let selected: String = (0..ranges.Length().ok()?)
+                .filter_map(|i| ranges.GetElement(i).and_then(|r| r.GetText(SELECTION_SAMPLE)).ok())
+                .map(|t| t.to_string())
+                .collect();
+            (!selected.is_empty()).then_some(selected)
+        }
     }
 
     /// Whether the keyboard focus is in a box the user can type in (a chat message box), or `None` when UI

@@ -185,7 +185,11 @@ pub fn start(app: &AppHandle) {
                                 log::debug!("selection without I-beam: text selected {selected}");
                             }
                             if selected {
-                                quickbar::offer(&app, x, y, dy);
+                                let japanese = probe
+                                    .as_ref()
+                                    .and_then(|p| p.selected_text_at(x, y))
+                                    .map(|t| crate::popup::has_japanese(&t));
+                                quickbar::offer(&app, x, y, dy, japanese);
                             }
                         }
                     }
@@ -207,7 +211,11 @@ pub fn start(app: &AppHandle) {
                         if let Some(span) = span
                             && no_key_since()
                         {
-                            quickbar::offer_span(&app, span);
+                            let japanese = probe
+                                .as_ref()
+                                .and_then(|p| p.focused_selected_text())
+                                .map(|t| crate::popup::has_japanese(&t));
+                            quickbar::offer_span(&app, span, japanese);
                         }
                     }
                     Event::Key => quickbar::hide(&app),

@@ -52,7 +52,7 @@ import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../li
 import type { Direction, Keigo, ReviewResult, TextLang } from '../../types'
 import { issueLabel, parseIssues } from '../../lib/review'
 import { AiSwitcher } from './AiSwitcher'
-import { LanguageBar } from './LanguageBar'
+import { LanguageBar, ReadingBar } from './LanguageBar'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
 import { dragsFrom, useFloatingFrame } from './useFloatingFrame'
 import { useTranslation } from './useTranslation'
@@ -111,6 +111,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   )
   const direction: Direction = translates ? translation(sourceLanguage, target) : request.direction
   const readingMode: ReadingMode = target === 'ja' ? settings.japaneseReading : 'off'
+  // The toolbar's reading button: only how to read the Japanese text, until the user asks for its translation.
+  const [readingOnly, setReadingOnly] = useState(request.readingOnly ?? false)
+  const [sourceReading, setSourceReading] = useState<Exclude<ReadingMode, 'off'>>(
+    settings.japaneseReading === 'kana' ? 'kana' : 'furigana',
+  )
   // The level last picked in this chat, else the user's default. Only a level they picked (here or earlier in this
   // chat) overrides a person's note in the Glossary.
   const [keigo, setKeigo] = useState<Keigo>(request.keigo ?? settings.defaultKeigo)
@@ -162,7 +167,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
     keigo,
     keigoChosen,
     runKey,
-    enabled: longConfirmed && !notice,
+    enabled: longConfirmed && !notice && !readingOnly,
     scenario,
     history: windowed ? { conversationId, threadId: filedThread } : undefined,
     ai: aiOverride,
@@ -253,7 +258,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   const finalText = draft ?? resultText
 
   // The reading of a finished Japanese translation (as edited), worked out on this PC.
-  const readingText = readingMode !== 'off' && resultReady && !isReview ? finalText : null
+  const readingText = readingOnly ? source : readingMode !== 'off' && resultReady && !isReview ? finalText : null
   const [reading, setReading] = useState<{ text: string; value: Reading } | null>(null)
   useEffect(() => {
     if (readingText === null) return
@@ -295,6 +300,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   }
 
   const primary = () => {
+    if (readingOnly) return setReadingOnly(false)
     if (!resultReady) return
     const text = finalText
     if (role === 'read') {
@@ -429,7 +435,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
       return
     }
     // The language bar's keys: L for the language, H for hiragana. Ctrl+R would reload the page.
-    if (e.ctrlKey && e.key.toLowerCase() === 'l' && translates && !notice) {
+    if (e.ctrlKey && e.key.toLowerCase() === 'h' && readingOnly) {
+      e.preventDefault()
+      setSourceReading((m) => (m === 'furigana' ? 'kana' : 'furigana'))
+      return
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'l' && translates && !notice && !readingOnly) {
       e.preventDefault()
       cycleTarget()
       return
@@ -563,7 +574,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
           <X size={15} />
         </IconButton>
       </header>
-      {translates && !notice && (
+      {readingOnly && !notice && (
+        <div ref={barRef}>
+          <ReadingBar mode={sourceReading} onMode={setSourceReading} />
+        </div>
+      )}
+      {translates && !notice && !readingOnly && (
         <div ref={barRef}>
           <LanguageBar
             source={sourceLanguage}
@@ -597,7 +613,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
         ) : (
         <>
 
-        {!longConfirmed ? (
+        {readingOnly ? (
+          <SourceReading text={source} mode={sourceReading} reading={shownReading} />
+        ) : !longConfirmed ? (
           <Banner
             tone="warn"
             icon={<AlertTriangle size={16} />}
@@ -754,6 +772,12 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
                 </Button>
               </div>
             </div>
+          </div>
+        ) : readingOnly ? (
+          <div className="flex items-center justify-end">
+            <Button size="sm" variant="primary" onClick={() => setReadingOnly(false)}>
+              <Languages size={14} /> {t('Dịch', '翻訳')} <Kbd>↵</Kbd>
+            </Button>
           </div>
         ) : (
           <FooterActions
@@ -969,18 +993,7 @@ function TranslationBody({
       <Section>
         {stream.done && reading?.mode === 'furigana' ? (
           // Furigana is only shown: the result is edited with the reading turned off (Ctrl+H).
-          <p data-reading="furigana" lang="ja" className="text-[15px] leading-[2.1] whitespace-pre-wrap [&_rt]:text-[10px] [&_rt]:text-ink-2 [&_ruby]:[ruby-align:center]">
-            {reading.value.parts.map((p, i) =>
-              p.ruby ? (
-                <ruby key={i}>
-                  {p.text}
-                  <rt>{p.ruby}</rt>
-                </ruby>
-              ) : (
-                <span key={i}>{p.text}</span>
-              ),
-            )}
-          </p>
+          <Furigana reading={reading.value} />
         ) : role === 'write' && stream.done && draft !== null ? (
           <textarea
             data-role="draft"
@@ -996,14 +1009,7 @@ function TranslationBody({
           </p>
         )}
       </Section>
-      {stream.done && reading?.mode === 'kana' && (
-        <Section className="bg-subtle">
-          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Cách đọc', '読み方')}</div>
-          <p data-reading="kana" lang="ja" className="text-[14px] leading-relaxed whitespace-pre-wrap text-ink">
-            {reading.value.kana}
-          </p>
-        </Section>
-      )}
+      {stream.done && reading?.mode === 'kana' && <KanaSection kana={reading.value.kana} />}
       {stream.done && role === 'write' && back && (
         <Section className="bg-subtle">
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Ý nghĩa khi đọc lại', '読み返したときの意味')}</div>
@@ -1012,6 +1018,59 @@ function TranslationBody({
           </p>
         </Section>
       )}
+    </>
+  )
+}
+
+/** Japanese with its reading in small hiragana over each word written in kanji. */
+function Furigana({ reading }: { reading: Reading }) {
+  return (
+    <p data-reading="furigana" lang="ja" className="text-[15px] leading-[2.1] whitespace-pre-wrap [&_rt]:text-[10px] [&_rt]:text-ink-2 [&_ruby]:[ruby-align:center]">
+      {reading.parts.map((p, i) =>
+        p.ruby ? (
+          <ruby key={i}>
+            {p.text}
+            <rt>{p.ruby}</rt>
+          </ruby>
+        ) : (
+          <span key={i}>{p.text}</span>
+        ),
+      )}
+    </p>
+  )
+}
+
+/** The whole text in hiragana, under the Japanese it reads. */
+function KanaSection({ kana }: { kana: string }) {
+  const t = useT()
+  return (
+    <Section className="bg-subtle">
+      <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Cách đọc', '読み方')}</div>
+      <p data-reading="kana" lang="ja" className="text-[14px] leading-relaxed whitespace-pre-wrap text-ink">
+        {kana}
+      </p>
+    </Section>
+  )
+}
+
+/** The selected Japanese itself, with its reading: no translation (the toolbar's reading button). */
+function SourceReading({ text, mode, reading }: { text: string; mode: Exclude<ReadingMode, 'off'>; reading: Reading | null }) {
+  const t = useT()
+  if (!reading) return <PendingBlock label={t('Đang phân tích cách đọc…', '読み方を解析中…')} />
+  if (mode === 'furigana')
+    return (
+      <Section>
+        <Furigana reading={reading} />
+      </Section>
+    )
+  return (
+    <>
+      <Section>
+        <p lang="ja" className="text-[15px] leading-relaxed whitespace-pre-wrap">
+          {text}
+        </p>
+      </Section>
+      <KanaSection kana={reading.kana} />
     </>
   )
 }

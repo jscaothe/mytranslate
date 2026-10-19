@@ -25,6 +25,7 @@ export function QuickActionBar({
   style,
   className,
   bare = false,
+  japanese = null,
 }: {
   /** Buttons in display order, from Settings. */
   items: QuickActionItem[]
@@ -38,11 +39,14 @@ export function QuickActionBar({
   className?: string
   /** In its own window, Windows draws the border and rounded corners. */
   bare?: boolean
+  /** Whether the selection has Japanese, for the reading button; `null` when not known. */
+  japanese?: boolean | null
 }) {
   const t = useT()
   const meta = quickActionMeta(useLang())
   const { hotkeys } = useStore().settings
-  const shortcut: Record<QuickActionId, string> = { translate: hotkeys.auto, review: hotkeys.review }
+  // The reading has no hotkey of its own.
+  const shortcut: Record<QuickActionId, string | null> = { translate: hotkeys.auto, review: hotkeys.review, reading: null }
   const iconOnly = display === 'iconOnly'
 
   // The button the pointer rests on. Once a hint shows, moving to the next button switches it at once.
@@ -75,7 +79,7 @@ export function QuickActionBar({
         // (4 + 24 + 4) is a whole number of pixels at 100/125/150/175 % scaling, so top and bottom stay even.
         className="flex h-6 items-center gap-0.5"
       >
-        {visibleQuickActions(items).map((id) => {
+        {visibleQuickActions(items, japanese).map((id) => {
           const action = meta[id]
           const Icon = action.icon
           return (
@@ -135,11 +139,11 @@ export function QuickActionBar({
           </p>
         </div>
       )}
-      {hinted && !menuOpen && (
+      {hinted && !menuOpen && (iconOnly || shortcut[hinted]) && (
         <div role="tooltip" className="mt-1 flex items-center gap-1 border-t border-line px-1 pt-1.5 pb-0.5 text-[11.5px] whitespace-nowrap text-ink-2">
           {iconOnly && <span className="mr-0.5 font-semibold text-ink">{meta[hinted].label}</span>}
-          <span className="mr-0.5">{t('Phím tắt', 'ショートカット')}</span>
-          {shortcut[hinted].split('+').map((k) => (
+          {shortcut[hinted] && <span className="mr-0.5">{t('Phím tắt', 'ショートカット')}</span>}
+          {shortcut[hinted]?.split('+').map((k) => (
             <Kbd key={k}>{k}</Kbd>
           ))}
         </div>
@@ -162,14 +166,14 @@ function BarButton({
   icon: ReactNode
   primary?: boolean
   iconOnly?: boolean
-  shortcut: string
+  shortcut: string | null
   children: string
 }) {
   return (
     <button
       type="button"
       aria-label={iconOnly ? children : undefined}
-      aria-keyshortcuts={shortcut.replace('Ctrl', 'Control')}
+      aria-keyshortcuts={shortcut?.replace('Ctrl', 'Control')}
       onMouseEnter={onHover}
       onClick={onClick}
       className={cx(

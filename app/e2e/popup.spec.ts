@@ -555,3 +555,32 @@ test('English in the chat is read in Vietnamese, with Japanese offered instead',
   await expect(targets.getByRole('radio')).toHaveText(['Tiếng Việt', 'Tiếng Nhật'])
   await expect(popup(page).locator('[data-language-bar]')).toContainText('Tiếng Anh')
 })
+
+test('the toolbar offers the reading of selected Japanese: furigana or hiragana, then Enter translates', async ({ page }) => {
+  await dragOverFirstMessage(page)
+  const bar = page.locator('[data-quick-bar]')
+  await bar.getByRole('button', { name: 'Cách đọc' }).click()
+
+  // Only the reading: no AI, no language bar.
+  await expect(popup(page).locator('[data-reading-bar]')).toBeVisible()
+  await expect(popup(page).locator('[data-language-bar]')).toHaveCount(0)
+  const furigana = popup(page).locator('[data-reading=furigana]')
+  await expect(furigana.locator('ruby').filter({ hasText: '画面' }).locator('rt')).toHaveText('がめん')
+  await popup(page).press('Control+h')
+  await expect(furigana).toHaveCount(0)
+  await expect(popup(page).locator('[data-reading=kana]')).toContainText('がめん')
+
+  await popup(page).press('Enter')
+  await expect(popup(page).locator('[data-language-bar]')).toBeVisible()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
+  await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
+})
+
+test('the reading button is only offered for a selection with Japanese', async ({ page }) => {
+  await composer(page).fill('Em đã sửa xong rồi ạ')
+  await composer(page).focus()
+  await page.keyboard.press('Control+a')
+  const bar = page.locator('[data-quick-bar]')
+  await expect(bar.getByRole('button', { name: /Dịch/ })).toBeVisible()
+  await expect(bar.getByRole('button', { name: 'Cách đọc' })).toHaveCount(0)
+})

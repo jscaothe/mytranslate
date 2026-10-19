@@ -95,8 +95,11 @@ export function langName(lang: Lang, of: TextLang): string {
   return pick(lang, ...names[of])
 }
 
-/** What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button) or check what they wrote. */
-export type Action = 'auto' | 'review'
+/**
+ * What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button), check what they wrote, or see how
+ * to read Japanese (the toolbar's reading button).
+ */
+export type Action = 'auto' | 'review' | 'reading'
 
 export function hasJapanese(text: string): boolean {
   return /[぀-ヿ一-鿿]/.test(text)
@@ -137,6 +140,8 @@ export function isEnglish(text: string): boolean {
  * everything else is shown. English being written goes to the other side; English being read comes to the user.
  */
 export function route(action: Action, text: string, lang: Lang, from: 'chat' | 'composer'): { direction: Direction; origin: 'chat' | 'composer' } {
+  // Reading Japanese is reading it, wherever it was selected; without any, the reading button translates.
+  if (action === 'reading' && hasJapanese(text)) return { direction: 'ja_vi', origin: 'chat' }
   const japanese = isMostlyJapanese(text)
   const direction: Direction =
     action === 'review'

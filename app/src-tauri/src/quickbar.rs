@@ -49,6 +49,17 @@ pub struct Shown {
     name: String,
 }
 
+/// What the toolbar's page is told when it is shown.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShownEvent {
+    exe: String,
+    name: String,
+    /// Whether the selection has Japanese in it, for the reading button; `None` when UI Automation could not read
+    /// it (the button then shows, as the text may well be Japanese).
+    japanese: Option<bool>,
+}
+
 /// The apps open on the desktop now, for "Thêm ứng dụng đang chạy" in Settings, by name. MyTranslate itself is
 /// left out: the toolbar never shows in it.
 #[tauri::command]
@@ -219,24 +230,24 @@ pub fn allowed_in_foreground(app: &AppHandle) -> bool {
 
 /// A selection that started at height `start_y` just ended at (x, y): show the toolbar there if the settings
 /// allow it in this app.
-pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32) {
+pub fn offer(app: &AppHandle, x: i32, y: i32, start_y: i32, japanese: Option<bool>) {
     let (x, y, start_y) = (f64::from(x), f64::from(y), f64::from(start_y));
     let span = popup::Span {
         x,
         top: y.min(start_y),
         bottom: y.max(start_y),
     };
-    show(app, x, y, start_y, span);
+    show(app, x, y, start_y, span, japanese);
 }
 
 /// Text selected with the keyboard (Ctrl+A) at `span`: show the toolbar above its first line, clear of the text.
-pub fn offer_span(app: &AppHandle, span: popup::Span) {
-    show(app, span.x, span.top, span.top, span);
+pub fn offer_span(app: &AppHandle, span: popup::Span, japanese: Option<bool>) {
+    show(app, span.x, span.top, span.top, span, japanese);
 }
 
 /// Shows the toolbar next to (x, y), on the side away from a selection that started at height `start_y`, if the
 /// settings allow it in the app in front. Physical pixels.
-fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
+fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span, japanese: Option<bool>) {
     let ctx = context::foreground();
     let own = own_exe();
     if ctx.exe.is_empty() || ctx.exe.eq_ignore_ascii_case(&own) || !allowed(&app.state::<SettingsStore>(), &ctx.exe) {
@@ -280,7 +291,14 @@ fn show(app: &AppHandle, x: f64, y: f64, start_y: f64, span: popup::Span) {
         }
     }
     // The page starts a fresh bar, and its close menu names the app.
-    let _ = window.emit("quickbar:shown", shown);
+    let _ = window.emit(
+        "quickbar:shown",
+        ShownEvent {
+            exe: shown.exe,
+            name: shown.name,
+            japanese,
+        },
+    );
     log::info!(
         "quickbar shown in {exe}",
         exe = state
@@ -353,11 +371,15 @@ pub fn quickbar_action(app: AppHandle, action: String) {
     };
     hide(&app);
     let Some(target) = target else { return };
-    crate::ai::prewarm(&app);
     let popup_action = match action.as_str() {
         "review" => popup::Action::Review,
+        "reading" => popup::Action::Reading,
         _ => popup::Action::Auto,
     };
+    // Showing the reading needs no AI.
+    if popup_action != popup::Action::Reading {
+        crate::ai::prewarm(&app);
+    }
     popup::run(&app, popup_action, Some(target), span);
 }
 

@@ -237,7 +237,13 @@ mod tests {
         let text = "・ログインの不具合を修正いたしました。\n\n  田中様、ご確認ください 🙏 (v2.1)";
         let parts: String = read(text).parts.iter().map(|p| p.text.as_str()).collect();
         assert_eq!(parts, text);
-        assert_eq!(read(""), Reading { parts: vec![], kana: String::new() });
+        assert_eq!(
+            read(""),
+            Reading {
+                parts: vec![],
+                kana: String::new()
+            }
+        );
     }
 
     #[test]
