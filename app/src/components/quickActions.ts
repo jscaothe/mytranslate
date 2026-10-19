@@ -1,12 +1,14 @@
-import { Languages, SpellCheck, type LucideIcon } from 'lucide-react'
+import { Languages, SpellCheck } from 'lucide-react'
+import type { ComponentType } from 'react'
 import { pick, type Lang } from '../lib/i18n'
 import type { QuickActionId, QuickActionItem } from '../store'
+import { KanaIcon } from './KanaIcon'
 
 export interface QuickActionMeta {
   /** Name in Settings. */
   name: string
   description: string
-  icon: LucideIcon
+  icon: ComponentType<{ size?: number; strokeWidth?: number; className?: string }>
   /** Button text on the toolbar. */
   label: string
   primary?: boolean
@@ -35,10 +37,22 @@ export function quickActionMeta(lang: Lang): Record<QuickActionId, QuickActionMe
       icon: SpellCheck,
       label: t('Kiểm tra', 'チェック'),
     },
+    reading: {
+      name: t('Cách đọc', '読み方'),
+      description: t(
+        'Chỉ hiện khi đoạn bôi đen có tiếng Nhật: xem cách đọc bằng furigana hoặc hiragana, không cần dịch.',
+        '選択した文に日本語があるときだけ表示します。ふりがな・ひらがなで読み方を表示します（翻訳はしません）。',
+      ),
+      icon: KanaIcon,
+      label: t('Cách đọc', '読み方'),
+    },
   }
 }
 
-/** Buttons to draw on the toolbar, in the user's order. */
-export function visibleQuickActions(items: QuickActionItem[]): QuickActionId[] {
-  return items.filter((i) => i.enabled).map((i) => i.id)
+/**
+ * Buttons to draw on the toolbar, in the user's order. The reading button is left out when the selection is known
+ * to have no Japanese (`japanese` false); when it is not known, it shows.
+ */
+export function visibleQuickActions(items: QuickActionItem[], japanese: boolean | null = null): QuickActionId[] {
+  return items.filter((i) => i.enabled && (i.id !== 'reading' || japanese !== false)).map((i) => i.id)
 }

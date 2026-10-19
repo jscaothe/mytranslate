@@ -55,7 +55,8 @@ Trong popup:
 - Kéo thanh tiêu đề để di chuyển, kéo mép hoặc góc dưới để đổi kích thước; popup nhớ vị trí và kích thước cho đến khi tắt app.
 - `Esc` không đóng popup, để bộ gõ tiếng Nhật không làm mất câu đang gõ: bấm nút đóng hoặc bấm ra ngoài popup.
 
-Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với hai nút: Dịch (app tự nhận ra tiếng Nhật hay tiếng Việt) và Kiểm tra.
+Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với các nút: Dịch (app tự nhận ra tiếng Nhật hay tiếng Việt) và Kiểm tra.
+Khi đoạn bôi đen có tiếng Nhật, thanh có thêm nút **Cách đọc**: popup hiện chính đoạn đó kèm furigana hoặc hiragana (`Ctrl+H` để đổi), không gọi AI; `Enter` để dịch tiếp.
 Bật/tắt và chọn ứng dụng ở Cài đặt > Thao tác nhanh khi bôi đen.
 
 App **không bao giờ tự gửi tin**: bạn vẫn tự nhấn gửi trong Teams/Slack.

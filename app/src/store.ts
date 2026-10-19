@@ -69,7 +69,7 @@ export type ReadingMode = 'off' | 'furigana' | 'kana'
 export const READING_MODES: ReadingMode[] = ['off', 'furigana', 'kana']
 
 
-export type QuickActionId = 'translate' | 'review'
+export type QuickActionId = 'translate' | 'review' | 'reading'
 
 export interface QuickActionItem {
   id: QuickActionId
@@ -79,6 +79,7 @@ export interface QuickActionItem {
 export const DEFAULT_QUICK_ACTION_ITEMS: QuickActionItem[] = [
   { id: 'translate', enabled: true },
   { id: 'review', enabled: true },
+  { id: 'reading', enabled: true },
 ]
 
 /**

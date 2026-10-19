@@ -39,6 +39,8 @@ export interface PopupRequest {
   keigo?: Keigo | null
   /** The language the user last picked in this chat's language bar for text in this language; `null` when never. */
   target?: TextLang | null
+  /** Only show how to read the Japanese text (the toolbar's reading button); it is translated when asked. */
+  readingOnly?: boolean
   window?: WindowContext
   /** Point in the host container the popup attaches to. */
   anchor: { x: number; y: number }

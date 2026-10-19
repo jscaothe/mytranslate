@@ -23,6 +23,7 @@ interface OpenPayload {
   keigo: Keigo | null
   /** The language last picked in this conversation's language bar for text in this language. */
   target: TextLang | null
+  readingOnly: boolean
 }
 
 interface GeometryInfo {
@@ -43,6 +44,7 @@ const toRequest = (p: OpenPayload): PopupRequest => ({
   app: p.app,
   keigo: p.keigo,
   target: p.target,
+  readingOnly: p.readingOnly,
   window: {
     conversation: p.conversation,
     workspace: p.workspace,

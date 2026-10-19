@@ -5,7 +5,7 @@ import { Hotkey, Segmented } from '../components/ui'
 import { cx } from '../components/styles'
 import { mockData } from '../data/mock'
 import { comboFromEvent } from '../lib/hotkeys'
-import { locale, route, sourceLang, useLang, useT, type Action, type Lang } from '../lib/i18n'
+import { hasJapanese, locale, route, sourceLang, useLang, useT, type Action, type Lang } from '../lib/i18n'
 import { hideQuickBarIn, quickBarShowsIn, useStore, type AppRef, type QuickActionId } from '../store'
 import type { ChatApp as ChatAppKind, ChatChannel, Keigo, TextLang } from '../types'
 import { Popup } from '../windows/popup/Popup'
@@ -54,7 +54,7 @@ export function Playground() {
   }
   const [size, setSize] = useState({ width: 0, height: 0 })
   const [guideOpen, setGuideOpen] = useState(true)
-  const [quick, setQuick] = useState<{ x: number; y: number; startY: number } | null>(null)
+  const [quick, setQuick] = useState<{ x: number; y: number; startY: number; japanese: boolean } | null>(null)
   /** Where the current mouse selection started, to keep the toolbar off the selected lines. */
   const downY = useRef(0)
 
@@ -144,6 +144,7 @@ export function Playground() {
         app,
         keigo: keigoByChat.current.get(chatKey(app, conversation)) ?? null,
         target: targetByChat.current.get(`${chatKey(app, conversation)}|${sourceLang(direction)}`) ?? null,
+        readingOnly: action === 'reading' && hasJapanese(got.text),
         anchor: got.anchor,
         placement: got.placement,
       })
@@ -168,13 +169,13 @@ export function Playground() {
         setQuick(null)
         return
       }
-      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current })
+      setQuick({ x: mouse.current.x, y: mouse.current.y, startY: downY.current, japanese: hasJapanese(got.text) })
     }, 0)
   }
 
   const runQuick = (action: QuickActionId) => {
     if (action === 'translate') return trigger('auto')
-    trigger('review')
+    trigger(action)
   }
 
   // Global shortcuts (in the real app these are OS-wide).
@@ -192,7 +193,7 @@ export function Playground() {
           const box = root.getBoundingClientRect()
           const r = el.getBoundingClientRect()
           const y = r.top - box.top
-          setQuick({ x: r.left - box.left + 12, y, startY: y })
+          setQuick({ x: r.left - box.left + 12, y, startY: y, japanese: hasJapanese(el.value) })
         }, 0)
       }
       const combo = comboFromEvent(e)
@@ -419,6 +420,7 @@ export function Playground() {
         <QuickActionBar
           items={settings.quickActions.items}
           display={settings.quickActions.display}
+          japanese={quick.japanese}
           onAction={runQuick}
           onDismiss={() => setQuick(null)}
           hideIn={{

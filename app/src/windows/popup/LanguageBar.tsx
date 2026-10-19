@@ -43,6 +43,37 @@ export function LanguageBar({
   )
 }
 
+/** Over the reading of selected Japanese (the toolbar's reading button): furigana or hiragana, Ctrl+H switches. */
+export function ReadingBar({
+  mode,
+  onMode,
+}: {
+  mode: Exclude<ReadingMode, 'off'>
+  onMode: (mode: Exclude<ReadingMode, 'off'>) => void
+}) {
+  const t = useT()
+  const lang = useLang()
+  return (
+    <div data-reading-bar className="flex h-9 shrink-0 items-center gap-2 border-b border-line pr-1.5 pl-3">
+      <span className="shrink-0 text-[12px] text-ink-2">
+        {t('Cách đọc', '読み方')} · {langName(lang, 'ja')}
+      </span>
+      <div className="min-w-0 flex-1" />
+      <div title={t('Đổi cách đọc (Ctrl+H)', '読み方を切り替え (Ctrl+H)')} className="shrink-0">
+        <Segmented
+          label={t('Cách đọc', '読み方')}
+          value={mode}
+          options={[
+            { value: 'furigana', label: t('Furigana', 'ふりがな') },
+            { value: 'kana', label: t('Hiragana', 'ひらがな') },
+          ]}
+          onChange={onMode}
+        />
+      </div>
+    </div>
+  )
+}
+
 function ReadingMenu({ mode, onChange }: { mode: ReadingMode; onChange: (mode: ReadingMode) => void }) {
   const t = useT()
   const [open, setOpen] = useState(false)

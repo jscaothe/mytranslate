@@ -48,6 +48,8 @@ pub enum Action {
     Auto,
     /// Check Japanese the user wrote, usually in the message box (Ctrl+Alt+C).
     Review,
+    /// Show how to read selected Japanese, in furigana or hiragana, without translating (the toolbar's button).
+    Reading,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -107,6 +109,8 @@ pub struct OpenPayload {
     /// The language the user last picked in this conversation's language bar for text in this language: the
     /// popup translates into it instead of the usual way.
     pub target: Option<TextLang>,
+    /// Only show how to read the Japanese text; the popup translates it when asked.
+    pub reading_only: bool,
 }
 
 /// Threads untouched for this long are not considered.
@@ -348,6 +352,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
             .zip(direction.source())
             .and_then(|(c, source)| c.targets.get(&source).copied());
 
+        let reading_only = action == Action::Reading && has_japanese(&text);
         let state = app.state::<PopupState>();
         let id = {
             let mut inner = state.inner.lock().unwrap();
@@ -369,6 +374,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
             thread_id,
             keigo,
             target,
+            reading_only,
         };
         if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");
@@ -531,11 +537,14 @@ pub fn route(action: Action, text: &str, lang: Lang, in_message_box: Option<bool
         Lang::Ja => Direction::EnJa,
     };
     let direction = match action {
-        Action::Auto if is_mostly_japanese(text) => Direction::JaVi,
+        // Reading Japanese is reading it, wherever it was selected.
+        Action::Reading if has_japanese(text) => return (Direction::JaVi, Origin::Chat),
+        Action::Auto | Action::Reading if is_mostly_japanese(text) => Direction::JaVi,
         // English the user is writing goes to the other side; English they read comes into their language.
-        Action::Auto if is_english(text) && in_message_box != Some(false) => english(lang.other()),
-        Action::Auto if is_english(text) => english(lang),
-        Action::Auto => Direction::ViJa,
+        // Without any Japanese the reading button translates, like the translate button.
+        Action::Auto | Action::Reading if is_english(text) && in_message_box != Some(false) => english(lang.other()),
+        Action::Auto | Action::Reading if is_english(text) => english(lang),
+        Action::Auto | Action::Reading => Direction::ViJa,
         // A review checks the text in its own language, whichever the user's is.
         Action::Review if is_mostly_japanese(text) => Direction::ReviewJa,
         Action::Review => Direction::ReviewVi,
@@ -671,6 +680,11 @@ fn is_vietnamese_letter(c: char) -> bool {
     !c.is_ascii() && matches!(c, '\u{00C0}'..='\u{01B0}' | '\u{1EA0}'..='\u{1EF9}')
 }
 
+/// Any kana or kanji at all: something to read.
+pub fn has_japanese(text: &str) -> bool {
+    text.chars().any(is_japanese_char)
+}
+
 fn is_japanese_char(c: char) -> bool {
     matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}')
 }
@@ -771,6 +785,19 @@ mod tests {
             "Em đã deploy rồi, nhờ anh kiểm tra màn hình 仕訳 giúp em nhé"
         ));
         assert!(!is_mostly_japanese("Please check the deploy result today"));
+    }
+
+    #[test]
+    fn the_reading_button_reads_japanese_anywhere_and_translates_anything_else() {
+        let mixed = "Em sẽ sửa màn hình 仕訳 nhé";
+        assert_eq!(
+            route(Action::Reading, mixed, Lang::Vi, Some(true)),
+            (Direction::JaVi, Origin::Chat)
+        );
+        assert_eq!(
+            route(Action::Reading, "Em đã sửa xong rồi ạ.", Lang::Vi, Some(true)),
+            (Direction::ViJa, Origin::Composer)
+        );
     }
 
     #[test]
