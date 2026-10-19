@@ -1,7 +1,13 @@
 export type ChatApp = 'slack' | 'teams'
 
+/** A language a text can be in: the user's own is Vietnamese or Japanese, and English is translated on request. */
+export type TextLang = 'vi' | 'ja' | 'en'
+
+/** A translation from one language into another, such as `ja_vi` or `vi_en`. */
+export type TranslateDirection = 'ja_vi' | 'vi_ja' | 'ja_en' | 'vi_en' | 'en_vi' | 'en_ja'
+
 /** `review_ja` and `review_vi` check a sentence the user wrote, in its own language, instead of translating it. */
-export type Direction = 'ja_vi' | 'vi_ja' | 'review_ja' | 'review_vi'
+export type Direction = TranslateDirection | 'review_ja' | 'review_vi'
 
 export type Keigo = 'casual' | 'polite' | 'formal'
 

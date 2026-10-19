@@ -45,9 +45,15 @@ Trang https://mytranslate.pages.dev/#install có hoạt họa từng bước bê
 
 Trong popup:
 
-- `Tab` đổi mức kính ngữ (Thân mật / Lịch sự / Trang trọng); `Esc` đóng; `Ctrl+P` ghim popup.
+- `Enter` dùng kết quả: sao chép bản dịch, hoặc thay vào ô chat khi bạn đang viết.
+  Với tin của khách, `Ctrl+Enter` để gõ câu trả lời tiếng Việt.
+- `Tab` đổi mức kính ngữ (Thân mật / Lịch sự / Trang trọng); `Ctrl+P` ghim popup; `Ctrl+M` đổi AI.
+- Thanh ngôn ngữ dưới tiêu đề cho dịch sang ngôn ngữ khác: Tiếng Việt, Tiếng Nhật hoặc Tiếng Anh (trừ ngôn ngữ của đoạn đang dịch); `Ctrl+L` đổi nhanh.
+  App nhớ lựa chọn theo từng cuộc trò chuyện.
+- Khi dịch sang tiếng Nhật, menu **Cách đọc** hiện furigana trên chữ Kanji hoặc cả câu bằng hiragana; `Ctrl+H` đổi nhanh.
+  Cách đọc do app tự phân tích trên máy, không tốn lượt dùng AI; tên riêng hiếm có thể bị đọc sai.
 - Kéo thanh tiêu đề để di chuyển, kéo mép hoặc góc dưới để đổi kích thước; popup nhớ vị trí và kích thước cho đến khi tắt app.
-- Với tin của khách: `G` để Claude gợi ý 3 câu trả lời tiếng Nhật (bấm một câu để sao chép), `Enter` để tự gõ câu trả lời tiếng Việt.
+- `Esc` không đóng popup, để bộ gõ tiếng Nhật không làm mất câu đang gõ: bấm nút đóng hoặc bấm ra ngoài popup.
 
 Dùng chuột: bôi đen chữ trong Teams/Slack, một thanh nhỏ hiện cạnh con trỏ với hai nút: Dịch (app tự nhận ra tiếng Nhật hay tiếng Việt) và Kiểm tra.
 Bật/tắt và chọn ứng dụng ở Cài đặt > Thao tác nhanh khi bôi đen.

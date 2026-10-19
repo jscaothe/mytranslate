@@ -36,6 +36,14 @@ impl Lang {
         }
     }
 
+    /// The other side's language: the one the user reads from and writes to.
+    pub fn other(self) -> Self {
+        match self {
+            Self::Vi => Self::Ja,
+            Self::Ja => Self::Vi,
+        }
+    }
+
     /// Japanese when Windows is set to Japanese, Vietnamese otherwise (the app's first users are Vietnamese).
     pub fn system() -> Self {
         #[cfg(windows)]
@@ -47,6 +55,41 @@ impl Lang {
             }
         }
         Self::Vi
+    }
+}
+
+/// A language a text can be in. The user's own is Vietnamese or Japanese; English is translated into and out of
+/// on request (the popup's language bar) and when a message is in English.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextLang {
+    Vi,
+    Ja,
+    En,
+}
+
+impl TextLang {
+    pub const ALL: [TextLang; 3] = [TextLang::Vi, TextLang::Ja, TextLang::En];
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Vi => "vi",
+            Self::Ja => "ja",
+            Self::En => "en",
+        }
+    }
+
+    pub fn parse(code: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|l| l.code() == code)
+    }
+}
+
+impl From<Lang> for TextLang {
+    fn from(lang: Lang) -> Self {
+        match lang {
+            Lang::Vi => Self::Vi,
+            Lang::Ja => Self::Ja,
+        }
     }
 }
 

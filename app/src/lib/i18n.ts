@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useStore } from '../store'
-import type { Direction } from '../types'
+import type { Direction, TextLang, TranslateDirection } from '../types'
 
 /**
  * The user's own language. A Vietnamese user reads the client's Japanese and writes Vietnamese; a Japanese
@@ -42,22 +42,58 @@ export function writeDirection(lang: Lang): 'ja_vi' | 'vi_ja' {
   return lang === 'ja' ? 'ja_vi' : 'vi_ja'
 }
 
+/**
+ * Reading what someone else wrote (into the user's language, or from the other side's into English), writing to
+ * them (from the user's language or from English), or checking what the user wrote.
+ */
 export function roleOf(direction: Direction, lang: Lang): Role {
-  if (direction === 'review_ja' || direction === 'review_vi') return 'review'
-  return direction === readDirection(lang) ? 'read' : 'write'
+  if (!isTranslation(direction)) return 'review'
+  const source = sourceLang(direction)
+  if (targetLang(direction) === lang || source === otherLang(lang)) return 'read'
+  return 'write'
+}
+
+export function isTranslation(direction: Direction): direction is TranslateDirection {
+  return direction !== 'review_ja' && direction !== 'review_vi'
 }
 
 /** The language a translation produces; a review stays in the language of the sentence. */
-export function targetLang(direction: Direction): Lang {
-  return direction === 'ja_vi' || direction === 'review_vi' ? 'vi' : 'ja'
+export function targetLang(direction: Direction): TextLang {
+  if (direction === 'review_ja') return 'ja'
+  if (direction === 'review_vi') return 'vi'
+  return direction.slice(3) as TextLang
 }
 
-export function sourceLang(direction: Direction): Lang {
-  return direction === 'vi_ja' || direction === 'review_vi' ? 'vi' : 'ja'
+export function sourceLang(direction: Direction): TextLang {
+  if (direction === 'review_ja') return 'ja'
+  if (direction === 'review_vi') return 'vi'
+  return direction.slice(0, 2) as TextLang
 }
+
+/** The translation from one language into another (two different ones). */
+export const translation = (from: TextLang, to: TextLang): TranslateDirection => `${from}_${to}` as TranslateDirection
+
+/** A translation written to the other side, in their language: it follows the user's keigo level. */
+export const writesToOtherSide = (direction: Direction, lang: Lang) =>
+  isTranslation(direction) && targetLang(direction) === otherLang(lang)
 
 /** The other side's language. */
 export const otherLang = (lang: Lang): Lang => (lang === 'ja' ? 'vi' : 'ja')
+
+export const TEXT_LANGS: TextLang[] = ['vi', 'ja', 'en']
+
+/** The languages a text in `source` can be translated into. */
+export const targetsFor = (source: TextLang) => TEXT_LANGS.filter((l) => l !== source)
+
+/** A language's name, in the user's language. */
+export function langName(lang: Lang, of: TextLang): string {
+  const names: Record<TextLang, [string, string]> = {
+    vi: ['Tiếng Việt', 'ベトナム語'],
+    ja: ['Tiếng Nhật', '日本語'],
+    en: ['Tiếng Anh', '英語'],
+  }
+  return pick(lang, ...names[of])
+}
 
 /** What the user asked for: translate (Ctrl+Alt+T, the toolbar's Translate button) or check what they wrote. */
 export type Action = 'auto' | 'review'
@@ -74,13 +110,44 @@ export function isMostlyJapanese(text: string): boolean {
 }
 
 /**
+ * Common English words that are not also Vietnamese written without diacritics ("do", "an", "to", "me") nor English
+ * that Vietnamese chats mix in ("check", "fix", "ok"), as `ENGLISH_WORDS` in popup.rs.
+ */
+const ENGLISH_WORDS = new Set(
+  ('the is are was were be been will would should could have has had this that these those with from for and of it ' +
+    'its you your we our they their he she i my please thanks thank what when where which who why how not if at by ' +
+    'about just also there here all any some let know need want today tomorrow yesterday sorry morning good great ' +
+    'does did but or into after before yet still already us them').split(' '),
+)
+
+/** Latin text without Vietnamese diacritics in which a third of the words are common English words, as `is_english`. */
+export function isEnglish(text: string): boolean {
+  if (/[぀-ヿ一-鿿À-ưẠ-ỹ]/.test(text)) return false
+  const words = text
+    .split(/[^A-Za-z']+/)
+    .map((w) => w.replace(/^'+|'+$/g, '').toLowerCase())
+    .filter((w) => /[a-z]/.test(w))
+  const common = words.filter((w) => ENGLISH_WORDS.has(w)).length
+  return common > 0 && common * 3 >= words.length
+}
+
+/**
  * Which way to translate and where the result goes, like `popup::route` in the real app: the text's language
  * decides the way, and a check stays in that language; only what the user writes in the message box is replaced,
- * everything else is shown.
+ * everything else is shown. English being written goes to the other side; English being read comes to the user.
  */
 export function route(action: Action, text: string, lang: Lang, from: 'chat' | 'composer'): { direction: Direction; origin: 'chat' | 'composer' } {
   const japanese = isMostlyJapanese(text)
-  const direction: Direction = action === 'auto' ? (japanese ? 'ja_vi' : 'vi_ja') : japanese ? 'review_ja' : 'review_vi'
-  const writing = direction === writeDirection(lang) || action === 'review'
+  const direction: Direction =
+    action === 'review'
+      ? japanese
+        ? 'review_ja'
+        : 'review_vi'
+      : japanese
+        ? 'ja_vi'
+        : isEnglish(text)
+          ? translation('en', from === 'composer' ? otherLang(lang) : lang)
+          : 'vi_ja'
+  const writing = roleOf(direction, lang) !== 'read'
   return { direction, origin: writing && from === 'composer' ? 'composer' : 'chat' }
 }

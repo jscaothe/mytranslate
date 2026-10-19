@@ -25,16 +25,34 @@ import { Button, IconButton, Kbd, Segmented } from '../../components/ui'
 import { cx } from '../../components/styles'
 import { keigoLabel } from '../../data/mock'
 import { diffChars, diffWords } from '../../lib/diff'
-import { isMostlyJapanese, locale, otherLang, roleOf, targetLang, useLang, useT, writeDirection, type Lang, type Role } from '../../lib/i18n'
-import { useStore } from '../../store'
+import {
+  isMostlyJapanese,
+  isTranslation,
+  langName,
+  locale,
+  otherLang,
+  roleOf,
+  sourceLang,
+  targetLang,
+  targetsFor,
+  translation,
+  useLang,
+  useT,
+  writeDirection,
+  type Lang,
+  type Role,
+} from '../../lib/i18n'
+import { japaneseReading, type Reading } from '../../lib/reading'
+import { READING_MODES, useStore, type ReadingMode } from '../../store'
 import { AI_NAMES, AI_ORDER, choiceLabel, defaultChoice, modelField, useQuickChoices, type AiChoice, type QuickChoice } from '../../lib/ai'
 import { ACCOUNT_TOOL, loginAccount, type Account } from '../../lib/accounts'
 import { emit } from '@tauri-apps/api/event'
 import { useUpdates } from '../../lib/updates'
 import type { ErrorKind as ClaudeErrorKind, RateLimit, Sections } from '../../lib/claude'
-import type { Direction, Keigo, ReviewResult } from '../../types'
+import type { Direction, Keigo, ReviewResult, TextLang } from '../../types'
 import { issueLabel, parseIssues } from '../../lib/review'
 import { AiSwitcher } from './AiSwitcher'
+import { LanguageBar } from './LanguageBar'
 import type { PopupOrigin, PopupRequest, WindowedHost } from './types'
 import { dragsFrom, useFloatingFrame } from './useFloatingFrame'
 import { useTranslation } from './useTranslation'
@@ -69,11 +87,13 @@ export interface PopupProps {
   onPinnedChange?: (pinned: boolean) => void
   /** Remembers a keigo level picked here, so the chat's next popups start from it. */
   onKeigo?: (keigo: Keigo) => void
+  /** Remembers the language picked here for text in `source`, so the chat's next popups translate into it. */
+  onTarget?: (source: TextLang, target: TextLang) => void
   /** Set when the popup is its own OS window (Tauri) instead of a box drawn on a page. */
   windowed?: WindowedHost
 }
 
-export function Popup({ request, container, onClose, onApply, onPinnedChange, onKeigo, windowed }: PopupProps) {
+export function Popup({ request, container, onClose, onApply, onPinnedChange, onKeigo, onTarget, windowed }: PopupProps) {
   const store = useStore()
   const { scenario, settings, showToast } = store
   const lang = useLang()
@@ -81,7 +101,16 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   // A first-time tip about the keys, shown in the first real popup only (the guide's practice popup does not count).
   const [tipOpen, setTipOpen] = useState(() => !settings.popupTipShown && request.origin !== 'onboarding')
 
-  const { direction, source, origin } = request
+  const { source, origin } = request
+  // The language bar: a translation can go into either language the text is not in. It starts from the language
+  // last picked in this chat for text in this language, else the usual way.
+  const translates = isTranslation(request.direction)
+  const sourceLanguage = sourceLang(request.direction)
+  const [target, setTarget] = useState<TextLang>(() =>
+    request.target && request.target !== sourceLanguage ? request.target : targetLang(request.direction),
+  )
+  const direction: Direction = translates ? translation(sourceLanguage, target) : request.direction
+  const readingMode: ReadingMode = target === 'ja' ? settings.japaneseReading : 'off'
   // The level last picked in this chat, else the user's default. Only a level they picked (here or earlier in this
   // chat) overrides a person's note in the Glossary.
   const [keigo, setKeigo] = useState<Keigo>(request.keigo ?? settings.defaultKeigo)
@@ -103,6 +132,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   const [longConfirmed, setLongConfirmed] = useState(request.source.length <= LONG_TEXT_LIMIT)
   const rootRef = useRef<HTMLDivElement>(null)
   const headerRef = useRef<HTMLElement>(null)
+  const barRef = useRef<HTMLDivElement>(null)
   const bodyRef = useRef<HTMLDivElement>(null)
   const footerRef = useRef<HTMLElement>(null)
   const notice = request.window?.error ?? null
@@ -120,8 +150,11 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   })
 
   const isReview = direction === 'review_ja' || direction === 'review_vi'
-  // Reading the other side, writing to them, or checking what they wrote: the popup's actions follow from it.
-  const role = roleOf(direction, lang)
+  // Reading the other side, writing to them, or checking what they wrote: the popup's actions follow from it. It
+  // comes from the text, not from the language picked: a message read into English is still being read.
+  const role = roleOf(request.direction, lang)
+  // Only what is written into the other side's language has a keigo level.
+  const keigoShown = role === 'write' && target !== 'en'
   // Translations and reviews stream from Claude (canned answers in the browser prototype).
   const live = useTranslation({
     direction,
@@ -201,12 +234,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   // A real window follows its content's height (the Rust side ignores this once the user sets a height).
   useEffect(() => {
     if (!windowed) return
-    const measure = () => {
-      const h = (headerRef.current?.offsetHeight ?? 0) + (bodyRef.current?.offsetHeight ?? 0) + (footerRef.current?.offsetHeight ?? 0)
-      windowed.onFit(h)
-    }
+    const parts = [headerRef, barRef, bodyRef, footerRef]
+    const measure = () => windowed.onFit(parts.reduce((h, r) => h + (r.current?.offsetHeight ?? 0), 0))
     const ro = new ResizeObserver(measure)
-    for (const el of [headerRef.current, bodyRef.current, footerRef.current]) if (el) ro.observe(el)
+    for (const r of parts) if (r.current) ro.observe(r.current)
     measure()
     return () => ro.disconnect()
   }, [windowed])
@@ -220,6 +251,33 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   }, [pinned, onPinnedChange])
 
   const finalText = draft ?? resultText
+
+  // The reading of a finished Japanese translation (as edited), worked out on this PC.
+  const readingText = readingMode !== 'off' && resultReady && !isReview ? finalText : null
+  const [reading, setReading] = useState<{ text: string; value: Reading } | null>(null)
+  useEffect(() => {
+    if (readingText === null) return
+    let alive = true
+    japaneseReading(readingText)
+      .then((value) => alive && setReading({ text: readingText, value }))
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [readingText])
+  const shownReading = reading && reading.text === readingText ? reading.value : null
+
+  const changeTarget = (next: TextLang) => {
+    if (next === target) return
+    setTarget(next)
+    onTarget?.(sourceLanguage, next)
+  }
+  const cycleTarget = () => {
+    const options = targetsFor(sourceLanguage)
+    changeTarget(options[(options.indexOf(target) + 1) % options.length])
+  }
+  const changeReading = (mode: ReadingMode) => updateSettings({ japaneseReading: mode })
+  const cycleReading = () => changeReading(READING_MODES[(READING_MODES.indexOf(readingMode) + 1) % READING_MODES.length])
 
   const close = onClose
 
@@ -333,10 +391,10 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
   }, [replyRun, replyLive.phase])
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
-    const target = e.target as HTMLElement
-    const inReply = target.dataset.role === 'reply'
-    const inDraft = target.dataset.role === 'draft'
-    const typing = inReply || inDraft || target.tagName === 'INPUT'
+    const el = e.target as HTMLElement
+    const inReply = el.dataset.role === 'reply'
+    const inDraft = el.dataset.role === 'draft'
+    const typing = inReply || inDraft || el.tagName === 'INPUT'
 
     // No key closes the popup or leaves the reply (decided 2026-10-14): Esc also cancels a word in the Japanese
     // input method, and a reply being written was lost with it. The close button and a click elsewhere close it.
@@ -344,8 +402,8 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
       e.preventDefault()
       return
     }
-    // Keys inside the AI menu belong to it (Enter picks the focused entry).
-    if (target.closest('[role="menu"]')) return
+    // Keys inside a menu (the AI, the reading) belong to it (Enter picks the focused entry).
+    if (el.closest('[role="menu"]')) return
     if (e.ctrlKey && e.key.toLowerCase() === 'm') {
       e.preventDefault()
       setAiMenuOpen((o) => !o)
@@ -370,12 +428,23 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
       setPinned((p) => !p)
       return
     }
+    // The language bar's keys: L for the language, H for hiragana. Ctrl+R would reload the page.
+    if (e.ctrlKey && e.key.toLowerCase() === 'l' && translates && !notice) {
+      e.preventDefault()
+      cycleTarget()
+      return
+    }
+    if (e.ctrlKey && e.key.toLowerCase() === 'h' && target === 'ja' && translates && !notice) {
+      e.preventDefault()
+      cycleReading()
+      return
+    }
     if (e.ctrlKey && e.key.toLowerCase() === 'c' && !inDraft && !window.getSelection()?.toString()) {
       e.preventDefault()
       if (resultReady) void copy(finalText, t('Đã sao chép bản dịch', '翻訳をコピーしました'))
       return
     }
-    if (e.key === 'Tab' && role === 'write') {
+    if (e.key === 'Tab' && keigoShown) {
       e.preventDefault()
       cycleKeigo()
       return
@@ -494,6 +563,17 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
           <X size={15} />
         </IconButton>
       </header>
+      {translates && !notice && (
+        <div ref={barRef}>
+          <LanguageBar
+            source={sourceLanguage}
+            target={target}
+            onTarget={changeTarget}
+            reading={readingMode}
+            onReading={changeReading}
+          />
+        </div>
+      )}
 
       <div className="scroll-thin min-h-0 flex-1 overflow-y-auto">
         <div ref={bodyRef}>
@@ -548,8 +628,9 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
           <ReviewBody result={reviewResult} streaming={live.sections.suggestion} textLang={direction === 'review_ja' ? 'ja' : 'vi'} />
         ) : (
           <TranslationBody
-            direction={direction}
+            target={target}
             role={role}
+            reading={readingMode === 'off' ? null : shownReading && { mode: readingMode, value: shownReading }}
             stream={{
               text: live.sections.translation,
               started: live.sections.translation !== '',
@@ -679,7 +760,7 @@ export function Popup({ request, container, onClose, onApply, onPinnedChange, on
             role={role}
             origin={origin}
             ready={resultReady}
-            keigo={keigo}
+            keigo={keigoShown ? keigo : null}
             onKeigo={changeKeigo}
             onPrimary={primary}
             onKeep={keepOriginal}
@@ -861,15 +942,18 @@ function InkText({ text }: { text: string }) {
 }
 
 function TranslationBody({
-  direction,
+  target,
   role,
+  reading,
   stream,
   draft,
   onDraft,
   back,
 }: {
-  direction: 'ja_vi' | 'vi_ja'
+  target: TextLang
   role: Role
+  /** How to read a finished Japanese translation, once worked out: furigana over it, or a hiragana line under it. */
+  reading: { mode: Exclude<ReadingMode, 'off'>; value: Reading } | null
   stream: { text: string; started: boolean; done: boolean }
   draft: string | null
   onDraft: (v: string) => void
@@ -879,25 +963,47 @@ function TranslationBody({
   const t = useT()
   const userLang = useLang()
   if (!stream.started) return <PendingBlock label={t('Đang dịch…', '翻訳中…')} />
-  const lang = targetLang(direction)
+  const name = langName(userLang, target)
   return (
     <>
       <Section>
-        {role === 'write' && stream.done && draft !== null ? (
+        {stream.done && reading?.mode === 'furigana' ? (
+          // Furigana is only shown: the result is edited with the reading turned off (Ctrl+H).
+          <p data-reading="furigana" lang="ja" className="text-[15px] leading-[2.1] whitespace-pre-wrap [&_rt]:text-[10px] [&_rt]:text-ink-2 [&_ruby]:[ruby-align:center]">
+            {reading.value.parts.map((p, i) =>
+              p.ruby ? (
+                <ruby key={i}>
+                  {p.text}
+                  <rt>{p.ruby}</rt>
+                </ruby>
+              ) : (
+                <span key={i}>{p.text}</span>
+              ),
+            )}
+          </p>
+        ) : role === 'write' && stream.done && draft !== null ? (
           <textarea
             data-role="draft"
-            lang={lang}
+            lang={target}
             value={draft}
             onChange={(e) => onDraft(e.target.value)}
-            aria-label={t('Bản tiếng Nhật, có thể sửa', 'ベトナム語訳（編集できます）')}
+            aria-label={t(`Bản ${name.replace('Tiếng', 'tiếng')}, có thể sửa`, `${name}訳（編集できます）`)}
             className="-mx-1.5 -my-1 block w-[calc(100%+12px)] field-sizing-content resize-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-[15px] leading-relaxed text-ink hover:border-line focus:border-accent focus:bg-surface focus:outline-none"
           />
         ) : (
-          <p lang={lang} className={cx('text-[15px] leading-relaxed whitespace-pre-wrap', !stream.done && 'stream-caret')}>
+          <p lang={target} className={cx('text-[15px] leading-relaxed whitespace-pre-wrap', !stream.done && 'stream-caret')}>
             <InkText text={stream.text} />
           </p>
         )}
       </Section>
+      {stream.done && reading?.mode === 'kana' && (
+        <Section className="bg-subtle">
+          <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Cách đọc', '読み方')}</div>
+          <p data-reading="kana" lang="ja" className="text-[14px] leading-relaxed whitespace-pre-wrap text-ink">
+            {reading.value.kana}
+          </p>
+        </Section>
+      )}
       {stream.done && role === 'write' && back && (
         <Section className="bg-subtle">
           <div className="mb-1 text-[11.5px] font-semibold tracking-wide text-ink-3 uppercase">{t('Ý nghĩa khi đọc lại', '読み返したときの意味')}</div>
@@ -1290,7 +1396,8 @@ function FooterActions({
   role: Role
   origin: PopupOrigin
   ready: boolean
-  keigo: Keigo
+  /** `null` when the result has no keigo level (English). */
+  keigo: Keigo | null
   onKeigo: (k: Keigo) => void
   onPrimary: () => void
   onKeep: () => void
@@ -1318,7 +1425,7 @@ function FooterActions({
     return (
       // Wraps instead of overflowing when the popup is made narrow: the actions move under the keigo choice.
       <div className="flex flex-wrap items-center gap-x-2 gap-y-2">
-        <KeigoChoice keigo={keigo} onKeigo={onKeigo} />
+        {keigo && <KeigoChoice keigo={keigo} onKeigo={onKeigo} />}
         <div className="ml-auto flex items-center gap-2">
         {origin === 'composer' ? (
           <Button size="sm" variant="primary" disabled={!ready} onClick={onPrimary}>

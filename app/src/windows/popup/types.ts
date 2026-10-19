@@ -1,4 +1,4 @@
-import type { ChatApp, Direction, Keigo } from '../../types'
+import type { ChatApp, Direction, Keigo, TextLang } from '../../types'
 
 /** Where the text came from in the real app (filled by the Rust side from the foreground window). */
 export interface WindowContext {
@@ -37,6 +37,8 @@ export interface PopupRequest {
   app: ChatApp | 'other'
   /** The keigo level the user last picked in this chat; `null` (or absent) when they never did. */
   keigo?: Keigo | null
+  /** The language the user last picked in this chat's language bar for text in this language; `null` when never. */
+  target?: TextLang | null
   window?: WindowContext
   /** Point in the host container the popup attaches to. */
   anchor: { x: number; y: number }

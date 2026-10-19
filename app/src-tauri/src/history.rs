@@ -1,13 +1,14 @@
 //! Translation history on this PC (SQLite): conversations, threads and translated messages.
 //! It feeds thread detection and the context sent with each translation, and the Threads screen.
 
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Mutex;
 
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
-use crate::lang::Lang;
+use crate::lang::{Lang, TextLang};
 use crate::prompt::Keigo;
 use crate::review::{AdviceItem, Issue};
 
@@ -149,6 +150,11 @@ const MIGRATIONS: &[&str] = &[
         created_at INTEGER NOT NULL
     );
 "#,
+    r#"
+    -- Per conversation: the language picked in the popup's language bar for text in each language, as
+    -- 'ja=en,vi=ja' ('' = the usual Japanese-Vietnamese way).
+    ALTER TABLE conversations ADD COLUMN targets TEXT NOT NULL DEFAULT '';
+"#,
 ];
 
 /// Every table holding user data, children first (for wiping).
@@ -187,11 +193,15 @@ pub struct MessageInfo {
 }
 
 impl MessageInfo {
-    /// The Japanese side of the exchange.
+    /// The Japanese side of the exchange; the original when neither side is Japanese (to and from English).
     pub fn japanese(&self) -> &str {
-        match self.direction.as_str() {
-            "ja_vi" => &self.source,
-            _ => &self.result,
+        let d = self.direction.as_str();
+        if d.starts_with("ja_") {
+            &self.source
+        } else if d.ends_with("_ja") {
+            &self.result
+        } else {
+            &self.source
         }
     }
 }
@@ -202,6 +212,8 @@ pub struct ConversationInfo {
     pub name: String,
     /// The keigo level the user last picked here; `None` until they pick one.
     pub keigo: Option<Keigo>,
+    /// The language the user last picked in the popup's language bar here, for text in each language.
+    pub targets: HashMap<TextLang, TextLang>,
 }
 
 pub struct NewMessage<'a> {
@@ -413,13 +425,33 @@ impl History {
 
     pub fn conversation(&self, id: i64) -> rusqlite::Result<Option<ConversationInfo>> {
         let conn = self.conn.lock().unwrap();
-        conn.query_row("SELECT name, keigo FROM conversations WHERE id = ?1", [id], |r| {
-            Ok(ConversationInfo {
-                name: r.get(0)?,
-                keigo: Keigo::from_name(&r.get::<_, String>(1)?),
-            })
-        })
+        conn.query_row(
+            "SELECT name, keigo, targets FROM conversations WHERE id = ?1",
+            [id],
+            |r| {
+                Ok(ConversationInfo {
+                    name: r.get(0)?,
+                    keigo: Keigo::from_name(&r.get::<_, String>(1)?),
+                    targets: parse_targets(&r.get::<_, String>(2)?),
+                })
+            },
+        )
         .optional()
+    }
+
+    /// Remembers the language picked in the popup for text in `source`, for the conversation's next popups.
+    pub fn set_conversation_target(&self, id: i64, source: TextLang, target: TextLang) -> rusqlite::Result<()> {
+        let conn = self.conn.lock().unwrap();
+        let saved: Option<String> = conn
+            .query_row("SELECT targets FROM conversations WHERE id = ?1", [id], |r| r.get(0))
+            .optional()?;
+        let mut targets = parse_targets(&saved.unwrap_or_default());
+        targets.insert(source, target);
+        conn.execute(
+            "UPDATE conversations SET targets = ?2 WHERE id = ?1",
+            params![id, format_targets(&targets)],
+        )?;
+        Ok(())
     }
 
     /// Remembers the keigo level picked in a conversation, for its next translations.
@@ -810,6 +842,30 @@ impl GlossaryTerm {
     }
 }
 
+/// `ja=en,vi=ja` as stored in `conversations.targets`; unknown languages are skipped.
+fn parse_targets(saved: &str) -> HashMap<TextLang, TextLang> {
+    saved
+        .split(',')
+        .filter_map(|pair| {
+            let (source, target) = pair.split_once('=')?;
+            Some((TextLang::parse(source)?, TextLang::parse(target)?))
+        })
+        .collect()
+}
+
+fn format_targets(targets: &HashMap<TextLang, TextLang>) -> String {
+    // In a fixed order, so the same choices are always stored the same way.
+    TextLang::ALL
+        .iter()
+        .filter_map(|source| {
+            targets
+                .get(source)
+                .map(|target| format!("{}={}", source.code(), target.code()))
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
 fn thread_row(r: &rusqlite::Row) -> rusqlite::Result<ThreadInfo> {
     Ok(ThreadInfo {
         id: r.get(0)?,
@@ -854,6 +910,25 @@ mod tests {
         let c = h.upsert_conversation("teams", "", "CustomerX", "dev-qa").unwrap();
         assert_eq!(a, b);
         assert_ne!(a, c);
+    }
+
+    #[test]
+    fn a_conversation_keeps_the_language_picked_for_each_source() {
+        let h = History::in_memory();
+        let a = h.upsert_conversation("slack", "", "CustomerX", "dev-qa").unwrap();
+        assert!(h.conversation(a).unwrap().unwrap().targets.is_empty());
+        h.set_conversation_target(a, TextLang::Ja, TextLang::En).unwrap();
+        h.set_conversation_target(a, TextLang::Vi, TextLang::En).unwrap();
+        h.set_conversation_target(a, TextLang::Vi, TextLang::Ja).unwrap();
+        let targets = h.conversation(a).unwrap().unwrap().targets;
+        assert_eq!(targets.get(&TextLang::Ja), Some(&TextLang::En));
+        assert_eq!(targets.get(&TextLang::Vi), Some(&TextLang::Ja));
+        assert_eq!(targets.len(), 2);
+        assert_eq!(format_targets(&targets), "vi=ja,ja=en");
+        assert_eq!(
+            parse_targets("ja=en,xx=vi,vi"),
+            HashMap::from([(TextLang::Ja, TextLang::En)])
+        );
     }
 
     #[test]

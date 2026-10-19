@@ -14,6 +14,7 @@ mod popup;
 pub mod prompt;
 pub mod provider;
 mod quickbar;
+mod reading;
 mod review;
 mod selection_watch;
 mod settings;
@@ -35,7 +36,7 @@ use tauri_plugin_global_shortcut::ShortcutState;
 
 use history::{History, NewMessage, TermKind};
 use hotkeys::{HotkeyAction, HotkeyState};
-use lang::Lang;
+use lang::{Lang, TextLang};
 use prompt::{Direction, Keigo, Person, ThreadMessage, TranslateRequest};
 use provider::Router;
 use provider::claude_cli::{ClaudeCli, Timing, TranslateEvent};
@@ -257,10 +258,7 @@ async fn translate(
     mut request: TranslateRequest,
     on_event: Channel<TranslateEvent>,
 ) -> Result<(), String> {
-    if !matches!(
-        request.direction,
-        Direction::JaVi | Direction::ViJa | Direction::ReviewJa | Direction::ReviewVi
-    ) {
+    if request.direction == Direction::WritingAdvice {
         return Err("only translate and review are streamed".into());
     }
     add_context(&app, &mut request);
@@ -298,18 +296,11 @@ async fn translate(
 fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing) -> Option<TranslateEvent> {
     let conversation = req.conversation_id?;
     let history = app.state::<History>();
-    let (direction, result, back) = match req.direction {
-        Direction::JaVi => ("ja_vi", &s.translation, &s.back_translation),
-        Direction::ViJa => ("vi_ja", &s.translation, &s.back_translation),
-        Direction::ReviewJa => ("review_ja", &s.suggestion, &s.suggestion_vi),
-        Direction::ReviewVi => ("review_vi", &s.suggestion, &s.suggestion_vi),
+    let (result, back) = match req.direction {
+        Direction::ReviewJa | Direction::ReviewVi => (&s.suggestion, &s.suggestion_vi),
         Direction::WritingAdvice => return None,
+        _ => (&s.translation, &s.back_translation),
     };
-    // The user's own message goes from their language into the other side's; a review is always theirs.
-    let mine = !matches!(
-        (req.direction, req.user_lang),
-        (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja)
-    );
     if result.trim().is_empty() {
         return None;
     }
@@ -324,8 +315,8 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
         },
     };
     let message = NewMessage {
-        direction,
-        mine,
+        direction: req.direction.name(),
+        mine: req.direction.is_mine(req.user_lang),
         source: &req.text,
         result,
         back,
@@ -360,12 +351,13 @@ fn file_result(app: &AppHandle, req: &TranslateRequest, s: &Sections, t: &Timing
 /// A thread's title: the start of its first message, in the user's language.
 fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
     let own = match (req.direction, req.user_lang) {
-        (Direction::JaVi, Lang::Vi) | (Direction::ViJa, Lang::Ja) => s.translation.as_str(),
-        (Direction::ViJa, Lang::Vi) | (Direction::JaVi, Lang::Ja) => req.text.as_str(),
         (Direction::ReviewJa, Lang::Vi) => s.suggestion_vi.as_str(),
         (Direction::ReviewJa, Lang::Ja) | (Direction::ReviewVi, Lang::Vi) => s.suggestion.as_str(),
         (Direction::ReviewVi, Lang::Ja) => s.suggestion_vi.as_str(),
         (Direction::WritingAdvice, _) => "",
+        // A translation into the user's language, else what they wrote (in their language or in English).
+        (d, user) if d.languages().is_some_and(|(_, to)| to == user.into()) => s.translation.as_str(),
+        _ => req.text.as_str(),
     };
     // Japanese has no spaces between words: keep the first characters instead.
     let title = if req.user_lang == Lang::Ja {
@@ -378,6 +370,25 @@ fn fallback_title(req: &TranslateRequest, s: &Sections) -> String {
     } else {
         title
     }
+}
+
+/// A language picked in the popup's language bar for text in `source`, kept for the conversation's next popups.
+#[tauri::command]
+fn conversation_target_set(
+    history: State<'_, History>,
+    conversation_id: i64,
+    source: TextLang,
+    target: TextLang,
+) -> Result<(), String> {
+    history
+        .set_conversation_target(conversation_id, source, target)
+        .map_err(|e| e.to_string())
+}
+
+/// How to read a Japanese text, for the popup's furigana and hiragana.
+#[tauri::command]
+fn japanese_reading(text: String) -> reading::Reading {
+    reading::read(&text)
 }
 
 /// A keigo level picked in the popup, kept for the conversation's next translations.
@@ -891,6 +902,8 @@ pub fn run() {
             glossary_delete,
             glossary_team,
             conversation_keigo_set,
+            conversation_target_set,
+            japanese_reading,
             data_backup,
             data_restore,
             data_wipe,

@@ -112,11 +112,13 @@ fn main() {
     );
     for (case, event) in rows {
         let direction = match case.direction {
-            Direction::JaVi => format!("JA→VI ({:?})", case.keigo).to_lowercase(),
-            Direction::ViJa => format!("VI→JA ({:?})", case.keigo).to_lowercase(),
             Direction::ReviewJa => format!("Kiểm tra JA ({:?})", case.keigo).to_lowercase(),
             Direction::ReviewVi => "kiểm tra vi".into(),
             Direction::WritingAdvice => "lời khuyên".into(),
+            d => {
+                let (from, to) = d.languages().expect("a translation");
+                format!("{}→{} ({:?})", from.code(), to.code(), case.keigo).to_lowercase()
+            }
         };
         let direction = match case.user {
             Lang::Vi => direction,
