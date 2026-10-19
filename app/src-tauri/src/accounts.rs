@@ -323,7 +323,8 @@ pub async fn account_login(
         let _ = child.start_kill();
     }
     if let Ok(text) = tokio::time::timeout(Duration::from_secs(2), drain).await {
-        log::info!("{account:?} sign-in: {}", text.unwrap_or_default().trim());
+        // Only in a development build: the output may name the account.
+        log::debug!("{account:?} sign-in: {}", text.unwrap_or_default().trim());
     }
     if outcome.is_ok()
         && let Some(main) = app.get_webview_window("main")

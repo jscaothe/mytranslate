@@ -22,6 +22,9 @@ use windows::core::{PCWSTR, w};
 
 /// How long a target app gets to put the selection on the clipboard after Ctrl+C.
 const COPY_WAIT: Duration = Duration::from_millis(450);
+/// After the clipboard first changes, how long the text gets to appear on it: the owner empties it before writing
+/// (the change is seen then), and a clipboard manager or Windows' clipboard history may hold it open meanwhile.
+const TEXT_WAIT: Duration = Duration::from_millis(500);
 /// In a message box an empty selection is common; this short probe decides quickly whether to select all.
 /// Slack and Teams copy within 25-36 ms (measured), so 120 ms leaves a wide margin; a slower app only costs
 /// us a select-all.
@@ -60,9 +63,15 @@ pub fn copy_selection(select_all_if_empty: impl FnOnce() -> bool) -> Result<Opti
         COPY_WAIT
     };
     let mut text = copy_once(first_wait);
-    if text.as_deref().is_none_or(|t| t.trim().is_empty()) && select_all_if_empty {
+    let empty = |t: &Option<String>| t.as_deref().is_none_or(|t| t.trim().is_empty());
+    if empty(&text) && select_all_if_empty {
         send_chord(VK_CONTROL, VK_A);
         sleep(Duration::from_millis(30));
+        text = copy_once(COPY_WAIT);
+    } else if empty(&text) {
+        // A selection made beforehand (the mouse, the toolbar) is still there: a busy app may have missed the
+        // first Ctrl+C, so it gets a second one before the popup says nothing is selected.
+        log::info!("nothing copied, trying Ctrl+C again");
         text = copy_once(COPY_WAIT);
     }
 
@@ -109,6 +118,8 @@ pub fn copy_text(text: &str) -> Result<(), CaptureError> {
     set_text(text, false)
 }
 
+/// Presses Ctrl+C and returns the text the app in front puts on the clipboard: `None` when the clipboard does not
+/// change within `wait`, or no text shows up on it within `TEXT_WAIT` after it does.
 fn copy_once(wait: Duration) -> Option<String> {
     let before = unsafe { GetClipboardSequenceNumber() };
     send_chord(VK_CONTROL, VK_C);
@@ -116,19 +127,33 @@ fn copy_once(wait: Duration) -> Option<String> {
     while start.elapsed() < wait {
         sleep(Duration::from_millis(5));
         if unsafe { GetClipboardSequenceNumber() } != before {
-            // The owner may still be writing other formats; give it a moment.
-            sleep(Duration::from_millis(20));
-            let text = read_text();
+            let changed = start.elapsed();
+            let text = text_after_change();
             log::info!(
-                "clipboard changed {} ms after Ctrl+C, text: {} chars",
-                start.elapsed().as_millis(),
-                text.as_deref().map_or(0, |t| t.chars().count())
+                "clipboard changed {} ms after Ctrl+C, text: {} chars after {} ms",
+                changed.as_millis(),
+                text.as_deref().map_or(0, |t| t.chars().count()),
+                start.elapsed().as_millis()
             );
             return text;
         }
     }
     log::info!("clipboard did not change within {wait:?} after Ctrl+C");
     None
+}
+
+/// The text the owner is writing, once it is there. The change is seen when the owner empties the clipboard, before
+/// it writes; reading at that moment, or while another app holds the clipboard, finds nothing yet.
+fn text_after_change() -> Option<String> {
+    let start = Instant::now();
+    loop {
+        // The owner may still be writing other formats; give it a moment.
+        sleep(Duration::from_millis(20));
+        let text = read_text();
+        if text.as_deref().is_some_and(|t| !t.trim().is_empty()) || start.elapsed() >= TEXT_WAIT {
+            return text;
+        }
+    }
 }
 
 /// The hotkey's own Ctrl/Alt/Shift are usually still held when it fires. Give the user a moment to let go;
@@ -222,7 +247,10 @@ impl Drop for ClipboardGuard {
 }
 
 fn read_text() -> Option<String> {
-    let _guard = ClipboardGuard::open().ok()?;
+    let Ok(_guard) = ClipboardGuard::open() else {
+        log::info!("clipboard held by another app");
+        return None;
+    };
     unsafe {
         let handle = GetClipboardData(u32::from(CF_UNICODETEXT.0)).ok()?;
         let mem = HGLOBAL(handle.0);

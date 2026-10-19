@@ -46,6 +46,8 @@ use team_glossary::TeamGlossaryCache;
 
 /// Default model; SP1 showed Sonnet with low effort thinks far less often than Haiku.
 const DEFAULT_MODEL: &str = "sonnet";
+/// Size of the log file before it starts a new one; two older ones are kept.
+const LOG_MAX_BYTES: u128 = 2 * 1024 * 1024;
 /// Passed by the Windows autostart entry: start in the tray without showing the main window.
 const BACKGROUND_ARG: &str = "--background";
 /// The thread context sent with each translation: its latest messages that fit in this many characters. A cap on
@@ -813,14 +815,24 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .level_for("mytranslate_lib", log::LevelFilter::Debug)
-                        .build(),
-                )?;
-            }
+            // The installed app keeps a log too (%LOCALAPPDATA%\<identifier>\logs), so a problem the user runs into
+            // can be looked into afterwards. It records what happened and how long it took, never what was
+            // translated.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .level_for(
+                        "mytranslate_lib",
+                        if cfg!(debug_assertions) {
+                            log::LevelFilter::Debug
+                        } else {
+                            log::LevelFilter::Info
+                        },
+                    )
+                    .max_file_size(LOG_MAX_BYTES)
+                    .rotation_strategy(tauri_plugin_log::RotationStrategy::KeepSome(2))
+                    .build(),
+            )?;
             let store = SettingsStore::load(app.path().app_config_dir()?.join("settings.json"));
             // Until the guide is done (an AI connected), the app shows it on every start, even from autostart:
             // a new user would not know that it needs setting up.
