@@ -5,9 +5,9 @@ import { Hotkey, Segmented } from '../components/ui'
 import { cx } from '../components/styles'
 import { mockData } from '../data/mock'
 import { comboFromEvent } from '../lib/hotkeys'
-import { locale, route, useLang, useT, type Action, type Lang } from '../lib/i18n'
+import { locale, route, sourceLang, useLang, useT, type Action, type Lang } from '../lib/i18n'
 import { hideQuickBarIn, quickBarShowsIn, useStore, type AppRef, type QuickActionId } from '../store'
-import type { ChatApp as ChatAppKind, ChatChannel, Keigo } from '../types'
+import type { ChatApp as ChatAppKind, ChatChannel, Keigo, TextLang } from '../types'
 import { Popup } from '../windows/popup/Popup'
 import type { PopupRequest } from '../windows/popup/types'
 import { ChatApp } from './ChatApp'
@@ -66,6 +66,8 @@ export function Playground() {
   const requestSeq = useRef(0)
   /** The keigo level last picked in each chat, as the real app keeps it in its history. */
   const keigoByChat = useRef(new Map<string, Keigo>())
+  /** The language picked in each chat's language bar, by the language of the text (`${chat}|${source}`). */
+  const targetByChat = useRef(new Map<string, TextLang>())
 
   const channel = channels[app].find((c) => c.id === activeId[app]) ?? channels[app][0]
 
@@ -141,6 +143,7 @@ export function Playground() {
         conversation,
         app,
         keigo: keigoByChat.current.get(chatKey(app, conversation)) ?? null,
+        target: targetByChat.current.get(`${chatKey(app, conversation)}|${sourceLang(direction)}`) ?? null,
         anchor: got.anchor,
         placement: got.placement,
       })
@@ -443,6 +446,7 @@ export function Playground() {
           onApply={apply}
           onPinnedChange={setPinned}
           onKeigo={(k) => keigoByChat.current.set(chatKey(request.app, request.conversation), k)}
+          onTarget={(source, target) => targetByChat.current.set(`${chatKey(request.app, request.conversation)}|${source}`, target)}
         />
       )}
     </div>

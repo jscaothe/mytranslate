@@ -59,7 +59,15 @@ export interface Settings {
   trayNoticeShown: boolean
   /** The one-time tip in the first translation popup was shown. */
   popupTipShown: boolean
+  /** How the popup shows the reading of a Japanese translation: not at all, furigana over kanji, or in hiragana. */
+  japaneseReading: ReadingMode
 }
+
+export type ReadingMode = 'off' | 'furigana' | 'kana'
+
+/** In the order Ctrl+H goes through them. */
+export const READING_MODES: ReadingMode[] = ['off', 'furigana', 'kana']
+
 
 export type QuickActionId = 'translate' | 'review'
 

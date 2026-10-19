@@ -1,7 +1,7 @@
 // Canned responses that stand in for Claude. No real translation happens in the prototype.
 import { diffChars } from './diff'
-import type { Lang } from './i18n'
-import type { IssueKind, Keigo, ReviewResult, TranslationResult } from '../types'
+import { pick, roleOf, sourceLang, targetLang, type Lang } from './i18n'
+import type { IssueKind, Keigo, ReviewResult, TranslateDirection, TranslationResult } from '../types'
 
 export function isJapanese(text: string): boolean {
   return /[぀-ヿ一-鿿]/.test(text)
@@ -182,8 +182,34 @@ const jaToViWriteFallback: JaViEntry['out'] = {
   formal: { vi: 'Anh đã hiểu. Anh sẽ kiểm tra và liên lạc lại với em.', ja: '承知しました。確認のうえ、改めて連絡します。' },
 }
 
-export function translate(text: string, direction: 'ja_vi' | 'vi_ja', keigo: Keigo, lang: Lang = 'vi'): TranslationResult {
+/** The Japanese samples in English, for reading them in English from the language bar. */
+const jaToEn: Record<string, string> = {
+  'ログイン画面でエラーが出ています。先ほどの修正は反映済みでしょうか？':
+    'The login screen is showing an error. Has the fix from earlier been applied?',
+  '確認しました。問題なく動作しています。ありがとうございます。': "I've checked it. Everything is working fine. Thank you.",
+  'おはようございます。本日もよろしくお願いいたします。': "Good morning. I look forward to working with you today.",
+}
+
+/** To and from English: a few samples, otherwise a stand-in that says what it stands for. */
+function translateEnglish(clean: string, direction: TranslateDirection, lang: Lang): TranslationResult {
+  const short = `${clean.slice(0, 40)}${clean.length > 40 ? '…' : ''}`
+  const to = targetLang(direction)
+  const translation =
+    to === 'en'
+      ? (jaToEn[clean] ?? `(Mock translation) The English of: "${short}"`)
+      : to === 'ja'
+        ? `（模擬翻訳）「${short}」の日本語訳`
+        : `(Bản dịch mô phỏng) Nội dung tiếng Việt của: "${short}"`
+  // What the user sends is read back in their language.
+  if (roleOf(direction, lang) !== 'write') return { translation, notes: [] }
+  const back =
+    sourceLang(direction) === lang ? clean : pick(lang, `(Ý nghĩa mô phỏng) "${short}"`, `（意味の模擬）「${short}」`)
+  return { translation, backTranslation: back, notes: [] }
+}
+
+export function translate(text: string, direction: TranslateDirection, keigo: Keigo, lang: Lang = 'vi'): TranslationResult {
   const clean = text.trim()
+  if (direction !== 'ja_vi' && direction !== 'vi_ja') return translateEnglish(clean, direction, lang)
   if (lang === 'ja') {
     if (direction === 'vi_ja') {
       return {

@@ -38,6 +38,8 @@ futures-util = "0.3"
 # Installing Codex for the user: check the download against GitHub's SHA-256, unpack the .zst build.
 sha2 = "0.10"
 ruzstd = "0.8"
+# The reading of Japanese (furigana, hiragana) in the popup, from the IPADIC dictionary built into the app.
+lindera = { version = "6.2", default-features = false, features = ["embed-ipadic"] }
 
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.62", features = [

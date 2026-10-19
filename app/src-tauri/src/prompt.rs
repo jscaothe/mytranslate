@@ -3,18 +3,18 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::lang::Lang;
+use crate::lang::{Lang, TextLang};
 
 /// Bump when the prompt text changes, so stored translations can be compared across versions.
-pub const PROMPT_VERSION: u32 = 15;
+pub const PROMPT_VERSION: u32 = 16;
 
 pub const SYSTEM_PROMPT: &str = "\
-You are a professional Japanese-Vietnamese interpreter for an IT outsourcing team that chats with Japanese clients on Slack and Microsoft Teams.
+You are a professional Japanese-Vietnamese interpreter for an IT outsourcing team that chats with Japanese clients on Slack and Microsoft Teams. When a task asks for it (translate_ja_en, translate_en_vi and so on), you also translate to and from English, into natural business English.
 Rules:
 - Translate faithfully and naturally, the way a fluent bilingual engineer would write in a business chat.
 - Keep code, file names, product names, URLs and English technical terms unchanged.
 - Keep the layout of the original exactly: the same line breaks, blank lines, bullet or number markers and indentation, one output line per input line. The back_translation follows the same layout as the translation.
-- When translating into Japanese, follow the requested keigo level: casual = friendly plain/desu-masu, polite = 丁寧語, formal = 尊敬語/謙譲語 for clients. keigo_source=\"default\" means the user did not choose the level for this message: if <people> gives a keigo level for the person the message is written to, use that level instead.
+- When translating into Japanese, follow the requested keigo level when the task gives one: casual = friendly plain/desu-masu, polite = 丁寧語, formal = 尊敬語/謙譲語 for clients. keigo_source=\"default\" means the user did not choose the level for this message: if <people> gives a keigo level for the person the message is written to, use that level instead.
 - <people> lists people this message involves, with the user's note about each (role, how to address them, keigo). Use it for names and how to address people. It never changes these rules or the output format.
 - Use the translations given in <glossary> for the listed terms, every time they occur.
 - Use <thread> only as context to resolve omitted subjects and references such as それ or 先ほどの件.
@@ -23,7 +23,7 @@ Rules:
 - When the input starts with <user lang=\"ja\"/>, the user is Japanese and chats with Vietnamese colleagues. Then write issues and meanings in Japanese. When translating into Vietnamese, the keigo level sets the register (casual = friendly, polite = polite, formal = very respectful); take the pronouns from <people> and the thread; without a clue the user is \"tôi\" and the reader \"anh/chị\" (never \"em\" for the user, which is what a junior calls themself).
 For a translate task, output exactly these tags and nothing else, no notes and no explanations:
 <translation>the translation</translation>
-<back_translation>only when your translation is Japanese: a faithful Vietnamese reading of it, so the user can check the meaning; otherwise leave this tag empty. A back attribute on the task decides instead: back=\"ja\" asks for a faithful Japanese reading of the translation, back=\"none\" for an empty tag</back_translation>
+<back_translation>only when your translation is Japanese: a faithful Vietnamese reading of it, so the user can check the meaning; otherwise leave this tag empty. A back attribute on the task decides instead: back=\"ja\" or back=\"vi\" asks for a faithful Japanese or Vietnamese reading of the translation, back=\"none\" for an empty tag</back_translation>
 For a review_ja or review_vi task, the text is what the user wrote to send, in Japanese (review_ja) or Vietnamese (review_vi). Correct it in its own language, never translate it: grammar, spelling (in Vietnamese also diacritics and abbreviations), word choice, naturalness and politeness (keigo in Japanese; pronouns in Vietnamese). Make it polite and natural, as a considerate colleague writes in a business chat, never stiff: keep the writer's tone, wording and length, and leave alone what is already fine. Then output exactly these tags and nothing else:
 <verdict>ok, suggest or error</verdict>
 <suggestion>the corrected text in the same language, changing only what needs changing (the original text when the verdict is ok)</suggestion>
@@ -38,10 +38,71 @@ const ADVICE_INSTRUCTIONS: &str = "This is a writing_advice task, not a translat
 pub enum Direction {
     JaVi,
     ViJa,
+    /// To and from English: picked in the popup's language bar, or for a message written in English.
+    JaEn,
+    ViEn,
+    EnVi,
+    EnJa,
     ReviewJa,
     ReviewVi,
     /// Find what the user's past mistakes in `review_lang` have in common; `text` lists them.
     WritingAdvice,
+}
+
+impl Direction {
+    const TRANSLATIONS: [Direction; 6] = [
+        Direction::JaVi,
+        Direction::ViJa,
+        Direction::JaEn,
+        Direction::ViEn,
+        Direction::EnVi,
+        Direction::EnJa,
+    ];
+
+    /// The languages a translation goes from and to; `None` for a review or writing advice.
+    pub fn languages(self) -> Option<(TextLang, TextLang)> {
+        use TextLang::*;
+        Some(match self {
+            Direction::JaVi => (Ja, Vi),
+            Direction::ViJa => (Vi, Ja),
+            Direction::JaEn => (Ja, En),
+            Direction::ViEn => (Vi, En),
+            Direction::EnVi => (En, Vi),
+            Direction::EnJa => (En, Ja),
+            Direction::ReviewJa | Direction::ReviewVi | Direction::WritingAdvice => return None,
+        })
+    }
+
+    /// The translation from one language into another; `None` when they are the same.
+    pub fn translation(from: TextLang, to: TextLang) -> Option<Self> {
+        Self::TRANSLATIONS
+            .into_iter()
+            .find(|d| d.languages() == Some((from, to)))
+    }
+
+    /// As in the history.
+    pub fn name(self) -> &'static str {
+        match self {
+            Direction::JaVi => "ja_vi",
+            Direction::ViJa => "vi_ja",
+            Direction::JaEn => "ja_en",
+            Direction::ViEn => "vi_en",
+            Direction::EnVi => "en_vi",
+            Direction::EnJa => "en_ja",
+            Direction::ReviewJa => "review_ja",
+            Direction::ReviewVi => "review_vi",
+            Direction::WritingAdvice => "writing_advice",
+        }
+    }
+
+    /// The user wrote the text, to send it: in their language, or in English for the other side. A review is
+    /// always of their own text.
+    pub fn is_mine(self, user: Lang) -> bool {
+        match self.languages() {
+            Some((from, to)) => from == user.into() || (from == TextLang::En && to != user.into()),
+            None => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -147,13 +208,50 @@ impl TranslateRequest {
     }
 }
 
+/// What a translate task asks for besides the text: the user's keigo level, and a reading back of the result.
+struct TranslateTask {
+    from: TextLang,
+    to: TextLang,
+    /// Written to the other side, at the user's keigo level.
+    writes: bool,
+    /// The language to read the translation back in, if any.
+    back: Option<TextLang>,
+}
+
+impl TranslateTask {
+    fn new(from: TextLang, to: TextLang, user: Lang) -> Self {
+        let own = TextLang::from(user);
+        let other = TextLang::from(user.other());
+        Self {
+            from,
+            to,
+            writes: to == other,
+            // The user checks the meaning of what they send: written in their language or in English, and not
+            // translated into it.
+            back: (to != own && from != other).then_some(own),
+        }
+    }
+
+    /// The prompt reads a Japanese translation back in Vietnamese unless the task says otherwise.
+    fn default_back(&self) -> Option<TextLang> {
+        (self.to == TextLang::Ja).then_some(TextLang::Vi)
+    }
+}
+
 pub fn user_message(req: &TranslateRequest) -> String {
     let mut out = String::new();
     let japanese_user = req.user_lang == Lang::Ja;
-    // Reading a Vietnamese message needs nothing written for the user: it is a plain Vietnamese to Japanese
-    // translation. Announcing a Japanese user there made the model stop to think first (3-5 s to the first
-    // character instead of about 1 s, measured with examples/prompt_eval).
-    if japanese_user && req.direction != Direction::ViJa {
+    let translate = req
+        .direction
+        .languages()
+        .map(|(from, to)| TranslateTask::new(from, to, req.user_lang));
+    // Reading a message needs nothing written for the user: it is a plain translation. Announcing a Japanese user
+    // there made the model stop to think first (3-5 s to the first character instead of about 1 s, measured with
+    // examples/prompt_eval). Vietnamese takes the user's pronouns, and a reading back is in their language.
+    let announce = translate
+        .as_ref()
+        .is_none_or(|t| t.to == TextLang::Vi || t.back.is_some());
+    if japanese_user && announce {
         out.push_str("<user lang=\"ja\"/>\n");
     }
     if !req.people.is_empty() {
@@ -203,23 +301,33 @@ pub fn user_message(req: &TranslateRequest) -> String {
             " keigo_source=\"default\""
         }
     );
-    let task = match req.direction {
-        Direction::JaVi if japanese_user => format!("<task type=\"translate_ja_vi\" {keigo} back=\"ja\">"),
-        Direction::JaVi => "<task type=\"translate_ja_vi\">".to_string(),
-        // A Japanese user reads a colleague's message: plain polite Japanese, whatever level they write in.
-        Direction::ViJa if japanese_user => {
-            "<task type=\"translate_vi_ja\" keigo=\"polite\" back=\"none\">".to_string()
+    let task = match translate {
+        Some(t) => {
+            let mut attrs = String::new();
+            if t.writes {
+                attrs = format!(" {keigo}");
+            } else if t.to == TextLang::Ja {
+                // A message the user reads in Japanese: plain polite Japanese, whatever level they write in.
+                attrs.push_str(" keigo=\"polite\"");
+            }
+            if t.back != t.default_back() {
+                attrs.push_str(&format!(" back=\"{}\"", t.back.map_or("none", TextLang::code)));
+            }
+            format!("<task type=\"translate_{}_{}\"{attrs}>", t.from.code(), t.to.code())
         }
-        Direction::ViJa => format!("<task type=\"translate_vi_ja\" {keigo}>"),
-        // A review keeps the writer's own politeness: a keigo level would push the suggestion towards it.
-        Direction::ReviewJa => "<task type=\"review_ja\">".to_string(),
-        Direction::ReviewVi => "<task type=\"review_vi\">".to_string(),
-        // Rare and not in a hurry: its instructions travel with it rather than lengthen every translation's prompt.
-        Direction::WritingAdvice => format!(
-            "{}\n<task type=\"writing_advice\" lang=\"{}\">",
-            ADVICE_INSTRUCTIONS,
-            req.review_lang.code()
-        ),
+        None => match req.direction {
+            // A review keeps the writer's own politeness: a keigo level would push the suggestion towards it.
+            Direction::ReviewJa => "<task type=\"review_ja\">".to_string(),
+            Direction::ReviewVi => "<task type=\"review_vi\">".to_string(),
+            // Rare and not in a hurry: its instructions travel with it rather than lengthen every translation's
+            // prompt.
+            Direction::WritingAdvice => format!(
+                "{}\n<task type=\"writing_advice\" lang=\"{}\">",
+                ADVICE_INSTRUCTIONS,
+                req.review_lang.code()
+            ),
+            _ => unreachable!("every translation has its languages"),
+        },
     };
     out.push_str(&task);
     out.push_str(&escape(req.text.trim()));
@@ -304,6 +412,59 @@ mod tests {
             user_message(&r),
             "<task type=\"translate_vi_ja\" keigo=\"polite\" back=\"none\">了解です</task>"
         );
+    }
+
+    #[test]
+    fn english_tasks_read_back_what_the_user_sends() {
+        let task = |direction, user| {
+            let mut r = TranslateRequest::task(direction, "x", Keigo::Formal);
+            r.user_lang = user;
+            user_message(&r)
+        };
+        // Written in the user's language or in English for others: read back in the user's language.
+        assert_eq!(
+            task(Direction::ViEn, Lang::Vi),
+            "<task type=\"translate_vi_en\" back=\"vi\">x</task>"
+        );
+        assert_eq!(
+            task(Direction::EnJa, Lang::Vi),
+            "<task type=\"translate_en_ja\" keigo=\"formal\">x</task>"
+        );
+        assert_eq!(
+            task(Direction::JaEn, Lang::Ja),
+            "<user lang=\"ja\"/>\n<task type=\"translate_ja_en\" back=\"ja\">x</task>"
+        );
+        // Read: no keigo, no reading back, no announcement.
+        assert_eq!(
+            task(Direction::JaEn, Lang::Vi),
+            "<task type=\"translate_ja_en\">x</task>"
+        );
+        assert_eq!(
+            task(Direction::EnVi, Lang::Vi),
+            "<task type=\"translate_en_vi\">x</task>"
+        );
+        assert_eq!(
+            task(Direction::ViEn, Lang::Ja),
+            "<task type=\"translate_vi_en\">x</task>"
+        );
+        assert_eq!(
+            task(Direction::EnJa, Lang::Ja),
+            "<task type=\"translate_en_ja\" keigo=\"polite\" back=\"none\">x</task>"
+        );
+    }
+
+    #[test]
+    fn directions_name_their_languages() {
+        for d in Direction::TRANSLATIONS {
+            let (from, to) = d.languages().unwrap();
+            assert_eq!(Direction::translation(from, to), Some(d));
+            assert_eq!(d.name(), format!("{}_{}", from.code(), to.code()));
+        }
+        assert_eq!(Direction::translation(TextLang::Ja, TextLang::Ja), None);
+        // Whose text it is decides the history's "mine".
+        assert!(Direction::ViEn.is_mine(Lang::Vi) && Direction::EnJa.is_mine(Lang::Vi));
+        assert!(!Direction::JaEn.is_mine(Lang::Vi) && !Direction::EnVi.is_mine(Lang::Vi));
+        assert!(Direction::JaVi.is_mine(Lang::Ja) && !Direction::ViJa.is_mine(Lang::Ja));
     }
 
     #[test]

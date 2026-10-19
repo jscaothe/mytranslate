@@ -13,7 +13,7 @@ use tauri::{
 use crate::capture;
 use crate::context::{self, ChatApp, Context};
 use crate::history::{self, History};
-use crate::lang::Lang;
+use crate::lang::{Lang, TextLang};
 use crate::placement::{self, Anchor, Rect};
 use crate::prompt::Keigo;
 use crate::settings::SettingsStore;
@@ -55,8 +55,23 @@ pub enum Action {
 pub enum Direction {
     JaVi,
     ViJa,
+    /// A message in English: read in the user's language, or written in it for the other side.
+    EnVi,
+    EnJa,
     ReviewJa,
     ReviewVi,
+}
+
+impl Direction {
+    /// The language of a text to translate; `None` for a review.
+    fn source(self) -> Option<TextLang> {
+        match self {
+            Direction::JaVi => Some(TextLang::Ja),
+            Direction::ViJa => Some(TextLang::Vi),
+            Direction::EnVi | Direction::EnJa => Some(TextLang::En),
+            Direction::ReviewJa | Direction::ReviewVi => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -89,6 +104,9 @@ pub struct OpenPayload {
     pub thread_id: Option<i64>,
     /// The keigo level the user last picked in this conversation: the popup starts from it.
     pub keigo: Option<Keigo>,
+    /// The language the user last picked in this conversation's language bar for text in this language: the
+    /// popup translates into it instead of the usual way.
+    pub target: Option<TextLang>,
 }
 
 /// Threads untouched for this long are not considered.
@@ -324,9 +342,11 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
         } else {
             (None, None)
         };
-        let keigo = conversation_id
-            .and_then(|id| history.conversation(id).ok().flatten())
-            .and_then(|c| c.keigo);
+        let conversation = conversation_id.and_then(|id| history.conversation(id).ok().flatten());
+        let keigo = conversation.as_ref().and_then(|c| c.keigo);
+        let target = conversation
+            .zip(direction.source())
+            .and_then(|(c, source)| c.targets.get(&source).copied());
 
         let state = app.state::<PopupState>();
         let id = {
@@ -348,6 +368,7 @@ pub fn run(app: &AppHandle, action: Action, target: Option<Context>, span: Optio
             conversation_id,
             thread_id,
             keigo,
+            target,
         };
         if let Err(e) = show(&app, payload, span) {
             log::warn!("could not show the popup: {e}");
@@ -441,13 +462,10 @@ fn show(app: &AppHandle, payload: OpenPayload, span: Option<Span>) -> tauri::Res
         geometry.width
     } else {
         // Reading or writing, a translation has the keigo choice: in its footer, or in the reply's.
-        placement::auto_width(
-            &payload.text,
-            matches!(payload.direction, Direction::JaVi | Direction::ViJa),
-        )
+        placement::auto_width(&payload.text, payload.direction.source().is_some())
     };
-    // A Japanese result shows a second block: the reading back, or the suggestion's meaning.
-    let with_back = payload.direction != Direction::JaVi;
+    // A result the user sends shows a second block: the reading back, or the suggestion's meaning.
+    let with_back = !matches!(payload.direction, Direction::JaVi | Direction::EnVi);
     let expected = geometry
         .height
         .unwrap_or_else(|| placement::expected_height(&payload.text, width, with_back).min(AUTO_MAX_HEIGHT));
@@ -508,8 +526,15 @@ fn own_exe_name() -> String {
 /// (the user is reading). `in_message_box` is `None` when UI Automation could not tell: then the language alone
 /// decides, as text in the user's own language is usually what they are writing.
 pub fn route(action: Action, text: &str, lang: Lang, in_message_box: Option<bool>) -> (Direction, Origin) {
+    let english = |to: Lang| match to {
+        Lang::Vi => Direction::EnVi,
+        Lang::Ja => Direction::EnJa,
+    };
     let direction = match action {
         Action::Auto if is_mostly_japanese(text) => Direction::JaVi,
+        // English the user is writing goes to the other side; English they read comes into their language.
+        Action::Auto if is_english(text) && in_message_box != Some(false) => english(lang.other()),
+        Action::Auto if is_english(text) => english(lang),
         Action::Auto => Direction::ViJa,
         // A review checks the text in its own language, whichever the user's is.
         Action::Review if is_mostly_japanese(text) => Direction::ReviewJa,
@@ -519,7 +544,9 @@ pub fn route(action: Action, text: &str, lang: Lang, in_message_box: Option<bool
         Lang::Vi => Direction::ViJa,
         Lang::Ja => Direction::JaVi,
     };
-    let writing = direction == write || matches!(direction, Direction::ReviewJa | Direction::ReviewVi);
+    let writing = direction == write
+        || direction == english(lang.other())
+        || matches!(direction, Direction::ReviewJa | Direction::ReviewVi);
     let origin = if writing && in_message_box != Some(false) {
         Origin::Composer
     } else {
@@ -537,6 +564,106 @@ pub fn is_mostly_japanese(text: &str) -> bool {
         .filter(|w| !w.is_empty())
         .count();
     japanese > 0 && japanese >= latin_words
+}
+
+/// Common English words that are not also Vietnamese written without diacritics ("do", "an", "to", "me") nor
+/// English that Vietnamese chats mix in ("check", "fix", "ok").
+const ENGLISH_WORDS: &[&str] = &[
+    "the",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "will",
+    "would",
+    "should",
+    "could",
+    "have",
+    "has",
+    "had",
+    "this",
+    "that",
+    "these",
+    "those",
+    "with",
+    "from",
+    "for",
+    "and",
+    "of",
+    "it",
+    "its",
+    "you",
+    "your",
+    "we",
+    "our",
+    "they",
+    "their",
+    "he",
+    "she",
+    "i",
+    "my",
+    "please",
+    "thanks",
+    "thank",
+    "what",
+    "when",
+    "where",
+    "which",
+    "who",
+    "why",
+    "how",
+    "not",
+    "if",
+    "at",
+    "by",
+    "about",
+    "just",
+    "also",
+    "there",
+    "here",
+    "all",
+    "any",
+    "some",
+    "let",
+    "know",
+    "need",
+    "want",
+    "today",
+    "tomorrow",
+    "yesterday",
+    "sorry",
+    "morning",
+    "good",
+    "great",
+    "does",
+    "did",
+    "but",
+    "or",
+    "into",
+    "after",
+    "before",
+    "yet",
+    "still",
+    "already",
+    "us",
+    "them",
+];
+
+/// Latin text without Vietnamese diacritics in which at least a third of the words are common English words. A
+/// Vietnamese message always has diacritics; without them it rarely uses these words.
+pub fn is_english(text: &str) -> bool {
+    if text.chars().any(|c| is_japanese_char(c) || is_vietnamese_letter(c)) {
+        return false;
+    }
+    let words: Vec<String> = text
+        .split(|c: char| !(c.is_ascii_alphabetic() || c == '\''))
+        .filter(|w| w.chars().any(|c| c.is_ascii_alphabetic()))
+        .map(|w| w.trim_matches('\'').to_ascii_lowercase())
+        .collect();
+    let common = words.iter().filter(|w| ENGLISH_WORDS.contains(&w.as_str())).count();
+    common > 0 && common * 3 >= words.len()
 }
 
 /// Latin letters with Vietnamese diacritics (Latin-1 Supplement, Latin Extended-A/B and Extended Additional).
@@ -644,6 +771,39 @@ mod tests {
             "Em đã deploy rồi, nhờ anh kiểm tra màn hình 仕訳 giúp em nhé"
         ));
         assert!(!is_mostly_japanese("Please check the deploy result today"));
+    }
+
+    #[test]
+    fn english_detection() {
+        assert!(is_english("Please check the deploy result today"));
+        assert!(is_english("Thanks!"));
+        assert!(is_english("Can you review my PR when you have time?"));
+        // Vietnamese, with or without diacritics, and mixed-in English stays Vietnamese.
+        assert!(!is_english("Em đã deploy rồi, nhờ anh check giúp em"));
+        assert!(!is_english("em deploy xong roi, anh check giup em nhe"));
+        assert!(!is_english("OK"));
+        assert!(!is_english("確認お願いします。"));
+    }
+
+    #[test]
+    fn english_is_read_in_the_users_language_or_written_to_the_other_side() {
+        let en = "Please check the PR.";
+        assert_eq!(
+            route(Action::Auto, en, Lang::Vi, Some(false)),
+            (Direction::EnVi, Origin::Chat)
+        );
+        assert_eq!(
+            route(Action::Auto, en, Lang::Vi, Some(true)),
+            (Direction::EnJa, Origin::Composer)
+        );
+        assert_eq!(
+            route(Action::Auto, en, Lang::Ja, Some(false)),
+            (Direction::EnJa, Origin::Chat)
+        );
+        assert_eq!(
+            route(Action::Auto, en, Lang::Ja, None),
+            (Direction::EnVi, Origin::Composer)
+        );
     }
 
     #[test]

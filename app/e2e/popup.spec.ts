@@ -443,3 +443,115 @@ test('when Claude refuses MyTranslate, another AI translates the same text in on
   await expect(popup(page).getByText('Claude từ chối yêu cầu từ MyTranslate')).toHaveCount(0)
   await expect(popup(page).getByRole('button', { name: /Sao chép/ })).toBeEnabled()
 })
+
+test('the language bar translates into either language the text is not in; Ctrl+L switches', async ({ page }) => {
+  await readFirstMessage(page)
+  const bar = popup(page).locator('[data-language-bar]')
+  const targets = bar.getByRole('radiogroup', { name: 'Dịch sang' })
+  await expect(bar).toContainText('Tiếng Nhật')
+  // The text's own language is not offered.
+  await expect(targets.getByRole('radio')).toHaveText(['Tiếng Việt', 'Tiếng Anh'])
+  await expect(targets.getByRole('radio', { checked: true })).toHaveText('Tiếng Việt')
+
+  await targets.getByRole('radio', { name: 'Tiếng Anh' }).click()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_en')
+  await expect(popup(page).locator('p[lang=en]')).toContainText('The login screen is showing an error.')
+  // Reading the client's message in English is still reading: copy and reply, no keigo.
+  await expect(popup(page).getByRole('button', { name: /Trả lời/ })).toBeVisible()
+
+  await popup(page).press('Control+l')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
+  await expect(targets.getByRole('radio', { checked: true })).toHaveText('Tiếng Việt')
+})
+
+test('the language picked in a chat is kept for text in that language there, not in other chats', async ({ page }) => {
+  await readFirstMessage(page)
+  await popup(page).getByRole('radio', { name: 'Tiếng Anh' }).click()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_en')
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
+
+  await page.locator('p[lang=ja]').nth(1).click({ clickCount: 3 })
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_en')
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
+
+  // Vietnamese the user writes in the same chat still goes into Japanese.
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'vi_ja')
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
+
+  await page.getByRole('button', { name: 'general', exact: true }).click()
+  await page.locator('p[lang=ja]').first().click({ clickCount: 3 })
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'ja_vi')
+})
+
+test('writing into English has no keigo and is read back in Vietnamese', async ({ page }) => {
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+T')
+  const draft = popup(page).locator('textarea[data-role=draft]')
+  await expect(draft).toBeVisible()
+  await expect(popup(page).getByRole('radiogroup', { name: 'Mức kính ngữ' })).toBeVisible()
+
+  await popup(page).getByRole('radio', { name: 'Tiếng Anh' }).click()
+  await expect(popup(page)).toHaveAttribute('data-direction', 'vi_en')
+  await expect(draft).toHaveAttribute('aria-label', 'Bản tiếng Anh, có thể sửa')
+  await expect(popup(page).getByRole('radiogroup', { name: 'Mức kính ngữ' })).toHaveCount(0)
+  await expect(popup(page).getByText('Ý nghĩa khi đọc lại')).toBeVisible()
+  // No reading menu for English.
+  await expect(popup(page).getByRole('button', { name: /Cách đọc/ })).toHaveCount(0)
+})
+
+test('a Japanese translation shows its reading as furigana or in hiragana; Ctrl+H switches and it is remembered', async ({ page }) => {
+  await composer(page).fill('Em đã deploy bản sửa rồi ạ')
+  await page.keyboard.press('Control+Alt+T')
+  const draft = popup(page).locator('textarea[data-role=draft]')
+  await expect(draft).toBeVisible()
+  const menuButton = popup(page).getByRole('button', { name: /Cách đọc/ })
+  await expect(menuButton).toHaveAccessibleName('Cách đọc: Tắt (Ctrl+H)')
+
+  // Furigana over the kanji, in place of the editable text; what is copied stays plain.
+  await draft.press('Control+h')
+  const furigana = popup(page).locator('[data-reading=furigana]')
+  await expect(furigana).toBeVisible()
+  await expect(furigana.locator('ruby').filter({ hasText: '修正' }).locator('rt')).toHaveText('しゅうせい')
+  await expect(draft).toHaveCount(0)
+  await expect(menuButton).toHaveAccessibleName('Cách đọc: Furigana (Ctrl+H)')
+
+  // The whole sentence in hiragana, under the translation.
+  await popup(page).press('Control+h')
+  await expect(furigana).toHaveCount(0)
+  await expect(popup(page).locator('[data-reading=kana]')).toContainText('しゅうせい')
+  await expect(draft).toBeVisible()
+
+  // The menu offers the same three ways.
+  await menuButton.click()
+  const menu = popup(page).getByRole('menu', { name: 'Cách đọc tiếng Nhật' })
+  await expect(menu.getByRole('menuitemradio', { checked: true })).toContainText('Hiragana')
+  await menu.getByRole('menuitemradio', { name: /Furigana/ }).click()
+  await expect(menu).toHaveCount(0)
+  await expect(furigana).toBeVisible()
+
+  // The next Japanese translation starts with the reading last chosen.
+  await popup(page).getByRole('button', { name: 'Đóng', exact: true }).click()
+  await composer(page).fill('Cảm ơn anh')
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page).locator('[data-reading=furigana]')).toBeVisible()
+  await popup(page).press('Control+h')
+  await expect(popup(page).locator('[data-reading=kana]')).toBeVisible()
+  await popup(page).press('Control+h')
+  await expect(popup(page).locator('[data-reading]')).toHaveCount(0)
+  await expect(popup(page).locator('textarea[data-role=draft]')).toBeVisible()
+})
+
+test('English in the chat is read in Vietnamese, with Japanese offered instead', async ({ page }) => {
+  await composer(page).fill('Please check the PR when you have time.')
+  await composer(page).selectText()
+  // Selected in the chat app's message box: written to the other side, in Japanese.
+  await page.keyboard.press('Control+Alt+T')
+  await expect(popup(page)).toHaveAttribute('data-direction', 'en_ja')
+  const targets = popup(page).getByRole('radiogroup', { name: 'Dịch sang' })
+  await expect(targets.getByRole('radio')).toHaveText(['Tiếng Việt', 'Tiếng Nhật'])
+  await expect(popup(page).locator('[data-language-bar]')).toContainText('Tiếng Anh')
+})

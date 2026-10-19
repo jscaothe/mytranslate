@@ -41,6 +41,7 @@ const defaultSettings: Settings = {
   onboarded: false,
   trayNoticeShown: false,
   popupTipShown: false,
+  japaneseReading: 'off',
 }
 
 /** The prototype's sample glossary, as a user of the starting language would have it. */
