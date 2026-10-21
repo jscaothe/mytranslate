@@ -1,11 +1,19 @@
 import type { HotkeyMap } from '../store'
 
 /** Kept in step with `Hotkeys::default` on the Rust side. */
-export const DEFAULT_HOTKEYS: HotkeyMap = { auto: 'Ctrl+Alt+T', review: 'Ctrl+Alt+C', main: 'Ctrl+Alt+M' }
+export const DEFAULT_HOTKEYS: HotkeyMap = { auto: 'Ctrl+Alt+T', review: 'Ctrl+Alt+C', reading: 'Ctrl+Alt+R', main: 'Ctrl+Alt+M' }
 
-/** The saved hotkeys, without keys of earlier versions (the separate "read" and "write" hotkeys). */
+/**
+ * The saved hotkeys, without keys of earlier versions (the separate "read" and "write" hotkeys), and with the
+ * default for a hotkey added since they were saved.
+ */
 export function knownHotkeys(saved: Partial<HotkeyMap> | undefined): HotkeyMap {
-  return { auto: saved?.auto ?? DEFAULT_HOTKEYS.auto, review: saved?.review ?? DEFAULT_HOTKEYS.review, main: saved?.main ?? DEFAULT_HOTKEYS.main }
+  return {
+    auto: saved?.auto ?? DEFAULT_HOTKEYS.auto,
+    review: saved?.review ?? DEFAULT_HOTKEYS.review,
+    reading: saved?.reading ?? DEFAULT_HOTKEYS.reading,
+    main: saved?.main ?? DEFAULT_HOTKEYS.main,
+  }
 }
 
 /** Builds a "Ctrl+Alt+T" style combo from a keyboard event, using the physical key so AltGr layouts still work. */

@@ -28,11 +28,14 @@ pub struct SettingsStore {
 
 /// Global hotkeys as the page stores them, e.g. "Ctrl+Alt+T". One key translates either way (the text's
 /// language decides), one checks Japanese, one opens the main window.
+/// A hotkey missing from saved settings (added in a later version) takes its default; the others are kept.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct Hotkeys {
     pub auto: String,
     pub review: String,
+    /// How to read selected Japanese (furigana, hiragana), without translating.
+    pub reading: String,
     pub main: String,
 }
 
@@ -41,6 +44,7 @@ impl Default for Hotkeys {
         Self {
             auto: "Ctrl+Alt+T".into(),
             review: "Ctrl+Alt+C".into(),
+            reading: "Ctrl+Alt+R".into(),
             main: "Ctrl+Alt+M".into(),
         }
     }

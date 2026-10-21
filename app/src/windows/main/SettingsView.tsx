@@ -50,6 +50,7 @@ function hotkeyRows(t: T): { key: keyof HotkeyMap; label: string }[] {
   return [
     { key: 'auto', label: t('Dịch (tự chọn ngôn ngữ đích)', '翻訳（翻訳先の言語を自動で判断）') },
     { key: 'review', label: t('Kiểm tra câu đã viết', '書いた文をチェック') },
+    { key: 'reading', label: t('Xem cách đọc tiếng Nhật', '日本語の読み方を表示') },
     { key: 'main', label: t('Mở cửa sổ chính', 'メイン画面を開く') },
   ]
 }

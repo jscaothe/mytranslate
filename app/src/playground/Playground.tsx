@@ -199,7 +199,7 @@ export function Playground() {
       const combo = comboFromEvent(e)
       if (!combo) return
       const { hotkeys } = settings
-      const map: Record<string, Action> = { [hotkeys.auto]: 'auto', [hotkeys.review]: 'review' }
+      const map: Record<string, Action> = { [hotkeys.auto]: 'auto', [hotkeys.review]: 'review', [hotkeys.reading]: 'reading' }
       const action = map[combo]
       if (!action) return
       e.preventDefault()
@@ -364,7 +364,8 @@ export function Playground() {
                 <Step n={1} title="Đọc tin của khách">
                   Bôi đen một tin tiếng Nhật rồi nhấn <Hotkey combo={settings.hotkeys.auto} />
                   {settings.quickActions.enabled ? ', hoặc bấm "Dịch" trên thanh thao tác hiện ra.' : '.'} <Hotkey combo="Enter" /> sao chép bản
-                  dịch, <Hotkey combo="Ctrl+Enter" /> để trả lời ngay trong popup.
+                  dịch, <Hotkey combo="Ctrl+Enter" /> để trả lời ngay trong popup. Chỉ muốn biết cách đọc thì nhấn{' '}
+                  <Hotkey combo={settings.hotkeys.reading} />: furigana hoặc hiragana, không cần dịch.
                 </Step>
                 <Step n={2} title="Trả lời bằng tiếng Việt">
                   Gõ tiếng Việt vào ô chat rồi nhấn <Hotkey combo={settings.hotkeys.auto} />. Nhấn <Hotkey combo="Tab" /> để đổi kính ngữ,{' '}

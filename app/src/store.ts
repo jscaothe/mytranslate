@@ -20,6 +20,8 @@ export type ApiProvider = Exclude<AiProvider, 'claude' | 'codex'>
 export interface HotkeyMap {
   auto: string
   review: string
+  /** How to read selected Japanese (furigana, hiragana), without translating. */
+  reading: string
   main: string
 }
 

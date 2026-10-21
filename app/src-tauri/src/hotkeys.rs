@@ -54,6 +54,7 @@ fn wanted(keys: &Hotkeys, paused: bool) -> Vec<(String, HotkeyAction)> {
         out.extend([
             (keys.auto.clone(), HotkeyAction::Popup(popup::Action::Auto)),
             (keys.review.clone(), HotkeyAction::Popup(popup::Action::Review)),
+            (keys.reading.clone(), HotkeyAction::Popup(popup::Action::Reading)),
         ]);
     }
     out
@@ -116,6 +117,16 @@ mod tests {
         let paused = wanted(&keys, true);
         assert_eq!(paused.len(), 1);
         assert_eq!(paused[0].1, HotkeyAction::ShowMain);
-        assert_eq!(wanted(&keys, false).len(), 3);
+        assert_eq!(wanted(&keys, false).len(), 4);
+    }
+
+    #[test]
+    fn a_hotkey_added_later_takes_its_default_and_keeps_the_others() {
+        let saved: Hotkeys = serde_json::from_value(
+            serde_json::json!({ "auto": "Ctrl+Shift+T", "review": "Ctrl+Alt+C", "main": "Ctrl+Alt+M" }),
+        )
+        .unwrap();
+        assert_eq!(saved.auto, "Ctrl+Shift+T");
+        assert_eq!(saved.reading, "Ctrl+Alt+R");
     }
 }
