@@ -584,3 +584,15 @@ test('the reading button is only offered for a selection with Japanese', async (
   await expect(bar.getByRole('button', { name: /Dịch/ })).toBeVisible()
   await expect(bar.getByRole('button', { name: 'Cách đọc' })).toHaveCount(0)
 })
+
+test('Ctrl+Alt+R shows how to read the selected Japanese, and the toolbar teaches it', async ({ page }) => {
+  await dragOverFirstMessage(page)
+  const bar = page.locator('[data-quick-bar]')
+  await bar.getByRole('button', { name: 'Cách đọc' }).hover()
+  await expect(bar.getByRole('tooltip')).toHaveText('Phím tắtCtrlAltR')
+
+  // The text is still selected: the key alone opens its reading.
+  await page.keyboard.press('Control+Alt+R')
+  await expect(popup(page).locator('[data-reading-bar]')).toBeVisible()
+  await expect(popup(page).locator('[data-reading=furigana]')).toBeVisible()
+})

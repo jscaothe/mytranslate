@@ -41,6 +41,7 @@ Trang https://mytranslate.pages.dev/#install có hoạt họa từng bước bê
 | --- | --- |
 | `Ctrl+Alt+T` | Dịch, app tự chọn ngôn ngữ đích. Bôi đen tin tiếng Nhật rồi nhấn: xem bản dịch tiếng Việt. Gõ tiếng Việt trong ô chat (không cần bôi đen) rồi nhấn: xem bản tiếng Nhật, **Enter** để thay vào ô chat |
 | `Ctrl+Alt+C` | Kiểm tra câu bạn tự viết theo đúng ngôn ngữ của câu: tiếng Nhật được kiểm tra như tiếng Nhật (ngữ pháp, kính ngữ, độ tự nhiên), tiếng Việt như tiếng Việt (chính tả, ngữ pháp, cách xưng hô), không dịch. Popup chỉ ra chỗ cần sửa và câu đề xuất, **Enter** để dùng câu đề xuất |
+| `Ctrl+Alt+R` | Xem cách đọc đoạn tiếng Nhật đang bôi đen: furigana hoặc hiragana (`Ctrl+H` để đổi), không gọi AI; **Enter** để dịch tiếp |
 | `Ctrl+Alt+M` | Mở cửa sổ chính |
 
 Trong popup:

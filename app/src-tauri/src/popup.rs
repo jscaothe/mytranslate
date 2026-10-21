@@ -290,8 +290,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<WebviewWindow> {
 pub fn on_hotkey(app: &AppHandle, action: Action) {
     // Right now, while Alt is still held: keep the app in front from opening its menu bar on Alt release.
     capture::mask_menu_key();
-    // ChatGPT or Gemini: connect now, while the text is being copied.
-    crate::ai::prewarm(app);
+    // ChatGPT or Gemini: connect now, while the text is being copied. Showing the reading needs no AI.
+    if action != Action::Reading {
+        crate::ai::prewarm(app);
+    }
     run(app, action, None, None);
 }
 

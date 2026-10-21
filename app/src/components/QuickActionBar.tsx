@@ -45,8 +45,7 @@ export function QuickActionBar({
   const t = useT()
   const meta = quickActionMeta(useLang())
   const { hotkeys } = useStore().settings
-  // The reading has no hotkey of its own.
-  const shortcut: Record<QuickActionId, string | null> = { translate: hotkeys.auto, review: hotkeys.review, reading: null }
+  const shortcut: Record<QuickActionId, string> = { translate: hotkeys.auto, review: hotkeys.review, reading: hotkeys.reading }
   const iconOnly = display === 'iconOnly'
 
   // The button the pointer rests on. Once a hint shows, moving to the next button switches it at once.
@@ -139,11 +138,11 @@ export function QuickActionBar({
           </p>
         </div>
       )}
-      {hinted && !menuOpen && (iconOnly || shortcut[hinted]) && (
+      {hinted && !menuOpen && (
         <div role="tooltip" className="mt-1 flex items-center gap-1 border-t border-line px-1 pt-1.5 pb-0.5 text-[11.5px] whitespace-nowrap text-ink-2">
           {iconOnly && <span className="mr-0.5 font-semibold text-ink">{meta[hinted].label}</span>}
-          {shortcut[hinted] && <span className="mr-0.5">{t('Phím tắt', 'ショートカット')}</span>}
-          {shortcut[hinted]?.split('+').map((k) => (
+          <span className="mr-0.5">{t('Phím tắt', 'ショートカット')}</span>
+          {shortcut[hinted].split('+').map((k) => (
             <Kbd key={k}>{k}</Kbd>
           ))}
         </div>
@@ -166,14 +165,14 @@ function BarButton({
   icon: ReactNode
   primary?: boolean
   iconOnly?: boolean
-  shortcut: string | null
+  shortcut: string
   children: string
 }) {
   return (
     <button
       type="button"
       aria-label={iconOnly ? children : undefined}
-      aria-keyshortcuts={shortcut?.replace('Ctrl', 'Control')}
+      aria-keyshortcuts={shortcut.replace('Ctrl', 'Control')}
       onMouseEnter={onHover}
       onClick={onClick}
       className={cx(
