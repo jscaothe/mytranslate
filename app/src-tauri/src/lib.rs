@@ -24,6 +24,7 @@ mod tray;
 mod ui_selection;
 mod updates;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::Serialize;
@@ -266,12 +267,25 @@ async fn translate(
     add_context(&app, &mut request);
 
     let router = router.inner().clone();
-    let filed = request.clone();
+    let filed = Arc::new(request.clone());
     let routes = ai::routes_for(&app, request.ai.take().as_ref());
-    router
-        .translate(request_id, request, &routes, move |event| {
+    // A translation in the wrong language (the AI copied the text, or wrote English) is not shown: it is asked for
+    // once more, and the page sees the second answer stream in place of the first.
+    let wrong = Arc::new(AtomicBool::new(false));
+    let forward = |check: bool| {
+        let (app, filed, on_event, wrong) = (app.clone(), filed.clone(), on_event.clone(), wrong.clone());
+        move |event: TranslateEvent| {
             let saved = match &event {
                 TranslateEvent::Done { sections, timing, .. } => {
+                    if check && in_wrong_language(&filed, sections) {
+                        log::info!(
+                            "{} {}: answer in the wrong language, asking again",
+                            timing.provider,
+                            timing.model
+                        );
+                        wrong.store(true, Ordering::Relaxed);
+                        return;
+                    }
                     log::info!(
                         "{} {}: {:?} tokens, first token {:?} ms",
                         timing.provider,
@@ -288,9 +302,22 @@ async fn translate(
                 let _ = on_event.send(saved);
                 let _ = app.emit("history:changed", ());
             }
-        })
+        }
+    };
+    router
+        .translate(request_id, request.clone(), &routes, forward(true))
         .await;
+    if wrong.load(Ordering::Relaxed) {
+        router.translate(request_id, request, &routes, forward(false)).await;
+    }
     Ok(())
+}
+
+/// A translation that is clearly not in the language asked for.
+fn in_wrong_language(req: &TranslateRequest, s: &Sections) -> bool {
+    req.direction
+        .languages()
+        .is_some_and(|(_, to)| to.clearly_not_in(&s.translation))
 }
 
 /// Stores a finished translation in its thread (creating the thread if needed). Translations made outside a
