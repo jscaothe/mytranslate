@@ -82,6 +82,39 @@ impl TextLang {
     pub fn parse(code: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|l| l.code() == code)
     }
+
+    /// Whether `text` is clearly not in this language: a translation the AI wrote in the wrong one (Haiku now and
+    /// then copies the Japanese it was given, or writes English). Too little text to tell is never wrong.
+    pub fn clearly_not_in(self, text: &str) -> bool {
+        let japanese = text
+            .chars()
+            .filter(|c| matches!(c, '\u{3040}'..='\u{30ff}' | '\u{4e00}'..='\u{9fff}'))
+            .count();
+        let vietnamese = text
+            .chars()
+            .filter(|c| !c.is_ascii() && matches!(c, '\u{00C0}'..='\u{01B0}' | '\u{1EA0}'..='\u{1EF9}'))
+            .count();
+        let latin = text.chars().filter(char::is_ascii_alphabetic).count();
+        if japanese + vietnamese + latin < 12 {
+            return false;
+        }
+        match self {
+            // Names and terms in kanji may stay; Vietnamese sentences always carry diacritics.
+            Self::Vi => vietnamese == 0 || japanese > latin + vietnamese,
+            // English terms (API, CSV) may stay; a Vietnamese sentence quoting a term in kanji is not Japanese.
+            Self::Ja => japanese < latin + vietnamese,
+            Self::En => japanese > latin || vietnamese >= 3,
+        }
+    }
+
+    /// As the prompt names it.
+    pub fn english_name(self) -> &'static str {
+        match self {
+            Self::Vi => "Vietnamese",
+            Self::Ja => "Japanese",
+            Self::En => "English",
+        }
+    }
 }
 
 impl From<Lang> for TextLang {
@@ -96,6 +129,19 @@ impl From<Lang> for TextLang {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tells_a_translation_in_the_wrong_language() {
+        let ja = "共有いただいたGoogleスプレッドシートについて、現在、閲覧権限がありません。";
+        let vi = "Về file Google Sheets「補助簿」anh đã chia sẻ, hiện tôi chưa có quyền xem.";
+        let en = "If we don't handle this, we would end up comparing the November data.";
+        assert!(TextLang::Vi.clearly_not_in(ja) && TextLang::Vi.clearly_not_in(en));
+        assert!(!TextLang::Vi.clearly_not_in(vi));
+        assert!(TextLang::Ja.clearly_not_in(vi) && !TextLang::Ja.clearly_not_in(ja));
+        assert!(TextLang::En.clearly_not_in(ja) && TextLang::En.clearly_not_in(vi) && !TextLang::En.clearly_not_in(en));
+        // Too short to tell.
+        assert!(!TextLang::Vi.clearly_not_in("OK, API v2"));
+    }
 
     #[test]
     fn parses_known_codes_only() {

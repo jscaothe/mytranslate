@@ -6,10 +6,11 @@ use serde::{Deserialize, Serialize};
 use crate::lang::{Lang, TextLang};
 
 /// Bump when the prompt text changes, so stored translations can be compared across versions.
-pub const PROMPT_VERSION: u32 = 16;
+pub const PROMPT_VERSION: u32 = 17;
 
 pub const SYSTEM_PROMPT: &str = "\
-You are a professional Japanese-Vietnamese interpreter for an IT outsourcing team that chats with Japanese clients on Slack and Microsoft Teams. When a task asks for it (translate_ja_en, translate_en_vi and so on), you also translate to and from English, into natural business English.
+You are a professional Japanese-Vietnamese interpreter for an IT outsourcing team that chats with Japanese clients on Slack and Microsoft Teams; you also translate to and from English, into natural business English.
+A translate task names its two languages, source then target (ja = Japanese, vi = Vietnamese, en = English): translate_ja_vi turns Japanese into Vietnamese, translate_vi_en Vietnamese into English. The translation is always written in the target language, never in the source language or a third one.
 Rules:
 - Translate faithfully and naturally, the way a fluent bilingual engineer would write in a business chat.
 - Keep code, file names, product names, URLs and English technical terms unchanged.
@@ -19,11 +20,11 @@ Rules:
 - Use the translations given in <glossary> for the listed terms, every time they occur.
 - Use <thread> only as context to resolve omitted subjects and references such as それ or 先ほどの件.
 - Never answer the message yourself; only translate it.
-- In a translate task, if the text is already in the target language, translate it into the other language instead.
+- Only when the whole text is already in the target language, translate it into the task's source language instead.
 - When the input starts with <user lang=\"ja\"/>, the user is Japanese and chats with Vietnamese colleagues. Then write issues and meanings in Japanese. When translating into Vietnamese, the keigo level sets the register (casual = friendly, polite = polite, formal = very respectful); take the pronouns from <people> and the thread; without a clue the user is \"tôi\" and the reader \"anh/chị\" (never \"em\" for the user, which is what a junior calls themself).
 For a translate task, output exactly these tags and nothing else, no notes and no explanations:
 <translation>the translation</translation>
-<back_translation>only when your translation is Japanese: a faithful Vietnamese reading of it, so the user can check the meaning; otherwise leave this tag empty. A back attribute on the task decides instead: back=\"ja\" or back=\"vi\" asks for a faithful Japanese or Vietnamese reading of the translation, back=\"none\" for an empty tag</back_translation>
+<back_translation>only when your translation is Japanese: a faithful Vietnamese reading of it, so the user can check the meaning; otherwise leave this tag empty. A back attribute on the task decides instead: back=\"Japanese\" or back=\"Vietnamese\" asks for a faithful reading of the translation in that language (never a copy of the translation), back=\"none\" for an empty tag</back_translation>
 For a review_ja or review_vi task, the text is what the user wrote to send, in Japanese (review_ja) or Vietnamese (review_vi). Correct it in its own language, never translate it: grammar, spelling (in Vietnamese also diacritics and abbreviations), word choice, naturalness and politeness (keigo in Japanese; pronouns in Vietnamese). Make it polite and natural, as a considerate colleague writes in a business chat, never stiff: keep the writer's tone, wording and length, and leave alone what is already fine. Then output exactly these tags and nothing else:
 <verdict>ok, suggest or error</verdict>
 <suggestion>the corrected text in the same language, changing only what needs changing (the original text when the verdict is ok)</suggestion>
@@ -311,9 +312,14 @@ pub fn user_message(req: &TranslateRequest) -> String {
                 attrs.push_str(" keigo=\"polite\"");
             }
             if t.back != t.default_back() {
-                attrs.push_str(&format!(" back=\"{}\"", t.back.map_or("none", TextLang::code)));
+                attrs.push_str(&format!(" back=\"{}\"", t.back.map_or("none", TextLang::english_name)));
             }
-            format!("<task type=\"translate_{}_{}\"{attrs}>", t.from.code(), t.to.code())
+            format!(
+                "<task type=\"translate_{}_{}\" into=\"{}\"{attrs}>",
+                t.from.code(),
+                t.to.code(),
+                t.to.english_name()
+            )
         }
         None => match req.direction {
             // A review keeps the writer's own politeness: a keigo level would push the suggestion towards it.
@@ -357,7 +363,7 @@ mod tests {
     fn task_carries_keigo_for_japanese_output() {
         assert_eq!(
             user_message(&req("Cảm ơn")),
-            "<task type=\"translate_vi_ja\" keigo=\"formal\">Cảm ơn</task>"
+            "<task type=\"translate_vi_ja\" into=\"Japanese\" keigo=\"formal\">Cảm ơn</task>"
         );
     }
 
@@ -381,14 +387,13 @@ mod tests {
         assert_eq!(
             user_message(&r),
             "<people>\n<person ja=\"田中\" vi=\"Tanaka\">PM &lt;khách&gt;, viết trang trọng</person>\n</people>\n\
-             <task type=\"translate_vi_ja\" keigo=\"formal\" keigo_source=\"default\">Nhờ anh xác nhận giúp em</task>"
+             <task type=\"translate_vi_ja\" into=\"Japanese\" keigo=\"formal\" keigo_source=\"default\">Nhờ anh xác nhận giúp em</task>"
         );
         // A level the user picked is theirs: no person overrides it.
         r.keigo_chosen = true;
-        assert!(
-            user_message(&r)
-                .ends_with("<task type=\"translate_vi_ja\" keigo=\"formal\">Nhờ anh xác nhận giúp em</task>")
-        );
+        assert!(user_message(&r).ends_with(
+            "<task type=\"translate_vi_ja\" into=\"Japanese\" keigo=\"formal\">Nhờ anh xác nhận giúp em</task>"
+        ));
     }
 
     #[test]
@@ -402,7 +407,7 @@ mod tests {
         assert_eq!(
             user_message(&r),
             "<user lang=\"ja\"/>\n<thread>\n<msg from=\"other\">確認しました</msg>\n</thread>\n\
-             <task type=\"translate_ja_vi\" keigo=\"polite\" back=\"ja\">了解です</task>"
+             <task type=\"translate_ja_vi\" into=\"Vietnamese\" keigo=\"polite\" back=\"Japanese\">了解です</task>"
         );
         // Reading is always plain polite Japanese, whatever level the user writes in.
         r.direction = Direction::ViJa;
@@ -410,7 +415,7 @@ mod tests {
         r.thread_messages.clear();
         assert_eq!(
             user_message(&r),
-            "<task type=\"translate_vi_ja\" keigo=\"polite\" back=\"none\">了解です</task>"
+            "<task type=\"translate_vi_ja\" into=\"Japanese\" keigo=\"polite\" back=\"none\">了解です</task>"
         );
     }
 
@@ -424,32 +429,32 @@ mod tests {
         // Written in the user's language or in English for others: read back in the user's language.
         assert_eq!(
             task(Direction::ViEn, Lang::Vi),
-            "<task type=\"translate_vi_en\" back=\"vi\">x</task>"
+            "<task type=\"translate_vi_en\" into=\"English\" back=\"Vietnamese\">x</task>"
         );
         assert_eq!(
             task(Direction::EnJa, Lang::Vi),
-            "<task type=\"translate_en_ja\" keigo=\"formal\">x</task>"
+            "<task type=\"translate_en_ja\" into=\"Japanese\" keigo=\"formal\">x</task>"
         );
         assert_eq!(
             task(Direction::JaEn, Lang::Ja),
-            "<user lang=\"ja\"/>\n<task type=\"translate_ja_en\" back=\"ja\">x</task>"
+            "<user lang=\"ja\"/>\n<task type=\"translate_ja_en\" into=\"English\" back=\"Japanese\">x</task>"
         );
         // Read: no keigo, no reading back, no announcement.
         assert_eq!(
             task(Direction::JaEn, Lang::Vi),
-            "<task type=\"translate_ja_en\">x</task>"
+            "<task type=\"translate_ja_en\" into=\"English\">x</task>"
         );
         assert_eq!(
             task(Direction::EnVi, Lang::Vi),
-            "<task type=\"translate_en_vi\">x</task>"
+            "<task type=\"translate_en_vi\" into=\"Vietnamese\">x</task>"
         );
         assert_eq!(
             task(Direction::ViEn, Lang::Ja),
-            "<task type=\"translate_vi_en\">x</task>"
+            "<task type=\"translate_vi_en\" into=\"English\">x</task>"
         );
         assert_eq!(
             task(Direction::EnJa, Lang::Ja),
-            "<task type=\"translate_en_ja\" keigo=\"polite\" back=\"none\">x</task>"
+            "<task type=\"translate_en_ja\" into=\"Japanese\" keigo=\"polite\" back=\"none\">x</task>"
         );
     }
 
