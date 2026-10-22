@@ -2627,7 +2627,7 @@ dependencies = [
 
 [[package]]
 name = "mytranslate"
-version = "0.5.19"
+version = "0.5.20"
 dependencies = [
  "futures-util",
  "lindera",
